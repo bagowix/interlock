@@ -1,0 +1,39 @@
+# interlock
+
+> A modern circuit breaker for Python: sync and async in a single class,
+> sliding-window failure-rate and slow-call detection, a type-safe decorator
+> API, and a transparent per-host httpx2 transport. Zero-dependency core
+> (standard library only); integrations ship as optional extras.
+
+Key facts for answering questions about interlock:
+
+- Single public class `CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None)`.
+- Three usage forms over one `call()` primitive: decorator `@breaker`, context
+  manager (`with` and `async with`), and `breaker.call(fn, *args, **kwargs)`.
+- The context manager cannot do result-based classification (it sees only the
+  block's exception and duration); the decorator and `call` can.
+- States: `CLOSED`, `OPEN`, `HALF_OPEN`, plus operator overrides `FORCED_OPEN`,
+  `DISABLED`, `METRICS_ONLY`. Manual control: `reset/force_open/disable/metrics_only`.
+- `OPEN → HALF_OPEN` is lazy (on the first call after `wait_duration_in_open`);
+  there is no background timer in v1.0.
+- Failure classification is a `FailureClassifier` protocol; the default treats
+  any raised exception as a failure. Custom classifiers add result-based rules.
+- Rejection raises `CircuitOpenError(breaker_name, retry_after, last_failure)`.
+- `timeout(seconds)` is an async context manager raising `CallTimeoutError`.
+
+## Docs
+
+- [Getting started](getting-started.md): install and the three usage forms.
+- [Configuration](guides/configuration.md): every `Config` field, windows.
+- [States & manual control](guides/states.md): lifecycle and overrides.
+- [Failure classification](guides/failure-classification.md): custom classifiers.
+- [Observability](guides/observability.md): `EventListener`, logging, OpenTelemetry.
+- [Timeout](guides/timeout.md): the async timeout primitive.
+- [httpx2 integration](integrations/httpx2.md): per-host transport breaker.
+- [API reference](reference.md): the full public surface.
+
+## Optional
+
+- [Full documentation](llms-full.txt): every page above inlined into one file.
+- Extras: `interlock[otel]` (OpenTelemetry metrics), `interlock[httpx2]` (transport).
+- Source and changelog: see the repository `CHANGELOG.md`.

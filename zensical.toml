@@ -1,0 +1,63 @@
+[project]
+site_name = "interlock"
+site_description = "A modern circuit breaker for Python: sync + async, sliding-window rate, slow-call detection, type-safe API."
+site_author = "bagowix"
+site_url = "https://bagowix.github.io/interlock/"
+repo_url = "https://github.com/bagowix/interlock"
+copyright = "Copyright &copy; 2026 interlock authors"
+
+nav = [
+    { "Home" = "index.md" },
+    { "Getting started" = "getting-started.md" },
+    { "Guides" = ["guides/configuration.md", "guides/states.md", "guides/failure-classification.md", "guides/observability.md", "guides/timeout.md"] },
+    { "Integrations" = ["integrations/httpx2.md"] },
+    { "API reference" = "reference.md" },
+]
+
+[project.theme]
+language = "en"
+features = [
+    "content.action.view",
+    "content.code.annotate",
+    "content.code.copy",
+    "navigation.footer",
+    "navigation.indexes",
+    "navigation.instant",
+    "navigation.sections",
+    "navigation.top",
+    "navigation.tracking",
+    "search.highlight",
+    "toc.follow",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.footnotes]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.toc]
+permalink = true
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+    { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true

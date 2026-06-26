@@ -1,0 +1,39 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+.idea/
+.vscode/
+.vim/
+
+.venv/
+venv/
+.coverage
+.mypy_cache/
+.pytest_cache/
+.pytype/
+*.pyc
+.env
+.local/
+
+.DS_Store
+.python-version
+.ruff_cache
+*.npy
+script.py
+requests.http
+
+tmp/
+*egg-info/
+reports/
+scratch/
+
+# Zensical docs build output
+site/

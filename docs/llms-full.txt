@@ -1,0 +1,653 @@
+# interlock — full documentation
+
+> A modern circuit breaker for Python: sync and async in a single class,
+> sliding-window failure-rate and slow-call detection, a type-safe decorator
+> API, and a transparent per-host httpx2 transport. Zero-dependency core
+> (standard library only); integrations ship as optional extras.
+
+This file inlines every documentation page in reading order. It is generated
+from the Markdown sources by ``scripts/build_llms_full.py`` — edit the pages in
+``docs/``, not this file.
+
+
+---
+
+<!-- source: docs/getting-started.md -->
+
+# Getting started
+
+## Install
+
+```bash
+uv add interlock          # or: pip install interlock
+```
+
+The core is pure standard library. External integrations are optional extras:
+
+```bash
+uv add 'interlock[otel]'    # OpenTelemetry metrics listener
+uv add 'interlock[httpx2]'  # per-host httpx2 transport
+```
+
+## Create a breaker
+
+A breaker is named and configured once, then reused:
+
+```python
+from interlock import CircuitBreaker, Config
+
+breaker = CircuitBreaker(
+    name='payments',
+    config=Config(failure_rate_threshold=0.5, minimum_number_of_calls=20),
+)
+```
+
+The defaults follow resilience4j: trip at a 50% failure rate over at least 10
+calls, stay open for 60s before allowing a single probe. See
+[Configuration](guides/configuration.md) for every option.
+
+## Three ways to protect work
+
+All three run over the same `call()` primitive.
+
+### Decorator
+
+```python
+@breaker
+def charge(amount: int) -> str:
+    return gateway.charge(amount)
+```
+
+The decorator preserves the wrapped signature and its sync/async nature — type
+checkers still see `charge` as `(int) -> str`.
+
+### `breaker.call`
+
+```python
+result = breaker.call(gateway.charge, 100)
+```
+
+### Context manager
+
+```python
+with breaker:
+    gateway.charge(100)
+```
+
+!!! note "Contract difference"
+    The decorator and `call` see a callable, so result-based classification and
+    slow-call detection both apply. The context manager sees only the block —
+    its exception and duration — so classification by **return value** is not
+    available there. Need result-based classification? Use the decorator or
+    `call`.
+
+## Async
+
+The same instance handles async. The decorator and `call` detect a coroutine
+function; the instance is also an async context manager:
+
+```python
+@breaker
+async def fetch(url: str) -> bytes:
+    return await client.get(url)
+
+result = await breaker.call(client.get, url)
+
+async with breaker:
+    await client.get(url)
+```
+
+## Handle rejections
+
+When the circuit is not closed, the call is rejected with `CircuitOpenError`:
+
+```python
+from interlock import CircuitOpenError
+
+try:
+    breaker.call(gateway.charge, 100)
+except CircuitOpenError as exc:
+    # exc.breaker_name, exc.retry_after (seconds, may be None), exc.last_failure
+    raise
+```
+
+## Inspect state
+
+```python
+breaker.state            # State.CLOSED / OPEN / HALF_OPEN / ...
+breaker.snapshot()       # WindowSnapshot: total_calls, failed_calls, slow_calls,
+                         # .failure_rate, .slow_call_rate
+```
+
+## Next steps
+
+- [Configuration](guides/configuration.md)
+- [States & manual control](guides/states.md)
+- [Failure classification](guides/failure-classification.md)
+- [Observability](guides/observability.md)
+- [httpx2 integration](integrations/httpx2.md)
+
+---
+
+<!-- source: docs/guides/configuration.md -->
+
+# Configuration
+
+`Config` is an immutable (frozen) dataclass validated on construction. Pass it
+to a `CircuitBreaker` or share it across a `Registry`. All fields are
+keyword-only.
+
+```python
+from interlock import Config
+from interlock import WindowType
+
+config = Config(
+    failure_rate_threshold=0.5,
+    minimum_number_of_calls=20,
+    slow_call_duration_threshold=2.0,
+    slow_call_rate_threshold=1.0,
+    permitted_calls_in_half_open=10,
+    max_concurrent_probes=1,
+    wait_duration_in_open=30.0,
+    window_type=WindowType.COUNT_BASED,
+    window_size=100,
+)
+```
+
+## Fields
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `failure_rate_threshold` | `0.5` | Trip when the failure rate reaches this fraction. Range `(0, 1]`. |
+| `minimum_number_of_calls` | `10` | Minimum calls in the window before a rate is trusted. Guards against `1/1 = 100%`. |
+| `slow_call_duration_threshold` | `60.0` | Calls at or above this many seconds are **slow**. |
+| `slow_call_rate_threshold` | `1.0` | Trip when the slow-call rate reaches this fraction. Range `(0, 1]`. |
+| `permitted_calls_in_half_open` | `10` | Probe calls allowed while `HALF_OPEN`. |
+| `max_concurrent_probes` | `1` | Cap on **simultaneous** probes in `HALF_OPEN`. Must be in `[1, permitted_calls_in_half_open]`. |
+| `wait_duration_in_open` | `60.0` | Seconds to stay `OPEN` before the first probe is allowed. |
+| `window_type` | `COUNT_BASED` | `COUNT_BASED` or `TIME_BASED`. |
+| `window_size` | `100` | Last N calls (count-based) or last N seconds (time-based). |
+
+Validation raises `ValueError` eagerly for out-of-range or inconsistent values,
+so a misconfigured breaker fails at construction rather than in production.
+
+## Windows
+
+- **Count-based** keeps the last `window_size` calls. Predictable memory,
+  independent of traffic rate. The default.
+- **Time-based** keeps calls from the last `window_size` seconds. The right
+  choice for high-throughput services where "last N calls" is a moving target.
+
+```python
+from interlock import Config, WindowType
+
+# Trip on a 50% failure rate observed over the last 30 seconds.
+Config(window_type=WindowType.TIME_BASED, window_size=30)
+```
+
+## Why slow calls matter
+
+A dependency that answers slowly but never errors will never trip a
+failure-rate breaker, yet it still exhausts your timeouts and threads.
+Slow-call detection treats latency as a first-class failure signal. By default
+`slow_call_rate_threshold=1.0` means slowness alone never trips the breaker
+until you tune it down — safe to leave on while you observe.
+
+## Sharing config with a Registry
+
+```python
+from interlock import Config, Registry
+
+registry = Registry(config=Config(minimum_number_of_calls=20))
+
+payments = registry.get('payments')                       # shared default
+search = registry.get('search', config=Config(window_size=500))  # per-name override
+```
+
+The override applies only when the breaker is first created; later `get` calls
+with the same name return the existing instance and ignore the `config`
+argument.
+
+---
+
+<!-- source: docs/guides/states.md -->
+
+# States & manual control
+
+A breaker has three core states plus three operator overrides.
+
+## Core lifecycle
+
+```mermaid
+stateDiagram-v2
+    CLOSED --> OPEN: failure/slow rate crosses threshold
+    OPEN --> HALF_OPEN: first call after wait_duration_in_open
+    HALF_OPEN --> CLOSED: probes succeed
+    HALF_OPEN --> OPEN: a probe fails
+```
+
+- **`CLOSED`** — traffic flows; outcomes are recorded. When the failure rate (or
+  slow-call rate) crosses its threshold over at least `minimum_number_of_calls`,
+  the breaker trips to `OPEN`.
+- **`OPEN`** — calls are rejected immediately with `CircuitOpenError`. After
+  `wait_duration_in_open` seconds, the **next** call lazily moves the breaker to
+  `HALF_OPEN` (there is no background timer in v1.0).
+- **`HALF_OPEN`** — a limited number of probe calls are admitted, with a cap on
+  how many run concurrently, so a barely-recovered dependency is not hit by the
+  full parallel load at once. Probes succeeding closes the breaker; a probe
+  failing re-opens it.
+
+## Operator overrides
+
+Three special states are set manually and stay until you `reset()`:
+
+| Method | State | Behaviour |
+|--------|-------|-----------|
+| `breaker.force_open()` | `FORCED_OPEN` | Reject all traffic regardless of metrics. |
+| `breaker.disable()` | `DISABLED` | Admit all traffic, record nothing — the breaker is a no-op. |
+| `breaker.metrics_only()` | `METRICS_ONLY` | Admit all traffic, record metrics, but never trip. |
+| `breaker.reset()` | `CLOSED` | Return to closed with a fresh, empty window. |
+
+```python
+breaker.metrics_only()   # observe in production without enforcing
+# ... inspect breaker.snapshot() until thresholds look right ...
+breaker.reset()          # start enforcing with a clean window
+```
+
+### `METRICS_ONLY` — safe rollout
+
+Shadow mode is the key to introducing a breaker without risk: it records the
+exact failure and slow-call rates real traffic produces, so you can tune
+thresholds against live data before letting the breaker reject anything. It
+costs almost nothing to leave on.
+
+## Observing transitions
+
+Every transition (and reset) is delivered to the breaker's
+[`EventListener`](observability.md), so you can log or export state changes
+without polling `breaker.state`.
+
+---
+
+<!-- source: docs/guides/failure-classification.md -->
+
+# Failure classification
+
+What counts as a failure is a separate concern from *when to trip* (thresholds,
+in [Config](configuration.md)). It is decided by a `FailureClassifier`.
+
+## Default policy
+
+By default, a call is a failure exactly when it **raises**, and any returned
+value is a success:
+
+```python
+from interlock import CircuitBreaker
+
+breaker = CircuitBreaker(name='svc')   # DefaultFailureClassifier
+```
+
+This is right for code that signals errors by raising. It is *not* enough when
+failure is encoded in a **return value** — for example an HTTP response object
+whose `503` status means the dependency is unhealthy.
+
+## Classify by result
+
+A classifier implements one method. The `result`/`exception` pair is mutually
+exclusive: when `exception` is not `None` the call raised; otherwise `result`
+holds the return value.
+
+```python
+from interlock import CircuitBreaker
+
+class StatusClassifier:
+    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+        if exception is not None:
+            return True
+        return getattr(result, 'status_code', 200) >= 500
+
+breaker = CircuitBreaker(name='api', classifier=StatusClassifier())
+result = breaker.call(client.get, url)   # a 503 response now counts as a failure
+```
+
+Result-based classification needs the return value, so it works with the
+**decorator** and **`call`**, but not the context manager (which only sees
+exceptions and duration).
+
+## Ignore expected errors
+
+Business errors — a `404`, a validation failure — should not open the circuit.
+Encode that by treating only the exceptions you care about as failures:
+
+```python
+class IgnoreNotFound:
+    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+        if isinstance(exception, NotFoundError):
+            return False          # expected, not a dependency problem
+        return exception is not None
+```
+
+## HTTP out of the box
+
+For httpx2, you do not need to write this yourself — the
+[httpx2 integration](../integrations/httpx2.md) ships `HttpStatusClassifier`,
+which treats transport exceptions and the canonical retryable statuses
+(`429, 500, 502, 503, 504`) as failures.
+
+---
+
+<!-- source: docs/guides/observability.md -->
+
+# Observability
+
+A breaker reports everything it does through an `EventListener`. The same four
+hooks back logging, metrics, and any custom sink.
+
+## The hooks
+
+```python
+class EventListener(Protocol):
+    def on_state_change(self, *, name: str, old: State, new: State) -> None: ...
+    def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None: ...
+    def on_rejected(self, *, name: str) -> None: ...
+    def on_reset(self, *, name: str) -> None: ...
+```
+
+Listeners are called **outside** the breaker's lock, after the protected call
+returns, so a slow listener never serialises throughput. Implementations must
+not raise back into the core.
+
+Attach one per breaker, or share one across a `Registry`:
+
+```python
+breaker = CircuitBreaker(name='payments', listener=my_listener)
+registry = Registry(listener=my_listener)   # every breaker reports here
+```
+
+## Logging (zero dependencies)
+
+`LoggingEventListener` is built in. State changes and rejections log at
+`WARNING`, resets at `INFO`, and individual calls at `DEBUG`:
+
+```python
+from interlock import CircuitBreaker, LoggingEventListener
+
+breaker = CircuitBreaker(name='payments', listener=LoggingEventListener())
+```
+
+Pass your own logger to control routing:
+
+```python
+import logging
+
+LoggingEventListener(logging.getLogger('myapp.breakers'))
+```
+
+## OpenTelemetry metrics
+
+The OTel listener lives in the `interlock[otel]` extra and is imported
+explicitly, so the core stays dependency-free:
+
+```bash
+uv add 'interlock[otel]'
+```
+
+```python
+from interlock import CircuitBreaker
+from interlock.otel import OTelEventListener
+
+breaker = CircuitBreaker(name='payments', listener=OTelEventListener())
+```
+
+It records four instruments on the `interlock` meter (or a meter you pass in):
+
+| Instrument | Type | Labels |
+|------------|------|--------|
+| `interlock.call.duration` | histogram (s) | `breaker`, `outcome` |
+| `interlock.call.rejected` | counter | `breaker` |
+| `interlock.state.changes` | counter | `breaker`, `from`, `to` |
+| `interlock.reset` | counter | `breaker` |
+
+## Custom listeners
+
+Any object with the four methods satisfies the protocol — no base class to
+inherit. The core calls all four, so define each one, leaving the hooks you do
+not need as no-ops:
+
+```python
+class RejectionCounter:
+    def __init__(self) -> None:
+        self.rejected = 0
+
+    def on_rejected(self, *, name: str) -> None:
+        self.rejected += 1
+
+    def on_state_change(self, *, name, old, new) -> None: ...
+    def on_call(self, *, name, outcome, duration) -> None: ...
+    def on_reset(self, *, name) -> None: ...
+```
+
+---
+
+<!-- source: docs/guides/timeout.md -->
+
+# Timeout
+
+A circuit breaker without a timeout is unsafe. A call that hangs forever is
+never counted as slow or failed — it just holds a resource indefinitely.
+`timeout` bounds an awaited block and turns a hang into a `CallTimeoutError`,
+which a surrounding breaker records as a (slow) failure.
+
+```python
+from interlock import timeout
+
+async with timeout(2.0):
+    await client.get(url)        # raises CallTimeoutError after 2 seconds
+```
+
+## Composing with a breaker
+
+`timeout` is async-only by design (a sync timeout is planned for v1.1). Compose
+it with a breaker manually — pipeline composition is a v2 feature. Put the
+timeout *inside* the protected callable so the breaker observes the
+`CallTimeoutError`:
+
+```python
+from interlock import CircuitBreaker, timeout
+
+breaker = CircuitBreaker(name='search')
+
+@breaker
+async def search(q: str) -> bytes:
+    async with timeout(2.0):
+        return await client.get('/search', params={'q': q})
+```
+
+Now a request that exceeds 2 seconds raises `CallTimeoutError`; the breaker
+counts it as a failure and, once the failure rate crosses the threshold, opens
+the circuit — converting slow hangs into fast rejections.
+
+## Why not bake it in?
+
+interlock keeps retry, fallback and timeout as explicit, observable features
+rather than hidden magic inside the breaker. You decide the deadline at the call
+site, and the failure it produces flows through the same classification and
+metrics as any other.
+
+---
+
+<!-- source: docs/integrations/httpx2.md -->
+
+# httpx2 integration
+
+The `interlock[httpx2]` extra wraps an [httpx2](https://pypi.org/project/httpx2/)
+transport so a circuit breaker is applied **per host** transparently — no
+decorators or `call` wrappers in your request code.
+
+```bash
+uv add 'interlock[httpx2]'
+```
+
+## Synchronous client
+
+```python
+import httpx2
+from interlock.httpx2 import CircuitBreakerTransport
+
+transport = CircuitBreakerTransport(httpx2.HTTPTransport())
+client = httpx2.Client(transport=transport)
+
+response = client.get('https://api.example.com/v1/users')
+```
+
+## Asynchronous client
+
+```python
+import httpx2
+from interlock.httpx2 import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(httpx2.AsyncHTTPTransport())
+client = httpx2.AsyncClient(transport=transport)
+
+response = await client.get('https://api.example.com/v1/users')
+```
+
+## Per-host isolation
+
+Each host gets its own breaker, created lazily and cached. A failing
+`api.a.example.com` trips only its own breaker; requests to
+`api.b.example.com` are unaffected. Per-instance, per-host state is usually more
+correct than global state — each host's health is observed independently.
+
+When a host's breaker is open, its requests raise `CircuitOpenError` before
+reaching the network.
+
+## What counts as a failure
+
+By default the transport uses `HttpStatusClassifier`:
+
+- any transport exception (connect/read errors) → failure;
+- a response with status `429, 500, 502, 503, 504` → failure;
+- everything else, including `4xx` client errors like `404`, → success.
+
+This mirrors the retryable set used by urllib3, AWS and Google clients.
+Permanent `5xx` (`501`, `505`) are deliberately excluded — retrying or tripping
+the breaker cannot fix a contract or protocol error.
+
+## Tuning
+
+Pass any of `config`, `clock`, `classifier`, `listener` to the transport; they
+flow to every per-host breaker:
+
+```python
+from interlock import Config, LoggingEventListener
+from interlock.httpx2 import CircuitBreakerTransport
+
+transport = CircuitBreakerTransport(
+    httpx2.HTTPTransport(),
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    listener=LoggingEventListener(),
+)
+```
+
+Supply your own `classifier` to change the failure policy — for example to also
+fail on `408 Request Timeout`.
+
+---
+
+<!-- source: docs/reference.md -->
+
+# API reference
+
+Everything below is importable from the top-level `interlock` package, except
+the integration adapters, which live in their own modules to keep the core
+dependency-free.
+
+## `CircuitBreaker`
+
+```python
+CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None)
+```
+
+A named breaker for sync and async callables.
+
+- **Use as** a decorator (`@breaker`), a sync/async context manager
+  (`with` / `async with`), or `breaker.call(fn, *args, **kwargs)`.
+- **Properties:** `name: str`, `state: State`.
+- **`snapshot() -> WindowSnapshot`** — current window aggregates.
+- **Manual control:** `reset()`, `force_open()`, `disable()`, `metrics_only()`.
+
+## `Config`
+
+Frozen dataclass of thresholds, window and timing; validated on construction.
+See [Configuration](guides/configuration.md) for every field. Raises
+`ValueError` on invalid input.
+
+## `Registry`
+
+```python
+Registry(*, config=None, clock=None, classifier=None, listener=None)
+registry.get(name, *, config=None) -> CircuitBreaker
+```
+
+Creates and caches named breakers. The same name always returns the same
+instance; the per-call `config` override applies only at creation.
+
+## Enums
+
+- **`State`** — `CLOSED`, `OPEN`, `HALF_OPEN`, `FORCED_OPEN`, `DISABLED`,
+  `METRICS_ONLY`. A `StrEnum`; values are stable lowercase identifiers.
+- **`Outcome`** — `SUCCESS`, `FAILURE`, `SLOW_SUCCESS`, `SLOW_FAILURE`, with
+  `.is_failure` and `.is_slow` properties.
+- **`WindowType`** — `COUNT_BASED`, `TIME_BASED`.
+
+## `WindowSnapshot`
+
+Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
+`.failure_rate` and `.slow_call_rate` properties (both `0.0` when empty).
+
+## Errors & warnings
+
+- **`InterlockError`** — base of all interlock errors.
+- **`CircuitOpenError(breaker_name, *, retry_after=None, last_failure=None)`** —
+  raised on rejection; attributes `breaker_name`, `retry_after`, `last_failure`.
+- **`CallTimeoutError(timeout)`** — raised by `timeout`; attribute `timeout`.
+- **`InterlockDeprecationWarning`** — subclasses `UserWarning`, visible by
+  default.
+
+## `timeout`
+
+```python
+async with timeout(seconds): ...
+```
+
+Async context manager that raises `CallTimeoutError` if the block exceeds
+`seconds`. See [Timeout](guides/timeout.md).
+
+## Protocols (extension points)
+
+Implement any of these to swap a core behaviour:
+
+- **`Clock`** — `monotonic() -> float`. Inject a fake for deterministic tests.
+- **`SlidingWindow`** — `record(outcome)`, `snapshot() -> WindowSnapshot`.
+- **`Storage`** — `load(name) -> State`, `save(*, name, state)`.
+- **`FailureClassifier`** — `is_failure(*, result, exception) -> bool`. See
+  [Failure classification](guides/failure-classification.md).
+- **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`.
+  See [Observability](guides/observability.md).
+
+## Listeners
+
+- **`LoggingEventListener(logger=None)`** — top-level; zero dependencies.
+- **`interlock.otel.OTelEventListener(meter=None)`** — extra `interlock[otel]`.
+
+## httpx2 adapters
+
+Extra `interlock[httpx2]`, module `interlock.httpx2`:
+
+- **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
+- **`AsyncCircuitBreakerTransport(transport, *, ...)`**
+- **`HttpStatusClassifier`** — fails on transport exceptions and statuses
+  `429, 500, 502, 503, 504`.
+
+See the [httpx2 integration](integrations/httpx2.md).

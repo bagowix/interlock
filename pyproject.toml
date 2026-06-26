@@ -1,0 +1,171 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "interlock"
+dynamic = ["version"]
+description = "A modern circuit breaker for Python: sync + async, sliding-window rate, slow-call detection, type-safe API."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "bagowix", email = "galushko355@gmail.com" },
+]
+keywords = ["circuit-breaker", "resilience", "fault-tolerance", "async", "asyncio"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+otel = ["opentelemetry-api>=1.20.0"]
+httpx2 = ["httpx2>=2.4.0"]
+
+[project.urls]
+Homepage = "https://github.com/bagowix/interlock"
+Documentation = "https://github.com/bagowix/interlock/tree/main/docs"
+Repository = "https://github.com/bagowix/interlock"
+Changelog = "https://github.com/bagowix/interlock/blob/main/CHANGELOG.md"
+Issues = "https://github.com/bagowix/interlock/issues"
+
+[tool.hatch.version]
+path = "interlock/version.py"
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["interlock"]
+
+[tool.ruff]
+src = ["interlock", "tests"]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "COM812",
+  "ISC001",
+  "TRY003",
+  "EM101",
+  "EM102",
+  "N818",
+  "RUF001",
+  "RUF002",
+  "RUF003",
+  "TD002",
+  "TD003",
+  "FIX002",
+  "D105",
+  "D107",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["interlock"]
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.List".msg = "Use list[] instead."
+"typing.Dict".msg = "Use dict[] instead."
+"typing.Set".msg = "Use set[] instead."
+"typing.Optional".msg = "Use X | None instead."
+"typing.Union".msg = "Use X | Y instead."
+"typing.Type".msg = "Use type[] instead."
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**/*.py" = [
+  "INP001",  # scripts is a run-directly directory, not an importable package
+]
+"tests/**/*.py" = [
+  "S101",    # asserts are the point of tests
+  "PLR2004", # magic values are fine in tests
+  "D",       # test names are the documentation (test__unit__state__expected)
+  "INP001",  # tests is not an importable package
+  "FBT001",  # boolean params come from @parametrize, not real flag args
+  "ARG002",  # test doubles accept protocol args they intentionally ignore
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+files = ["interlock"]
+
+[tool.pyright]
+include = ["interlock"]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+
+[tool.pymarkdown]
+plugins.MD013.enabled = false   # line-length limit disabled
+plugins.MD029.style = "ordered" # consistent ordered list numbering
+plugins.MD033.enabled = false   # allow inline HTML (useful for docs)
+plugins.MD041.enabled = false   # do not require an H1 at the top of every file
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+  "error",
+  # opentelemetry-api trips this CPython 3.11 importlib.metadata warning at
+  # import time; it is third-party and absent on newer Pythons.
+  "ignore:SelectableGroups dict interface is deprecated:DeprecationWarning",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["interlock"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "@overload",
+  "@abstractmethod",
+  "raise NotImplementedError",
+  "^\\s*\\.\\.\\.\\s*$",
+]
+fail_under = 98
+
+[dependency-groups]
+dev = [
+    "faker>=40.23.0",
+    "httpx2>=2.4.0",
+    "hypothesis>=6.155.7",
+    "mypy>=2.1.0",
+    "opentelemetry-api>=1.20.0",
+    "prek>=0.4.5",
+    "pyright>=1.1.410",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "pytest-mock>=3.15.1",
+    "pytest-sugar>=1.1.1",
+    "ruff>=0.15.18",
+    "ty>=0.0.52",
+    "zensical>=0.0.46",
+]
