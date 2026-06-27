@@ -1,8 +1,8 @@
 # interlock
 
 [![CI](https://github.com/bagowix/interlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bagowix/interlock/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/interlock.svg)](https://pypi.org/project/interlock/)
-[![Python versions](https://img.shields.io/pypi/pyversions/interlock.svg)](https://pypi.org/project/interlock/)
+[![PyPI](https://img.shields.io/pypi/v/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
+[![Python versions](https://img.shields.io/pypi/pyversions/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A modern circuit breaker for Python — sync and async in a single class,
@@ -21,19 +21,19 @@ integrations at the transport level.
   signature *and* its sync/async nature; ships `py.typed`, passes mypy and
   pyright in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
-  optional extras (`interlock[otel]`, `interlock[httpx2]`).
+  optional extras (`interlock-cb[otel]`, `interlock-cb[httpx2]`).
 
 ## Installation
 
 ```bash
-uv add interlock          # or: pip install interlock
+uv add interlock-cb          # or: pip install interlock-cb
 ```
 
 Optional extras:
 
 ```bash
-uv add 'interlock[otel]'    # OpenTelemetry metrics listener
-uv add 'interlock[httpx2]'  # per-host httpx2 transport
+uv add 'interlock-cb[otel]'    # OpenTelemetry metrics listener
+uv add 'interlock-cb[httpx2]'  # per-host httpx2 transport
 ```
 
 ## Quickstart

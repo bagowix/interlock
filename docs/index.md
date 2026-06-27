@@ -20,7 +20,7 @@ integrations at the transport level.
 ## Installation
 
 ```bash
-uv add interlock
+uv add interlock-cb
 ```
 
 ## Status

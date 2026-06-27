@@ -45,11 +45,11 @@ LoggingEventListener(logging.getLogger('myapp.breakers'))
 
 ## OpenTelemetry metrics
 
-The OTel listener lives in the `interlock[otel]` extra and is imported
+The OTel listener lives in the `interlock-cb[otel]` extra and is imported
 explicitly, so the core stays dependency-free:
 
 ```bash
-uv add 'interlock[otel]'
+uv add 'interlock-cb[otel]'
 ```
 
 ```python
