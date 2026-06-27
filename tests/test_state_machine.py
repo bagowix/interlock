@@ -281,6 +281,63 @@ def test__half_open__retry_after__is_none(config: Config, fake_clock: FakeClock)
     fake_clock.advance(5.0)
     assert machine.acquire() is True  # crosses the wait into HALF_OPEN as the first probe
 
+
+def test__attempt_auto_transition__open_and_elapsed__moves_to_half_open(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, config.minimum_number_of_calls)
+    fake_clock.advance(config.wait_duration_in_open)
+
+    assert machine.attempt_auto_transition() is True
+    assert machine.state is State.HALF_OPEN
+
+
+def test__attempt_auto_transition__open_not_elapsed__stays_open(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, config.minimum_number_of_calls)
+    fake_clock.advance(config.wait_duration_in_open - 1)
+
+    assert machine.attempt_auto_transition() is False
+    assert machine.state is State.OPEN
+
+
+def test__attempt_auto_transition__not_open__returns_false(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+
+    assert machine.attempt_auto_transition() is False
+    assert machine.state is State.CLOSED
+
+
+def test__attempt_auto_transition__admits_no_probe(config: Config, fake_clock: FakeClock) -> None:
+    machine = StateMachine(
+        config=replace(config, permitted_calls_in_half_open=1, max_concurrent_probes=1),
+        clock=fake_clock,
+    )
+    _trip_to_open(machine, config.minimum_number_of_calls)
+    fake_clock.advance(config.wait_duration_in_open)
+
+    machine.attempt_auto_transition()
+
+    # No probe slot was consumed: the first real probe is still admitted.
+    assert machine.acquire() is True
+
+
+def test__attempt_auto_transition__after_lazy_acquire__no_double_transition(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, config.minimum_number_of_calls)
+    fake_clock.advance(config.wait_duration_in_open)
+    assert machine.acquire() is True  # real call wins the lazy transition first
+
+    assert machine.attempt_auto_transition() is False
+    assert machine.state is State.HALF_OPEN
+
     assert machine.state is State.HALF_OPEN
     assert machine.retry_after() is None
 

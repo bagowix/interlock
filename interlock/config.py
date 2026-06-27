@@ -19,6 +19,11 @@ class Config:
     treat calls slower than 60s as slow (but never trip on slowness alone until
     tuned), stay open 60s before a single probe is allowed.
 
+    ``auto_transition`` opts into a timer that proactively moves a breaker from
+    ``OPEN`` to ``HALF_OPEN`` once ``wait_duration_in_open`` elapses, emitting the
+    state change without waiting for the next call. It defaults to ``False``,
+    preserving the lazy transition (which stays authoritative either way).
+
     Raises:
         ValueError: If any value is out of range or inconsistent.
     """
@@ -30,6 +35,7 @@ class Config:
     permitted_calls_in_half_open: int = 10
     max_concurrent_probes: int = 1
     wait_duration_in_open: float = 60.0
+    auto_transition: bool = False
     window_type: WindowType = WindowType.COUNT_BASED
     window_size: int = 100
 

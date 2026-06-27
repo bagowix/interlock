@@ -101,6 +101,20 @@ class StateMachine:
         elif self._state is State.METRICS_ONLY:
             self._window.record(outcome)
 
+    def attempt_auto_transition(self) -> bool:
+        """Proactively move ``OPEN`` → ``HALF_OPEN`` once the wait has elapsed.
+
+        Unlike ``acquire``, this admits no probe — it only flips the state, so an
+        out-of-band timer can surface the transition without consuming a probe
+        slot. Returns whether it transitioned; the lazy path in ``acquire``
+        stays authoritative and a later real call admits the first probe.
+        """
+        if self._state is not State.OPEN or not self._wait_elapsed():
+            return False
+
+        self._to_half_open()
+        return True
+
     def force_open(self) -> None:
         """Override to ``FORCED_OPEN``: reject all traffic until reset."""
         self._state = State.FORCED_OPEN
@@ -121,11 +135,14 @@ class StateMachine:
         self._close()
 
     def _begin_probing_if_elapsed(self) -> bool:
-        if self._clock.monotonic() - self._opened_at < self._config.wait_duration_in_open:
+        if not self._wait_elapsed():
             return False
 
         self._to_half_open()
         return self._admit_probe()
+
+    def _wait_elapsed(self) -> bool:
+        return self._clock.monotonic() - self._opened_at >= self._config.wait_duration_in_open
 
     def _admit_probe(self) -> bool:
         # Cap total probes (don't hammer a barely-recovered dependency) and how
