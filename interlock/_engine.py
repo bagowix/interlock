@@ -82,6 +82,8 @@ class Engine:
         self._machine = StateMachine(config=config, clock=clock)
         self._lock = threading.Lock()
         self._last_failure: BaseException | None = None
+        self._timer: threading.Timer | None = None
+        self._timer_lock = threading.Lock()
 
     @property
     def state(self) -> State:
@@ -171,7 +173,7 @@ class Engine:
             self._machine.reset()
             after = self._machine.state
 
-        self._emit_state_change(before, after)
+        self._on_transition(before, after)
         self._listener.on_reset(name=self._name)
 
     def force_open(self) -> None:
@@ -192,7 +194,7 @@ class Engine:
             mutate()
             after = self._machine.state
 
-        self._emit_state_change(before, after)
+        self._on_transition(before, after)
 
     def _admit(self) -> None:
         with self._lock:
@@ -202,7 +204,7 @@ class Engine:
             retry_after = None if admitted else self._machine.retry_after()
             last_failure = self._last_failure
 
-        self._emit_state_change(before, after)
+        self._on_transition(before, after)
         if not admitted:
             self._listener.on_rejected(name=self._name)
             raise CircuitOpenError(
@@ -225,8 +227,58 @@ class Engine:
                 self._last_failure = exception
 
         self._listener.on_call(name=self._name, outcome=outcome, duration=duration)
-        self._emit_state_change(before, after)
+        self._on_transition(before, after)
 
-    def _emit_state_change(self, before: State, after: State) -> None:
-        if after != before:
-            self._listener.on_state_change(name=self._name, old=before, new=after)
+    def _on_transition(self, before: State, after: State) -> None:
+        if after == before:
+            return
+
+        self._listener.on_state_change(name=self._name, old=before, new=after)
+        if after is State.OPEN:
+            self._schedule_auto_transition()
+        elif before is State.OPEN:
+            self._cancel_auto_transition()
+
+    def _schedule_auto_transition(self) -> None:
+        """Arm a timer to fire the proactive OPEN → HALF_OPEN once the wait ends.
+
+        A no-op unless ``auto_transition`` is enabled. The timer is a daemon so a
+        pending one never blocks interpreter shutdown, and it is cancelled the
+        moment the breaker leaves ``OPEN`` by any path (a real probe, ``reset``,
+        ``force_open`` or the timer itself).
+        """
+        if not self._config.auto_transition:
+            return
+
+        timer = threading.Timer(self._config.wait_duration_in_open, self._fire_auto_transition)
+        timer.daemon = True
+        with self._timer_lock:
+            self._cancel_timer_locked()
+            self._timer = timer
+
+        timer.start()
+
+    def _cancel_auto_transition(self) -> None:
+        with self._timer_lock:
+            self._cancel_timer_locked()
+
+    def _cancel_timer_locked(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+    def _fire_auto_transition(self) -> None:
+        """Timer callback: flip OPEN → HALF_OPEN under the lock, then emit.
+
+        Races with a real call are settled by the lock: whichever acquires it
+        first performs the single transition; the loser sees a non-``OPEN`` state,
+        so ``attempt_auto_transition`` is a no-op and ``_on_transition`` (which
+        ignores an unchanged state) emits nothing. The state changes exactly once
+        and the event fires exactly once.
+        """
+        with self._lock:
+            before = self._machine.state
+            self._machine.attempt_auto_transition()
+            after = self._machine.state
+
+        self._on_transition(before, after)

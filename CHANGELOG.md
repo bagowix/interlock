@@ -13,6 +13,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and raises `CallTimeoutError` on overrun. Documents the worker-thread
   limitation: Python cannot kill a thread, so the worker keeps running in the
   background after a timeout.
+- `Config.auto_transition` (default `False`): opt into a timer that proactively
+  moves a breaker `OPEN → HALF_OPEN` once `wait_duration_in_open` elapses,
+  emitting the state change without waiting for the next call. The lazy
+  transition stays authoritative; the timer admits no probe and is cancelled on
+  `reset()`, `force_open()`, or when a call makes the move first.
 
 ## [1.0.0] - 2026-06-27
 

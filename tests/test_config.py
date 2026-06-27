@@ -55,3 +55,11 @@ def test__config__invalid_value__raises_value_error(
 def test__config__concurrent_probes_above_permitted__raises_value_error() -> None:
     with pytest.raises(ValueError, match='max_concurrent_probes'):
         Config(permitted_calls_in_half_open=3, max_concurrent_probes=5)
+
+
+def test__config__auto_transition__defaults_to_false() -> None:
+    assert Config().auto_transition is False
+
+
+def test__config__auto_transition__can_be_enabled() -> None:
+    assert Config(auto_transition=True).auto_transition is True
