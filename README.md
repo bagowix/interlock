@@ -22,10 +22,10 @@
 | interlock/protocols.py        |       25 |        0 |        0 |        0 |     100% |           |
 | interlock/registry.py         |       21 |        0 |        2 |        0 |     100% |           |
 | interlock/state.py            |        9 |        0 |        0 |        0 |     100% |           |
-| interlock/timeout.py          |       12 |        0 |        0 |        0 |     100% |           |
+| interlock/timeout.py          |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py          |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py           |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                     |  **596** |    **0** |   **86** |    **0** | **100%** |           |
+| **TOTAL**                     |  **622** |    **0** |   **92** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
