@@ -8,12 +8,12 @@
 | interlock/\_classify.py       |        4 |        0 |        0 |        0 |     100% |           |
 | interlock/\_clock.py          |        5 |        0 |        0 |        0 |     100% |           |
 | interlock/\_detect.py         |        9 |        0 |        4 |        0 |     100% |           |
-| interlock/\_engine.py         |      113 |        0 |       18 |        0 |     100% |           |
-| interlock/\_state\_machine.py |      100 |        0 |       26 |        0 |     100% |           |
+| interlock/\_engine.py         |      142 |        0 |       26 |        0 |     100% |           |
+| interlock/\_state\_machine.py |      107 |        0 |       28 |        0 |     100% |           |
 | interlock/\_typing.py         |        9 |        0 |        0 |        0 |     100% |           |
 | interlock/\_windows.py        |       61 |        0 |       10 |        0 |     100% |           |
 | interlock/breaker.py          |       60 |        0 |        2 |        0 |     100% |           |
-| interlock/config.py           |       31 |        0 |       16 |        0 |     100% |           |
+| interlock/config.py           |       32 |        0 |       16 |        0 |     100% |           |
 | interlock/errors.py           |       19 |        0 |        2 |        0 |     100% |           |
 | interlock/httpx2.py           |       35 |        0 |        2 |        0 |     100% |           |
 | interlock/listeners.py        |       15 |        0 |        0 |        0 |     100% |           |
@@ -25,7 +25,7 @@
 | interlock/timeout.py          |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py          |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py           |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                     |  **622** |    **0** |   **92** |    **0** | **100%** |           |
+| **TOTAL**                     |  **659** |    **0** |  **102** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
