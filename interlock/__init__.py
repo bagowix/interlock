@@ -20,7 +20,7 @@ from interlock.protocols import (
 )
 from interlock.registry import Registry
 from interlock.state import State
-from interlock.timeout import timeout
+from interlock.timeout import sync_timeout, timeout
 from interlock.version import VERSION
 from interlock.window import WindowSnapshot, WindowType
 
@@ -49,5 +49,6 @@ __all__ = (
     'WindowSnapshot',
     'WindowType',
     '__version__',
+    'sync_timeout',
     'timeout',
 )

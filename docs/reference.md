@@ -52,18 +52,25 @@ Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
 - **`InterlockError`** — base of all interlock errors.
 - **`CircuitOpenError(breaker_name, *, retry_after=None, last_failure=None)`** —
   raised on rejection; attributes `breaker_name`, `retry_after`, `last_failure`.
-- **`CallTimeoutError(timeout)`** — raised by `timeout`; attribute `timeout`.
+- **`CallTimeoutError(timeout)`** — raised by `timeout` and `sync_timeout`;
+  attribute `timeout`.
 - **`InterlockDeprecationWarning`** — subclasses `UserWarning`, visible by
   default.
 
-## `timeout`
+## `timeout` / `sync_timeout`
 
 ```python
-async with timeout(seconds): ...
+async with timeout(seconds): ...   # async block
+
+@sync_timeout(seconds)             # synchronous callable
+def work(): ...
 ```
 
-Async context manager that raises `CallTimeoutError` if the block exceeds
-`seconds`. See [Timeout](guides/timeout.md).
+`timeout` is an async context manager that raises `CallTimeoutError` if the
+block exceeds `seconds`. `sync_timeout` is a decorator that runs a synchronous
+callable in a daemon worker thread and raises `CallTimeoutError` if it overruns
+`seconds`; the worker keeps running after a timeout (Python cannot kill a
+thread). See [Timeout](guides/timeout.md).
 
 ## Protocols (extension points)
 
