@@ -26,7 +26,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-otel = ["opentelemetry-api>=1.20.0"]
+otel = ["opentelemetry-api>=1.43.0"]
 httpx2 = ["httpx2>=2.4.0"]
 
 [project.urls]
@@ -157,7 +157,7 @@ dev = [
     "httpx2>=2.4.0",
     "hypothesis>=6.155.7",
     "mypy>=2.1.0",
-    "opentelemetry-api>=1.20.0",
+    "opentelemetry-api>=1.43.0",
     "prek>=0.4.5",
     "pyright>=1.1.410",
     "pytest>=9.1.1",
