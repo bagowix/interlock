@@ -1,9 +1,12 @@
 # interlock
 
 [![CI](https://github.com/bagowix/interlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bagowix/interlock/actions/workflows/ci.yml)
+[![Coverage](https://raw.githubusercontent.com/bagowix/interlock/python-coverage-comment-action-data/badge.svg)](https://github.com/bagowix/interlock/tree/python-coverage-comment-action-data)
 [![PyPI](https://img.shields.io/pypi/v/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
+[![Downloads](https://img.shields.io/pypi/dm/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![Python versions](https://img.shields.io/pypi/pyversions/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![llms.txt](https://img.shields.io/badge/-llms.txt-brightgreen)](docs/llms.txt)
 
 A modern circuit breaker for Python — sync and async in a single class,
 sliding-window rate and slow-call detection, a type-safe API, and transparent
@@ -22,6 +25,44 @@ integrations at the transport level.
   pyright in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
   optional extras (`interlock-cb[otel]`, `interlock-cb[httpx2]`).
+
+## How it compares
+
+interlock-cb is young (first released in 2026). [pybreaker][pybreaker] and
+[circuitbreaker][circuitbreaker] are mature, well-documented and proven in
+production for years — for many projects they are exactly the right choice. Each
+library is strong in different places:
+
+| Feature | interlock-cb | pybreaker | circuitbreaker |
+|---|:---:|:---:|:---:|
+| Core states (closed / open / half-open) | ✅ | ✅ | ✅ |
+| Choose which exceptions count as failures | ✅ | ✅ | ✅ |
+| Zero-dependency core | ✅ | ✅ | ✅ |
+| `async` / `await` (asyncio) | ✅ | Tornado | ✅ |
+| Event / state-change listeners | ✅ | ✅ | — |
+| Shared state across processes (Redis) | planned | ✅ | — |
+| Fallback function | planned | — | ✅ |
+| Years of production use | new | ✅ | ✅ |
+| Failure-**rate** sliding window | ✅ | — | — |
+| Time-based window | ✅ | — | — |
+| Slow-call detection | ✅ | — | — |
+| Result-based failure classification | ✅ | — | — |
+| Type-safe decorator (preserves signature) | ✅ | — | — |
+| Built-in httpx transport | ✅ | — | — |
+| OpenTelemetry metrics | ✅ | — | — |
+
+<sub>Compared against pybreaker 1.x and circuitbreaker 2.1 as documented in mid-2026.
+pybreaker's async support is Tornado-based, not asyncio. "planned" items are on
+the interlock-cb roadmap (Redis-backed state, fallback). Both established
+libraries trip on a consecutive-failure count rather than a rate window.
+Something out of date? Please open a PR.</sub>
+
+Reach for an established library if you want a small, proven breaker today, state
+shared across hosts, or a built-in fallback. Choose interlock-cb when you want
+rate-based windows, slow-call detection and a fully typed API.
+
+[pybreaker]: https://github.com/danielfm/pybreaker
+[circuitbreaker]: https://github.com/fabfuel/circuitbreaker
 
 ## Installation
 
