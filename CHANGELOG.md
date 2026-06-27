@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `sync_timeout(seconds)` decorator: a synchronous counterpart to `timeout`.
+  It runs the wrapped callable in a daemon worker thread joined with a deadline
+  and raises `CallTimeoutError` on overrun. Documents the worker-thread
+  limitation: Python cannot kill a thread, so the worker keeps running in the
+  background after a timeout.
+
 ## [1.0.0] - 2026-06-27
 
 ### Added
