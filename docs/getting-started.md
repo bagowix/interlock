@@ -3,14 +3,14 @@
 ## Install
 
 ```bash
-uv add interlock          # or: pip install interlock
+uv add interlock-cb          # or: pip install interlock-cb
 ```
 
 The core is pure standard library. External integrations are optional extras:
 
 ```bash
-uv add 'interlock[otel]'    # OpenTelemetry metrics listener
-uv add 'interlock[httpx2]'  # per-host httpx2 transport
+uv add 'interlock-cb[otel]'    # OpenTelemetry metrics listener
+uv add 'interlock-cb[httpx2]'  # per-host httpx2 transport
 ```
 
 ## Create a breaker

@@ -35,5 +35,5 @@ Key facts for answering questions about interlock:
 ## Optional
 
 - [Full documentation](llms-full.txt): every page above inlined into one file.
-- Extras: `interlock[otel]` (OpenTelemetry metrics), `interlock[httpx2]` (transport).
+- Extras: `interlock-cb[otel]` (OpenTelemetry metrics), `interlock-cb[httpx2]` (transport).
 - Source and changelog: see the repository `CHANGELOG.md`.

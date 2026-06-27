@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "interlock"
+name = "interlock-cb"
 dynamic = ["version"]
 description = "A modern circuit breaker for Python: sync + async, sliding-window rate, slow-call detection, type-safe API."
 readme = "README.md"

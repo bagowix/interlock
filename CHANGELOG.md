@@ -31,8 +31,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the last recorded failure.
 - Async-first `timeout` primitive that turns a hang into `CallTimeoutError`.
 - Observability: `EventListener` protocol, a zero-dependency
-  `LoggingEventListener`, and an `OTelEventListener` (extra `interlock[otel]`).
-- httpx2 transport integration (extra `interlock[httpx2]`):
+  `LoggingEventListener`, and an `OTelEventListener` (extra `interlock-cb[otel]`).
+- httpx2 transport integration (extra `interlock-cb[httpx2]`):
   `CircuitBreakerTransport` and `AsyncCircuitBreakerTransport` apply a breaker
   per host, with an `HttpStatusClassifier` treating `429, 500, 502, 503, 504`
   and transport exceptions as failures.

@@ -1,11 +1,11 @@
 # httpx2 integration
 
-The `interlock[httpx2]` extra wraps an [httpx2](https://pypi.org/project/httpx2/)
+The `interlock-cb[httpx2]` extra wraps an [httpx2](https://pypi.org/project/httpx2/)
 transport so a circuit breaker is applied **per host** transparently — no
 decorators or `call` wrappers in your request code.
 
 ```bash
-uv add 'interlock[httpx2]'
+uv add 'interlock-cb[httpx2]'
 ```
 
 ## Synchronous client

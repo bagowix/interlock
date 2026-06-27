@@ -259,7 +259,7 @@ wheels = [
 ]
 
 [[package]]
-name = "interlock"
+name = "interlock-cb"
 source = { editable = "." }
 
 [package.optional-dependencies]

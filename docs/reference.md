@@ -80,11 +80,11 @@ Implement any of these to swap a core behaviour:
 ## Listeners
 
 - **`LoggingEventListener(logger=None)`** — top-level; zero dependencies.
-- **`interlock.otel.OTelEventListener(meter=None)`** — extra `interlock[otel]`.
+- **`interlock.otel.OTelEventListener(meter=None)`** — extra `interlock-cb[otel]`.
 
 ## httpx2 adapters
 
-Extra `interlock[httpx2]`, module `interlock.httpx2`:
+Extra `interlock-cb[httpx2]`, module `interlock.httpx2`:
 
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**

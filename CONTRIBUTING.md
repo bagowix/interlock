@@ -40,7 +40,7 @@ uv run prek install           # one-time, installs the git hook
 - **Types are part of the API.** Public surface stays fully typed; mypy and
   pyright must pass in strict mode.
 - **Keep the core dependency-free.** Anything external belongs in an extra
-  (`interlock[otel]`, `interlock[httpx2]`), imported lazily.
+  (`interlock-cb[otel]`, `interlock-cb[httpx2]`), imported lazily.
 - **Conventional commits.** Use `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
   `chore:`, `perf:`, `ci:` prefixes.
 - **Update the docs and CHANGELOG.** User-facing changes update the relevant
