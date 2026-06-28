@@ -169,7 +169,8 @@ async def orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list
 
 ## Documentation
 
-Full guides, integration recipes and the API reference live in [`docs/`](docs/):
+The full documentation is hosted at **<https://bagowix.github.io/interlock/>**.
+The sources live in [`docs/`](docs/):
 
 - [Getting started](docs/getting-started.md)
 - [Configuration](docs/guides/configuration.md)
