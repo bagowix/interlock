@@ -15,6 +15,7 @@
 | interlock/breaker.py          |       60 |        0 |        2 |        0 |     100% |           |
 | interlock/config.py           |       32 |        0 |       16 |        0 |     100% |           |
 | interlock/errors.py           |       19 |        0 |        2 |        0 |     100% |           |
+| interlock/fastapi.py          |       23 |        0 |        2 |        0 |     100% |           |
 | interlock/httpx2.py           |       35 |        0 |        2 |        0 |     100% |           |
 | interlock/listeners.py        |       15 |        0 |        0 |        0 |     100% |           |
 | interlock/otel.py             |       20 |        0 |        0 |        0 |     100% |           |
@@ -25,7 +26,7 @@
 | interlock/timeout.py          |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py          |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py           |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                     |  **659** |    **0** |  **102** |    **0** | **100%** |           |
+| **TOTAL**                     |  **682** |    **0** |  **104** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
