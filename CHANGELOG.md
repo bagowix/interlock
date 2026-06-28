@@ -58,5 +58,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/bagowix/interlock/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bagowix/interlock/releases/tag/v1.0.0
