@@ -28,6 +28,7 @@ dependencies = []
 [project.optional-dependencies]
 otel = ["opentelemetry-api>=1.43.0"]
 httpx2 = ["httpx2>=2.4.0"]
+fastapi = ["fastapi>=0.128.0"]
 
 [project.urls]
 Homepage = "https://github.com/bagowix/interlock"
@@ -155,6 +156,7 @@ fail_under = 98
 [dependency-groups]
 dev = [
     "faker>=40.23.0",
+    "fastapi>=0.128.0",
     "httpx2>=2.4.0",
     "hypothesis>=6.155.7",
     "mypy>=2.1.0",
