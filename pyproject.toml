@@ -32,7 +32,7 @@ fastapi = ["fastapi>=0.128.0"]
 
 [project.urls]
 Homepage = "https://github.com/bagowix/interlock"
-Documentation = "https://github.com/bagowix/interlock/tree/main/docs"
+Documentation = "https://bagowix.github.io/interlock/"
 Repository = "https://github.com/bagowix/interlock"
 Changelog = "https://github.com/bagowix/interlock/blob/main/CHANGELOG.md"
 Issues = "https://github.com/bagowix/interlock/issues"
