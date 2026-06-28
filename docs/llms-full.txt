@@ -722,3 +722,16 @@ Extra `interlock-cb[httpx2]`, module `interlock.httpx2`:
   `429, 500, 502, 503, 504`.
 
 See the [httpx2 integration](integrations/httpx2.md).
+
+## FastAPI adapters
+
+Extra `interlock-cb[fastapi]`, module `interlock.fastapi`:
+
+- **`breaker_dependency(name, *, registry)`** — returns a `Depends`-compatible
+  callable yielding the named breaker from a shared `Registry`.
+- **`install_exception_handler(app)`** — registers a handler mapping
+  `CircuitOpenError` to `503` with a `Retry-After` header.
+- **`circuit_open_handler(request, exc)`** — the handler itself, for custom
+  registration.
+
+See the [FastAPI integration](integrations/fastapi.md).

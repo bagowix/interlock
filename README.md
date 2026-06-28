@@ -24,7 +24,7 @@ integrations at the transport level.
   signature *and* its sync/async nature; ships `py.typed`, passes mypy and
   pyright in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
-  optional extras (`interlock-cb[otel]`, `interlock-cb[httpx2]`).
+  optional extras (`interlock-cb[otel]`, `interlock-cb[httpx2]`, `interlock-cb[fastapi]`).
 
 ## How it compares
 
@@ -75,6 +75,7 @@ Optional extras:
 ```bash
 uv add 'interlock-cb[otel]'    # OpenTelemetry metrics listener
 uv add 'interlock-cb[httpx2]'  # per-host httpx2 transport
+uv add 'interlock-cb[fastapi]' # FastAPI dependency + 503 Retry-After handler
 ```
 
 ## Quickstart
@@ -142,6 +143,30 @@ client = httpx2.Client(transport=transport)
 By default, transport exceptions and the canonical retryable statuses
 (`429, 500, 502, 503, 504`) count as failures; `4xx` client errors do not.
 
+## FastAPI integration
+
+Inject a per-name breaker with `Depends` and map an open circuit to a clean
+`503` with `Retry-After`:
+
+```python
+from typing import Annotated
+
+from fastapi import Depends, FastAPI
+from interlock import CircuitBreaker, Registry
+from interlock.fastapi import breaker_dependency, install_exception_handler
+
+app = FastAPI()
+registry = Registry()
+install_exception_handler(app)
+
+orders_db = breaker_dependency('orders-db', registry=registry)
+
+
+@app.get('/orders')
+async def orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
+    return await breaker.call(fetch_orders)
+```
+
 ## Documentation
 
 Full guides, integration recipes and the API reference live in [`docs/`](docs/):
@@ -153,6 +178,7 @@ Full guides, integration recipes and the API reference live in [`docs/`](docs/):
 - [Observability](docs/guides/observability.md)
 - [Timeout](docs/guides/timeout.md)
 - [httpx2 integration](docs/integrations/httpx2.md)
+- [FastAPI integration](docs/integrations/fastapi.md)
 - [API reference](docs/reference.md)
 
 ## Contributing

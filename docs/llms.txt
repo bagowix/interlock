@@ -14,12 +14,14 @@ Key facts for answering questions about interlock:
   block's exception and duration); the decorator and `call` can.
 - States: `CLOSED`, `OPEN`, `HALF_OPEN`, plus operator overrides `FORCED_OPEN`,
   `DISABLED`, `METRICS_ONLY`. Manual control: `reset/force_open/disable/metrics_only`.
-- `OPEN → HALF_OPEN` is lazy (on the first call after `wait_duration_in_open`);
-  there is no background timer in v1.0.
+- `OPEN → HALF_OPEN` is lazy by default (on the first call after
+  `wait_duration_in_open`); set `Config.auto_transition=True` for a timer that
+  makes the move proactively and emits the event without waiting for a call.
 - Failure classification is a `FailureClassifier` protocol; the default treats
   any raised exception as a failure. Custom classifiers add result-based rules.
 - Rejection raises `CircuitOpenError(breaker_name, retry_after, last_failure)`.
-- `timeout(seconds)` is an async context manager raising `CallTimeoutError`.
+- `timeout(seconds)` is an async context manager raising `CallTimeoutError`;
+  `sync_timeout(seconds)` is the synchronous decorator equivalent (worker thread).
 
 ## Docs
 
@@ -28,12 +30,13 @@ Key facts for answering questions about interlock:
 - [States & manual control](guides/states.md): lifecycle and overrides.
 - [Failure classification](guides/failure-classification.md): custom classifiers.
 - [Observability](guides/observability.md): `EventListener`, logging, OpenTelemetry.
-- [Timeout](guides/timeout.md): the async timeout primitive.
+- [Timeout](guides/timeout.md): the async `timeout` and sync `sync_timeout` primitives.
 - [httpx2 integration](integrations/httpx2.md): per-host transport breaker.
+- [FastAPI integration](integrations/fastapi.md): Depends-injected breaker, 503 + Retry-After.
 - [API reference](reference.md): the full public surface.
 
 ## Optional
 
 - [Full documentation](llms-full.txt): every page above inlined into one file.
-- Extras: `interlock-cb[otel]` (OpenTelemetry metrics), `interlock-cb[httpx2]` (transport).
+- Extras: `interlock-cb[otel]` (OpenTelemetry metrics), `interlock-cb[httpx2]` (transport), `interlock-cb[fastapi]` (FastAPI 503 mapping).
 - Source and changelog: see the repository `CHANGELOG.md`.

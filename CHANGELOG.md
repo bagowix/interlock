@@ -18,6 +18,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   emitting the state change without waiting for the next call. The lazy
   transition stays authoritative; the timer admits no probe and is cancelled on
   `reset()`, `force_open()`, or when a call makes the move first.
+- FastAPI integration via the `fastapi` extra (`interlock.fastapi`):
+  `breaker_dependency(name, *, registry)` injects a shared breaker with
+  `Depends`, and `install_exception_handler(app)` maps `CircuitOpenError` to
+  `503 Service Unavailable` with a `Retry-After` header.
 
 ## [1.0.0] - 2026-06-27
 
