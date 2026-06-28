@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-28
+
 ### Added
 
 - `sync_timeout(seconds)` decorator: a synchronous counterpart to `timeout`.
