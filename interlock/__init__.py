@@ -12,6 +12,7 @@ from interlock.errors import (
 from interlock.listeners import LoggingEventListener
 from interlock.outcome import Outcome
 from interlock.protocols import (
+    AsyncStorage,
     Clock,
     EventListener,
     FailureClassifier,
@@ -19,6 +20,7 @@ from interlock.protocols import (
     Storage,
 )
 from interlock.registry import Registry
+from interlock.shared import ProbeLease, SharedState
 from interlock.state import State
 from interlock.timeout import sync_timeout, timeout
 from interlock.version import VERSION
@@ -29,6 +31,7 @@ __version__ = VERSION
 __all__ = (
     'VERSION',
     'AsyncCallable',
+    'AsyncStorage',
     'Call',
     'CallTimeoutError',
     'CircuitBreaker',
@@ -41,7 +44,9 @@ __all__ = (
     'InterlockError',
     'LoggingEventListener',
     'Outcome',
+    'ProbeLease',
     'Registry',
+    'SharedState',
     'SlidingWindow',
     'State',
     'Storage',

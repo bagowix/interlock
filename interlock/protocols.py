@@ -8,10 +8,12 @@ classification and observability be swapped without touching it.
 from typing import Protocol, runtime_checkable
 
 from interlock.outcome import Outcome
+from interlock.shared import ProbeLease, SharedState
 from interlock.state import State
 from interlock.window import WindowSnapshot
 
 __all__ = (
+    'AsyncStorage',
     'Clock',
     'EventListener',
     'FailureClassifier',
@@ -44,14 +46,97 @@ class SlidingWindow(Protocol):
 
 @runtime_checkable
 class Storage(Protocol):
-    """Where breaker state lives. Default in-memory; shared backends later."""
+    """Coordinates breaker state across instances through a shared backend.
 
-    def load(self, name: str) -> State:
-        """Load the persisted state for the named breaker."""
+    Every operation is an atomic *intent*, not a raw read-modify-write: the
+    backend owns the atomicity (e.g. a Lua script or a locked section), so racing
+    instances never desync. The methods carry mechanism only — threshold policy
+    stays in the core state machine, which calls ``trip_open`` / ``close`` once
+    it has decided. ``ttl`` refreshes the key's expiry so abandoned instances let
+    state self-expire.
+
+    This is the synchronous contract; ``AsyncStorage`` mirrors it for async
+    breakers. No method may raise into the protected path — the engine degrades
+    to local state on backend failure.
+    """
+
+    def read(self, name: str) -> SharedState | None:
+        """Return the current shared view, or ``None`` if no key exists."""
         ...
 
-    def save(self, *, name: str, state: State) -> None:
-        """Persist the state for the named breaker."""
+    def trip_open(self, *, name: str, ttl: float) -> SharedState:
+        """Transition to ``OPEN``, stamping the backend's time as ``opened_at``.
+
+        Idempotent while already ``OPEN`` (the first opener's time stands);
+        from ``HALF_OPEN`` it reopens with a fresh ``opened_at`` and clears
+        probe accounting.
+        """
+        ...
+
+    def begin_half_open_if_elapsed(
+        self, *, name: str, wait_duration: float, permitted: int, ttl: float
+    ) -> SharedState:
+        """Move ``OPEN`` → ``HALF_OPEN`` once ``wait_duration`` has elapsed.
+
+        Atomically seeds the global probe budget (``permitted``) on the first
+        successful transition; later calls observe ``HALF_OPEN`` and do not
+        reseed. A no-op (returns the current view) until the wait elapses.
+        """
+        ...
+
+    def lease_probe(self, *, name: str) -> ProbeLease:
+        """Claim one global probe slot, decrementing the shared budget.
+
+        ``granted`` is true only in ``HALF_OPEN`` with budget remaining; this
+        bounds total probes across all instances against a recovering downstream.
+        """
+        ...
+
+    def record_probe(self, *, name: str, outcome: Outcome, ttl: float) -> SharedState:
+        """Tally one completed probe's outcome into the shared accounting.
+
+        Returns the updated view; the caller treats
+        ``probes_completed >= probes_permitted`` as "round finished, decide now".
+        """
+        ...
+
+    def close(self, *, name: str, ttl: float) -> SharedState:
+        """Transition to ``CLOSED`` and clear probe accounting."""
+        ...
+
+
+@runtime_checkable
+class AsyncStorage(Protocol):
+    """Async mirror of ``Storage`` for async breakers.
+
+    See ``Storage`` for the full contract; every method is the awaitable
+    counterpart.
+    """
+
+    async def read(self, name: str) -> SharedState | None:
+        """Return the current shared view, or ``None`` if no key exists."""
+        ...
+
+    async def trip_open(self, *, name: str, ttl: float) -> SharedState:
+        """Transition to ``OPEN``, stamping the backend's time as ``opened_at``."""
+        ...
+
+    async def begin_half_open_if_elapsed(
+        self, *, name: str, wait_duration: float, permitted: int, ttl: float
+    ) -> SharedState:
+        """Move ``OPEN`` → ``HALF_OPEN`` once ``wait_duration`` has elapsed."""
+        ...
+
+    async def lease_probe(self, *, name: str) -> ProbeLease:
+        """Claim one global probe slot, decrementing the shared budget."""
+        ...
+
+    async def record_probe(self, *, name: str, outcome: Outcome, ttl: float) -> SharedState:
+        """Tally one completed probe's outcome into the shared accounting."""
+        ...
+
+    async def close(self, *, name: str, ttl: float) -> SharedState:
+        """Transition to ``CLOSED`` and clear probe accounting."""
         ...
 
 
