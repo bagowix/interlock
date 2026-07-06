@@ -32,6 +32,20 @@ The pre-commit hooks run the fast subset automatically:
 uv run prek install           # one-time, installs the git hook
 ```
 
+### Redis-backed tests
+
+`tests/test_redis_storage.py` runs against in-process **`fakeredis`** by default —
+no server needed, coverage stays 100%. A few concurrency tests assert atomicity
+only a real server guarantees; they are skipped unless you point at one (Redis or
+any RESP server such as [Valkey](https://valkey.io)):
+
+```bash
+docker run --rm -p 6379:6379 redis    # or valkey/valkey, or a local redis-server
+INTERLOCK_TEST_REDIS_URL=redis://localhost:6379/0 uv run pytest
+```
+
+CI runs both.
+
 ## Expectations
 
 - **Tests first.** New behaviour and bug fixes come with tests; the suite keeps
@@ -40,7 +54,8 @@ uv run prek install           # one-time, installs the git hook
 - **Types are part of the API.** Public surface stays fully typed; mypy and
   pyright must pass in strict mode.
 - **Keep the core dependency-free.** Anything external belongs in an extra
-  (`interlock-cb[otel]`, `interlock-cb[httpx2]`), imported lazily.
+  (`interlock-cb[otel]`, `interlock-cb[httpx2]`, `interlock-cb[redis]`), imported
+  lazily.
 - **Conventional commits.** Use `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
   `chore:`, `perf:`, `ci:` prefixes.
 - **Update the docs and CHANGELOG.** User-facing changes update the relevant
