@@ -27,9 +27,11 @@ class _Core:
         with self._lock:
             return self._store.get(name)
 
-    def trip_open(self, *, name: str) -> SharedState:
+    def trip_open(self, *, name: str, expected_version: int | None) -> SharedState:
         with self._lock:
             current = self._store.get(name) or SharedState.closed()
+            if expected_version is not None and current.version != expected_version:
+                return current
             if current.state is State.OPEN:
                 return current
 
@@ -85,6 +87,9 @@ class _Core:
     def record_probe(self, *, name: str, outcome: Outcome) -> SharedState:
         with self._lock:
             current = self._store.get(name) or SharedState.closed()
+            if current.state is not State.HALF_OPEN:
+                return current  # stale probe outcome: the state has moved on
+
             new = dataclasses.replace(
                 current,
                 version=current.version + 1,
@@ -96,9 +101,12 @@ class _Core:
 
             return new
 
-    def close(self, *, name: str) -> SharedState:
+    def close(self, *, name: str, expected_version: int | None) -> SharedState:
         with self._lock:
             current = self._store.get(name) or SharedState.closed()
+            if expected_version is not None and current.version != expected_version:
+                return current
+
             new = dataclasses.replace(SharedState.closed(), version=current.version + 1)
             self._store[name] = new
             return new
@@ -113,8 +121,10 @@ class InMemoryStorage:
     def read(self, name: str) -> SharedState | None:
         return self._core.read(name)
 
-    def trip_open(self, *, name: str, ttl: float) -> SharedState:
-        return self._core.trip_open(name=name)
+    def trip_open(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
+        return self._core.trip_open(name=name, expected_version=expected_version)
 
     def begin_half_open_if_elapsed(
         self, *, name: str, wait_duration: float, permitted: int, ttl: float
@@ -123,14 +133,14 @@ class InMemoryStorage:
             name=name, wait_duration=wait_duration, permitted=permitted
         )
 
-    def lease_probe(self, *, name: str) -> ProbeLease:
+    def lease_probe(self, *, name: str, ttl: float) -> ProbeLease:
         return self._core.lease_probe(name=name)
 
     def record_probe(self, *, name: str, outcome: Outcome, ttl: float) -> SharedState:
         return self._core.record_probe(name=name, outcome=outcome)
 
-    def close(self, *, name: str, ttl: float) -> SharedState:
-        return self._core.close(name=name)
+    def close(self, *, name: str, ttl: float, expected_version: int | None = None) -> SharedState:
+        return self._core.close(name=name, expected_version=expected_version)
 
 
 class AsyncInMemoryStorage:
@@ -142,8 +152,10 @@ class AsyncInMemoryStorage:
     async def read(self, name: str) -> SharedState | None:
         return self._core.read(name)
 
-    async def trip_open(self, *, name: str, ttl: float) -> SharedState:
-        return self._core.trip_open(name=name)
+    async def trip_open(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
+        return self._core.trip_open(name=name, expected_version=expected_version)
 
     async def begin_half_open_if_elapsed(
         self, *, name: str, wait_duration: float, permitted: int, ttl: float
@@ -152,11 +164,13 @@ class AsyncInMemoryStorage:
             name=name, wait_duration=wait_duration, permitted=permitted
         )
 
-    async def lease_probe(self, *, name: str) -> ProbeLease:
+    async def lease_probe(self, *, name: str, ttl: float) -> ProbeLease:
         return self._core.lease_probe(name=name)
 
     async def record_probe(self, *, name: str, outcome: Outcome, ttl: float) -> SharedState:
         return self._core.record_probe(name=name, outcome=outcome)
 
-    async def close(self, *, name: str, ttl: float) -> SharedState:
-        return self._core.close(name=name)
+    async def close(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
+        return self._core.close(name=name, expected_version=expected_version)

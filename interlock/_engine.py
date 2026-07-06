@@ -118,16 +118,16 @@ class Engine:
         Raises:
             CircuitOpenError: If the breaker rejects the call.
         """
-        self._admit()
+        generation = self._admit()
         start = self._clock.monotonic()
 
         try:
             result = fn(*args, **kwargs)
         except Exception as exc:
-            self._settle(result=None, exception=exc, start=start)
+            self._settle(result=None, exception=exc, start=start, generation=generation)
             raise
         else:
-            self._settle(result=result, exception=None, start=start)
+            self._settle(result=result, exception=None, start=start, generation=generation)
             return result
 
     async def call_async(self, fn: AsyncCallable[P, R], /, *args: P.args, **kwargs: P.kwargs) -> R:
@@ -136,35 +136,37 @@ class Engine:
         Raises:
             CircuitOpenError: If the breaker rejects the call.
         """
-        self._admit()
+        generation = self._admit()
         start = self._clock.monotonic()
 
         try:
             result = await fn(*args, **kwargs)
         except Exception as exc:
-            self._settle(result=None, exception=exc, start=start)
+            self._settle(result=None, exception=exc, start=start, generation=generation)
             raise
         else:
-            self._settle(result=result, exception=None, start=start)
+            self._settle(result=result, exception=None, start=start, generation=generation)
             return result
 
-    def enter_block(self) -> float:
-        """Admit a guarded block and return its start time.
+    def enter_block(self) -> tuple[float, int]:
+        """Admit a guarded block; return its start time and admission generation.
 
         Backs the context-manager surface, where there is no callable to run —
-        only a block whose exception and duration are observed.
+        only a block whose exception and duration are observed. The generation
+        is handed back to ``exit_block`` so a block that outlives a state
+        transition is not recorded into the wrong era.
 
         Raises:
             CircuitOpenError: If the breaker rejects the block.
         """
-        self._admit()
-        return self._clock.monotonic()
+        generation = self._admit()
+        return self._clock.monotonic(), generation
 
-    def exit_block(self, *, start: float, exception: BaseException | None) -> None:
+    def exit_block(self, *, start: float, generation: int, exception: BaseException | None) -> None:
         """Record a guarded block's outcome from its exception and duration."""
         if exception is not None and not isinstance(exception, Exception):
             return  # mirror call(): cancellation/shutdown are not downstream failures
-        self._settle(result=None, exception=exception, start=start)
+        self._settle(result=None, exception=exception, start=start, generation=generation)
 
     def reset(self) -> None:
         """Return to ``CLOSED`` with a fresh window, discarding past metrics."""
@@ -172,6 +174,7 @@ class Engine:
             before = self._machine.state
             self._machine.reset()
             after = self._machine.state
+            self._last_failure = None
 
         self._on_transition(before, after)
         self._listener.on_reset(name=self._name)
@@ -196,11 +199,13 @@ class Engine:
 
         self._on_transition(before, after)
 
-    def _admit(self) -> None:
+    def _admit(self) -> int:
+        """Admit one call and return the generation it was admitted in."""
         with self._lock:
             before = self._machine.state
             admitted = self._machine.acquire()
             after = self._machine.state
+            generation = self._machine.generation
             retry_after = None if admitted else self._machine.retry_after()
             last_failure = self._last_failure
 
@@ -213,7 +218,11 @@ class Engine:
                 last_failure=last_failure,
             )
 
-    def _settle(self, *, result: object, exception: Exception | None, start: float) -> None:
+        return generation
+
+    def _settle(
+        self, *, result: object, exception: Exception | None, start: float, generation: int
+    ) -> None:
         duration = self._clock.monotonic() - start
         failure = self._classifier.is_failure(result=result, exception=exception)
         slow = duration >= self._config.slow_call_duration_threshold
@@ -221,7 +230,7 @@ class Engine:
 
         with self._lock:
             before = self._machine.state
-            self._machine.record(outcome)
+            self._machine.record(outcome, generation=generation)
             after = self._machine.state
             if failure and exception is not None:
                 self._last_failure = exception

@@ -347,3 +347,59 @@ def test__forced_open__retry_after__is_none(config: Config, fake_clock: FakeCloc
     machine.force_open()
 
     assert machine.retry_after() is None
+
+
+def test__record__stale_generation__not_counted_as_probe(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    stale_generation = machine.generation  # calls admitted while CLOSED carry this era
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True  # OPEN -> HALF_OPEN, first probe admitted
+
+    machine.record(Outcome.SUCCESS, generation=stale_generation)
+    machine.record(Outcome.SUCCESS, generation=stale_generation)
+
+    # Two stale CLOSED-era successes must not finish the probe round
+    # (permitted_calls_in_half_open=2 would otherwise close the breaker here).
+    assert machine.state is State.HALF_OPEN
+
+
+def test__record__current_generation__is_recorded(config: Config, fake_clock: FakeClock) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    assert machine.acquire() is True
+    generation = machine.generation
+
+    machine.record(Outcome.SUCCESS, generation=generation)
+    machine.record(Outcome.SUCCESS, generation=generation)
+
+    assert machine.state is State.CLOSED
+
+
+def test__record__probe_settling_after_reset__does_not_pollute_fresh_window(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True  # probe in flight
+    generation = machine.generation
+    machine.reset()  # operator resets while the probe still runs
+
+    machine.record(Outcome.FAILURE, generation=generation)
+
+    assert machine.snapshot().total_calls == 0
+
+
+def test__generation__bumped_by_overrides(config: Config, fake_clock: FakeClock) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    stale_generation = machine.generation
+
+    machine.metrics_only()
+    machine.record(Outcome.FAILURE, generation=stale_generation)
+
+    assert machine.snapshot().total_calls == 0  # pre-override call not recorded into shadow window

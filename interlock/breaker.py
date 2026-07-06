@@ -63,7 +63,7 @@ class CircuitBreaker:
             classifier=classifier,
             listener=listener,
         )
-        self._block_starts: list[float] = []
+        self._blocks: list[tuple[float, int]] = []
 
     @property
     def name(self) -> str:
@@ -143,7 +143,7 @@ class CircuitBreaker:
         return sync_wrapper
 
     def __enter__(self) -> Self:
-        self._block_starts.append(self._engine.enter_block())
+        self._blocks.append(self._engine.enter_block())
         return self
 
     def __exit__(
@@ -152,11 +152,12 @@ class CircuitBreaker:
         exc: BaseException | None,
         _traceback: TracebackType | None,
     ) -> Literal[False]:
-        self._engine.exit_block(start=self._block_starts.pop(), exception=exc)
+        start, generation = self._blocks.pop()
+        self._engine.exit_block(start=start, generation=generation, exception=exc)
         return False
 
     async def __aenter__(self) -> Self:
-        self._block_starts.append(self._engine.enter_block())
+        self._blocks.append(self._engine.enter_block())
         return self
 
     async def __aexit__(
@@ -165,5 +166,6 @@ class CircuitBreaker:
         exc: BaseException | None,
         _traceback: TracebackType | None,
     ) -> Literal[False]:
-        self._engine.exit_block(start=self._block_starts.pop(), exception=exc)
+        start, generation = self._blocks.pop()
+        self._engine.exit_block(start=start, generation=generation, exception=exc)
         return False

@@ -215,3 +215,29 @@ async def test__call_async__open_circuit__rejects_without_executing(engine: Engi
         await engine.call_async(probe)
 
     assert executed == []
+
+
+def test__stale_block__settling_in_half_open__not_counted_as_probe(
+    engine: Engine, fake_clock: FakeClock
+) -> None:
+    start, generation = engine.enter_block()  # admitted while CLOSED
+    _trip_to_open(engine)  # breaker trips while the block is still running
+    fake_clock.advance(5.0)
+    assert engine.call_sync(lambda: 'probe') == 'probe'  # -> HALF_OPEN, first probe succeeds
+
+    engine.exit_block(start=start, generation=generation, exception=None)
+
+    # permitted_calls_in_half_open=2: had the stale block counted as the second
+    # probe, the round would have finished and the breaker would have closed.
+    assert engine.state is State.HALF_OPEN
+
+
+def test__reset__clears_last_failure(engine: Engine) -> None:
+    _trip_to_open(engine)  # last_failure is now ValueError('boom')
+
+    engine.reset()
+    engine.force_open()
+    with pytest.raises(CircuitOpenError) as exc_info:
+        engine.call_sync(lambda: 1)
+
+    assert exc_info.value.last_failure is None
