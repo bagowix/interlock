@@ -21,13 +21,14 @@
 | interlock/otel.py             |       20 |        0 |        0 |        0 |     100% |           |
 | interlock/outcome.py          |       13 |        0 |        0 |        0 |     100% |           |
 | interlock/protocols.py        |       38 |        0 |        0 |        0 |     100% |           |
+| interlock/redis.py            |       76 |        0 |        4 |        0 |     100% |           |
 | interlock/registry.py         |       21 |        0 |        2 |        0 |     100% |           |
 | interlock/shared.py           |       11 |        0 |        0 |        0 |     100% |           |
 | interlock/state.py            |        9 |        0 |        0 |        0 |     100% |           |
 | interlock/timeout.py          |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py          |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py           |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                     |  **707** |    **0** |  **104** |    **0** | **100%** |           |
+| **TOTAL**                     |  **783** |    **0** |  **108** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
