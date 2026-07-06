@@ -48,12 +48,24 @@ class StateMachine:
         self._window = build_window(config=config, clock=clock)
         self._state = State.CLOSED
         self._opened_at = 0.0
+        self._generation = 0
         self._reset_probes()
 
     @property
     def state(self) -> State:
         """The current lifecycle state."""
         return self._state
+
+    @property
+    def generation(self) -> int:
+        """Era counter, bumped on every transition.
+
+        The call layer captures it at admission and passes it back to
+        ``record``, which drops outcomes admitted in an earlier era — a call
+        admitted in CLOSED must not settle as a HALF_OPEN probe, and a stale
+        probe must not pollute the fresh window after a close or reset.
+        """
+        return self._generation
 
     def snapshot(self) -> WindowSnapshot:
         """An immutable view of the current window aggregates."""
@@ -91,8 +103,15 @@ class StateMachine:
 
         return False  # FORCED_OPEN
 
-    def record(self, outcome: Outcome) -> None:
-        """Record one completed call's outcome and evaluate any transition."""
+    def record(self, outcome: Outcome, *, generation: int | None = None) -> None:
+        """Record one completed call's outcome and evaluate any transition.
+
+        ``generation`` is the era captured at admission; an outcome from an
+        earlier era is dropped (see ``generation``). ``None`` skips the check.
+        """
+        if generation is not None and generation != self._generation:
+            return
+
         if self._state is State.CLOSED:
             self._window.record(outcome)
             self._evaluate_closed()
@@ -118,16 +137,19 @@ class StateMachine:
     def force_open(self) -> None:
         """Override to ``FORCED_OPEN``: reject all traffic until reset."""
         self._state = State.FORCED_OPEN
+        self._generation += 1
         self._reset_probes()
 
     def disable(self) -> None:
         """Override to ``DISABLED``: admit all traffic, record nothing."""
         self._state = State.DISABLED
+        self._generation += 1
         self._reset_probes()
 
     def metrics_only(self) -> None:
         """Override to ``METRICS_ONLY``: admit all traffic, record but never trip."""
         self._state = State.METRICS_ONLY
+        self._generation += 1
         self._reset_probes()
 
     def reset(self) -> None:
@@ -196,14 +218,17 @@ class StateMachine:
     def _open(self) -> None:
         self._state = State.OPEN
         self._opened_at = self._clock.monotonic()
+        self._generation += 1
 
     def _to_half_open(self) -> None:
         self._state = State.HALF_OPEN
+        self._generation += 1
         self._reset_probes()
 
     def _close(self) -> None:
         self._state = State.CLOSED
         self._window = build_window(config=self._config, clock=self._clock)
+        self._generation += 1
         self._reset_probes()
 
     def _reset_probes(self) -> None:

@@ -13,7 +13,10 @@ Threshold *policy* stays in the core state machine, which calls ``trip_open`` /
 ``close`` once it has decided.
 
 Wire-compatible with Redis, Valkey, and any RESP server: this speaks plain
-commands and ``EVAL``, with no server-specific features.
+commands and ``EVAL``, with no server-specific features. The scripts call
+``TIME`` before writing, so the server must replicate scripts by effects —
+Redis >= 5.0 or any Valkey (the ``redis>=5.0.0`` dependency pin is the
+*client* library version, not the server's).
 """
 
 from typing import Any
@@ -44,18 +47,22 @@ _NOW_US = (
     'return tonumber(t[1]) * 1000000 + tonumber(t[2]) end)()'
 )
 
+# expected_version < 0 means unfenced; a fenced-out call performs no write at
+# all (not even a TTL refresh — a stale actor must not extend the key's life).
 _TRIP_OPEN = f"""
 local key = KEYS[1]
 local ttl_ms = tonumber(ARGV[1])
-local state = redis.call('HGET', key, 'state')
-if state ~= 'open' then
-  local version = tonumber(redis.call('HGET', key, 'version') or '0') + 1
-  redis.call('HSET', key,
-    'state', 'open', 'opened_at', {_NOW_US}, 'version', version,
-    'probes_permitted', 0, 'probes_remaining', 0, 'probes_completed', 0,
-    'probe_failures', 0, 'probe_slows', 0, 'v', 1)
+local expected = tonumber(ARGV[2])
+local version = tonumber(redis.call('HGET', key, 'version') or '0')
+if expected < 0 or version == expected then
+  if redis.call('HGET', key, 'state') ~= 'open' then
+    redis.call('HSET', key,
+      'state', 'open', 'opened_at', {_NOW_US}, 'version', version + 1,
+      'probes_permitted', 0, 'probes_remaining', 0, 'probes_completed', 0,
+      'probe_failures', 0, 'probe_slows', 0, 'v', 1)
+  end
+  redis.call('PEXPIRE', key, ttl_ms)
 end
-redis.call('PEXPIRE', key, ttl_ms)
 {_RETURN_STATE}
 """
 
@@ -80,6 +87,7 @@ redis.call('PEXPIRE', key, ttl_ms)
 
 _LEASE_PROBE = f"""
 local key = KEYS[1]
+local ttl_ms = tonumber(ARGV[1])
 local granted = 0
 if redis.call('HGET', key, 'state') == 'half_open' then
   if tonumber(redis.call('HGET', key, 'probes_remaining') or '0') > 0 then
@@ -88,33 +96,41 @@ if redis.call('HGET', key, 'state') == 'half_open' then
     granted = 1
   end
 end
+redis.call('PEXPIRE', key, ttl_ms)
 local r = redis.call('HMGET', KEYS[1], {_FIELDS})
 table.insert(r, 1, granted)
 return r
 """
 
+# Tallies only while HALF_OPEN: a probe outcome arriving after the state moved
+# on (another instance tripped or closed) must not pollute the new accounting.
 _RECORD_PROBE = f"""
 local key = KEYS[1]
 local is_failure = tonumber(ARGV[1])
 local is_slow = tonumber(ARGV[2])
 local ttl_ms = tonumber(ARGV[3])
-redis.call('HINCRBY', key, 'probes_completed', 1)
-redis.call('HINCRBY', key, 'version', 1)
-if is_failure == 1 then redis.call('HINCRBY', key, 'probe_failures', 1) end
-if is_slow == 1 then redis.call('HINCRBY', key, 'probe_slows', 1) end
-redis.call('PEXPIRE', key, ttl_ms)
+if redis.call('HGET', key, 'state') == 'half_open' then
+  redis.call('HINCRBY', key, 'probes_completed', 1)
+  redis.call('HINCRBY', key, 'version', 1)
+  if is_failure == 1 then redis.call('HINCRBY', key, 'probe_failures', 1) end
+  if is_slow == 1 then redis.call('HINCRBY', key, 'probe_slows', 1) end
+  redis.call('PEXPIRE', key, ttl_ms)
+end
 {_RETURN_STATE}
 """
 
 _CLOSE = f"""
 local key = KEYS[1]
 local ttl_ms = tonumber(ARGV[1])
-local version = tonumber(redis.call('HGET', key, 'version') or '0') + 1
-redis.call('HSET', key,
-  'state', 'closed', 'opened_at', 0, 'version', version,
-  'probes_permitted', 0, 'probes_remaining', 0, 'probes_completed', 0,
-  'probe_failures', 0, 'probe_slows', 0, 'v', 1)
-redis.call('PEXPIRE', key, ttl_ms)
+local expected = tonumber(ARGV[2])
+local version = tonumber(redis.call('HGET', key, 'version') or '0')
+if expected < 0 or version == expected then
+  redis.call('HSET', key,
+    'state', 'closed', 'opened_at', 0, 'version', version + 1,
+    'probes_permitted', 0, 'probes_remaining', 0, 'probes_completed', 0,
+    'probe_failures', 0, 'probe_slows', 0, 'v', 1)
+  redis.call('PEXPIRE', key, ttl_ms)
+end
 {_RETURN_STATE}
 """
 
@@ -125,8 +141,21 @@ def _s(value: object) -> str:
 
 
 def _ms(ttl: float) -> int:
-    """Convert a TTL in seconds to whole milliseconds for ``PEXPIRE``."""
-    return int(ttl * 1000)
+    """Convert a TTL in seconds to whole milliseconds for ``PEXPIRE``.
+
+    Rejects TTLs under one millisecond: ``PEXPIRE key 0`` would delete the key
+    outright instead of expiring it.
+    """
+    ms = int(ttl * 1000)
+    if ms <= 0:
+        msg = f'ttl must be at least 0.001 seconds, got {ttl!r}'
+        raise ValueError(msg)
+    return ms
+
+
+def _fence(expected_version: int | None) -> int:
+    """Encode ``expected_version`` for Lua: ``-1`` disables the fence."""
+    return -1 if expected_version is None else expected_version
 
 
 def _shared_from_values(values: list[Any]) -> SharedState:
@@ -184,9 +213,17 @@ class RedisStorage:
         """Return the current shared view, or ``None`` if no key exists."""
         return _shared_from_map(self._client.hgetall(self._key(name)))
 
-    def trip_open(self, *, name: str, ttl: float) -> SharedState:
-        """Atomically transition to ``OPEN`` (idempotent while already open)."""
-        values = self._client.eval(_TRIP_OPEN, 1, self._key(name), _ms(ttl))
+    def trip_open(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
+        """Atomically transition to ``OPEN`` (idempotent while already open).
+
+        With ``expected_version``, fenced: a no-op unless the backend still
+        holds that version.
+        """
+        values = self._client.eval(
+            _TRIP_OPEN, 1, self._key(name), _ms(ttl), _fence(expected_version)
+        )
         return _shared_from_values(values)
 
     def begin_half_open_if_elapsed(
@@ -198,13 +235,13 @@ class RedisStorage:
         )
         return _shared_from_values(values)
 
-    def lease_probe(self, *, name: str) -> ProbeLease:
+    def lease_probe(self, *, name: str, ttl: float) -> ProbeLease:
         """Atomically claim one global probe slot."""
-        values = self._client.eval(_LEASE_PROBE, 1, self._key(name))
+        values = self._client.eval(_LEASE_PROBE, 1, self._key(name), _ms(ttl))
         return ProbeLease(granted=bool(int(_s(values[0]))), state=_shared_from_values(values[1:]))
 
     def record_probe(self, *, name: str, outcome: Outcome, ttl: float) -> SharedState:
-        """Tally one completed probe's outcome into the shared accounting."""
+        """Tally one completed probe's outcome (only while ``HALF_OPEN``)."""
         values = self._client.eval(
             _RECORD_PROBE,
             1,
@@ -215,9 +252,13 @@ class RedisStorage:
         )
         return _shared_from_values(values)
 
-    def close(self, *, name: str, ttl: float) -> SharedState:
-        """Atomically transition to ``CLOSED`` and clear probe accounting."""
-        values = self._client.eval(_CLOSE, 1, self._key(name), _ms(ttl))
+    def close(self, *, name: str, ttl: float, expected_version: int | None = None) -> SharedState:
+        """Atomically transition to ``CLOSED`` and clear probe accounting.
+
+        With ``expected_version``, fenced: a delayed "probes passed" decision
+        cannot close a breaker that has since re-opened.
+        """
+        values = self._client.eval(_CLOSE, 1, self._key(name), _ms(ttl), _fence(expected_version))
         return _shared_from_values(values)
 
 
@@ -240,9 +281,17 @@ class AsyncRedisStorage:
         """Return the current shared view, or ``None`` if no key exists."""
         return _shared_from_map(await self._client.hgetall(self._key(name)))
 
-    async def trip_open(self, *, name: str, ttl: float) -> SharedState:
-        """Atomically transition to ``OPEN`` (idempotent while already open)."""
-        values = await self._client.eval(_TRIP_OPEN, 1, self._key(name), _ms(ttl))
+    async def trip_open(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
+        """Atomically transition to ``OPEN`` (idempotent while already open).
+
+        With ``expected_version``, fenced: a no-op unless the backend still
+        holds that version.
+        """
+        values = await self._client.eval(
+            _TRIP_OPEN, 1, self._key(name), _ms(ttl), _fence(expected_version)
+        )
         return _shared_from_values(values)
 
     async def begin_half_open_if_elapsed(
@@ -254,13 +303,13 @@ class AsyncRedisStorage:
         )
         return _shared_from_values(values)
 
-    async def lease_probe(self, *, name: str) -> ProbeLease:
+    async def lease_probe(self, *, name: str, ttl: float) -> ProbeLease:
         """Atomically claim one global probe slot."""
-        values = await self._client.eval(_LEASE_PROBE, 1, self._key(name))
+        values = await self._client.eval(_LEASE_PROBE, 1, self._key(name), _ms(ttl))
         return ProbeLease(granted=bool(int(_s(values[0]))), state=_shared_from_values(values[1:]))
 
     async def record_probe(self, *, name: str, outcome: Outcome, ttl: float) -> SharedState:
-        """Tally one completed probe's outcome into the shared accounting."""
+        """Tally one completed probe's outcome (only while ``HALF_OPEN``)."""
         values = await self._client.eval(
             _RECORD_PROBE,
             1,
@@ -271,7 +320,15 @@ class AsyncRedisStorage:
         )
         return _shared_from_values(values)
 
-    async def close(self, *, name: str, ttl: float) -> SharedState:
-        """Atomically transition to ``CLOSED`` and clear probe accounting."""
-        values = await self._client.eval(_CLOSE, 1, self._key(name), _ms(ttl))
+    async def close(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
+        """Atomically transition to ``CLOSED`` and clear probe accounting.
+
+        With ``expected_version``, fenced: a delayed "probes passed" decision
+        cannot close a breaker that has since re-opened.
+        """
+        values = await self._client.eval(
+            _CLOSE, 1, self._key(name), _ms(ttl), _fence(expected_version)
+        )
         return _shared_from_values(values)

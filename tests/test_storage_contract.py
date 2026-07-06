@@ -85,7 +85,7 @@ def test__begin_half_open__second_call__does_not_reseed() -> None:
     first = storage.begin_half_open_if_elapsed(
         name=NAME, wait_duration=WAIT, permitted=PERMITTED, ttl=TTL
     )
-    storage.lease_probe(name=NAME)
+    storage.lease_probe(name=NAME, ttl=TTL)
 
     again = storage.begin_half_open_if_elapsed(
         name=NAME, wait_duration=WAIT, permitted=PERMITTED, ttl=TTL
@@ -106,7 +106,7 @@ def test__lease_probe__grants_until_budget_exhausted() -> None:
     storage = InMemoryStorage(clock=clock)
     _half_open(storage, clock)
 
-    grants = [storage.lease_probe(name=NAME).granted for _ in range(PERMITTED + 1)]
+    grants = [storage.lease_probe(name=NAME, ttl=TTL).granted for _ in range(PERMITTED + 1)]
 
     assert grants == [True, True, True, False]
 
@@ -116,7 +116,7 @@ def test__lease_probe__not_half_open__is_denied() -> None:
     storage = InMemoryStorage(clock=clock)
     storage.trip_open(name=NAME, ttl=TTL)
 
-    lease = storage.lease_probe(name=NAME)
+    lease = storage.lease_probe(name=NAME, ttl=TTL)
 
     assert lease.granted is False
     assert lease.state.state is State.OPEN
@@ -143,7 +143,7 @@ def test__close__returns_to_closed_and_clears_probes() -> None:
     clock = FakeClock()
     storage = InMemoryStorage(clock=clock)
     _half_open(storage, clock)
-    storage.lease_probe(name=NAME)
+    storage.lease_probe(name=NAME, ttl=TTL)
 
     state = storage.close(name=NAME, ttl=TTL)
 
@@ -151,6 +151,78 @@ def test__close__returns_to_closed_and_clears_probes() -> None:
     assert state.probes_permitted == 0
     assert state.probes_remaining == 0
     assert state.probes_completed == 0
+
+
+def test__record_probe__not_half_open__is_dropped() -> None:
+    clock = FakeClock()
+    storage = InMemoryStorage(clock=clock)
+    storage.trip_open(name=NAME, ttl=TTL)
+
+    state = storage.record_probe(name=NAME, outcome=Outcome.FAILURE, ttl=TTL)
+
+    assert state.state is State.OPEN
+    assert state.probes_completed == 0
+    assert state.probe_failures == 0
+
+
+def test__record_probe__absent_key__does_not_create_state() -> None:
+    storage = InMemoryStorage(clock=FakeClock())
+
+    state = storage.record_probe(name=NAME, outcome=Outcome.FAILURE, ttl=TTL)
+
+    assert state.state is State.CLOSED
+    assert state.probes_completed == 0
+    assert storage.read(NAME) is None
+
+
+def test__close__matching_expected_version__applies() -> None:
+    clock = FakeClock()
+    storage = InMemoryStorage(clock=clock)
+    _half_open(storage, clock)
+    current = storage.record_probe(name=NAME, outcome=Outcome.SUCCESS, ttl=TTL)
+
+    state = storage.close(name=NAME, ttl=TTL, expected_version=current.version)
+
+    assert state.state is State.CLOSED
+    assert state.version == current.version + 1
+
+
+def test__close__stale_expected_version__is_fenced_out() -> None:
+    clock = FakeClock()
+    storage = InMemoryStorage(clock=clock)
+    _half_open(storage, clock)
+    stale = storage.record_probe(name=NAME, outcome=Outcome.SUCCESS, ttl=TTL)
+    reopened = storage.trip_open(name=NAME, ttl=TTL)  # another instance reopened meanwhile
+
+    state = storage.close(name=NAME, ttl=TTL, expected_version=stale.version)
+
+    assert state.state is State.OPEN  # the delayed close must not win
+    assert state.version == reopened.version
+
+
+def test__trip_open__stale_expected_version__is_fenced_out() -> None:
+    clock = FakeClock()
+    storage = InMemoryStorage(clock=clock)
+    _half_open(storage, clock)
+    stale = storage.record_probe(name=NAME, outcome=Outcome.FAILURE, ttl=TTL)
+    closed = storage.close(name=NAME, ttl=TTL)  # another instance closed meanwhile
+
+    state = storage.trip_open(name=NAME, ttl=TTL, expected_version=stale.version)
+
+    assert state.state is State.CLOSED  # the delayed reopen must not win
+    assert state.version == closed.version
+
+
+def test__trip_open__matching_expected_version__applies() -> None:
+    clock = FakeClock()
+    storage = InMemoryStorage(clock=clock)
+    _half_open(storage, clock)
+    current = storage.record_probe(name=NAME, outcome=Outcome.FAILURE, ttl=TTL)
+
+    state = storage.trip_open(name=NAME, ttl=TTL, expected_version=current.version)
+
+    assert state.state is State.OPEN
+    assert state.version == current.version + 1
 
 
 def test__trip_open__from_half_open__reopens_with_fresh_time() -> None:
@@ -182,11 +254,17 @@ async def test__async__full_cycle__mirrors_sync_contract() -> None:
     )
     assert half.state is State.HALF_OPEN
 
-    lease = await storage.lease_probe(name=NAME)
+    lease = await storage.lease_probe(name=NAME, ttl=TTL)
     assert lease.granted is True
 
     tally = await storage.record_probe(name=NAME, outcome=Outcome.SUCCESS, ttl=TTL)
     assert tally.probes_completed == 1
 
-    closed = await storage.close(name=NAME, ttl=TTL)
+    fenced = await storage.close(name=NAME, ttl=TTL, expected_version=tally.version - 1)
+    assert fenced.state is State.HALF_OPEN  # stale version: fenced out
+
+    closed = await storage.close(name=NAME, ttl=TTL, expected_version=tally.version)
     assert closed.state is State.CLOSED
+
+    reopen_fenced = await storage.trip_open(name=NAME, ttl=TTL, expected_version=tally.version)
+    assert reopen_fenced.state is State.CLOSED  # stale version: fenced out

@@ -133,7 +133,7 @@ def test__begin_half_open__after_elapsed__seeds_budget(storage: RedisStorage) ->
 
 
 def test__lease_probe__not_half_open__denied_on_absent_key(storage: RedisStorage) -> None:
-    lease = storage.lease_probe(name='svc')
+    lease = storage.lease_probe(name='svc', ttl=TTL)
 
     assert lease.granted is False
     assert lease.state.state is State.CLOSED
@@ -143,7 +143,7 @@ def test__lease_probe__grants_until_budget_exhausted(storage: RedisStorage) -> N
     storage.trip_open(name='svc', ttl=TTL)
     storage.begin_half_open_if_elapsed(name='svc', wait_duration=0.0, permitted=3, ttl=TTL)
 
-    grants = [storage.lease_probe(name='svc').granted for _ in range(4)]
+    grants = [storage.lease_probe(name='svc', ttl=TTL).granted for _ in range(4)]
 
     assert grants == [True, True, True, False]
 
@@ -181,7 +181,75 @@ def test__trip_open__from_half_open__reopens_fresh(storage: RedisStorage) -> Non
     assert state.probes_remaining == 0
 
 
-# --- T2.3: atomicity under concurrency ---
+def test__record_probe__not_half_open__is_dropped(storage: RedisStorage) -> None:
+    storage.trip_open(name='svc', ttl=TTL)
+
+    state = storage.record_probe(name='svc', outcome=Outcome.FAILURE, ttl=TTL)
+
+    assert state.state is State.OPEN
+    assert state.probes_completed == 0
+    assert state.probe_failures == 0
+
+
+def test__record_probe__absent_key__does_not_create_state(storage: RedisStorage) -> None:
+    state = storage.record_probe(name='svc', outcome=Outcome.FAILURE, ttl=TTL)
+
+    assert state.state is State.CLOSED
+    assert state.probes_completed == 0
+    assert storage.read('svc') is None
+
+
+def test__close__matching_expected_version__applies(storage: RedisStorage) -> None:
+    storage.trip_open(name='svc', ttl=TTL)
+    storage.begin_half_open_if_elapsed(name='svc', wait_duration=0.0, permitted=1, ttl=TTL)
+    current = storage.record_probe(name='svc', outcome=Outcome.SUCCESS, ttl=TTL)
+
+    state = storage.close(name='svc', ttl=TTL, expected_version=current.version)
+
+    assert state.state is State.CLOSED
+    assert state.version == current.version + 1
+
+
+def test__close__stale_expected_version__is_fenced_out(storage: RedisStorage) -> None:
+    storage.trip_open(name='svc', ttl=TTL)
+    storage.begin_half_open_if_elapsed(name='svc', wait_duration=0.0, permitted=1, ttl=TTL)
+    stale = storage.record_probe(name='svc', outcome=Outcome.SUCCESS, ttl=TTL)
+    reopened = storage.trip_open(name='svc', ttl=TTL)  # another instance reopened meanwhile
+
+    state = storage.close(name='svc', ttl=TTL, expected_version=stale.version)
+
+    assert state.state is State.OPEN  # the delayed close must not win
+    assert state.version == reopened.version
+
+
+def test__trip_open__stale_expected_version__is_fenced_out(storage: RedisStorage) -> None:
+    storage.trip_open(name='svc', ttl=TTL)
+    storage.begin_half_open_if_elapsed(name='svc', wait_duration=0.0, permitted=1, ttl=TTL)
+    stale = storage.record_probe(name='svc', outcome=Outcome.FAILURE, ttl=TTL)
+    closed = storage.close(name='svc', ttl=TTL)  # another instance closed meanwhile
+
+    state = storage.trip_open(name='svc', ttl=TTL, expected_version=stale.version)
+
+    assert state.state is State.CLOSED  # the delayed reopen must not win
+    assert state.version == closed.version
+
+
+def test__ttl__non_positive__rejected(storage: RedisStorage) -> None:
+    with pytest.raises(ValueError, match='ttl'):
+        storage.trip_open(name='svc', ttl=0.0)
+
+
+def test__read__ignores_unknown_hash_fields(
+    storage: RedisStorage, redis_client: redis_mod.Redis, prefix: str
+) -> None:
+    # Forward-compat: a newer writer may add fields this version does not know.
+    storage.trip_open(name='svc', ttl=TTL)
+    redis_client.hset(f'{prefix}svc', 'future_field', 'whatever')
+
+    state = storage.read('svc')
+
+    assert state is not None
+    assert state.state is State.OPEN
 
 
 @requires_real_redis
@@ -218,7 +286,7 @@ def test__lease_probe__concurrent__grants_exactly_budget(storage: RedisStorage) 
 
     def worker() -> None:
         barrier.wait()
-        result = storage.lease_probe(name='svc').granted
+        result = storage.lease_probe(name='svc', ttl=TTL).granted
         with lock:
             granted.append(result)
 
@@ -229,9 +297,6 @@ def test__lease_probe__concurrent__grants_exactly_budget(storage: RedisStorage) 
         thread.join()
 
     assert sum(granted) == budget
-
-
-# --- T2.4: TTL ---
 
 
 def test__ttl__set_on_write(
@@ -251,7 +316,15 @@ def test__ttl__key_expires(storage: RedisStorage) -> None:
     assert storage.read('svc') is None
 
 
-# --- async mirror ---
+def test__ttl__lease_probe_refreshes_expiry(
+    storage: RedisStorage, redis_client: redis_mod.Redis, prefix: str
+) -> None:
+    storage.trip_open(name='svc', ttl=TTL)
+    storage.begin_half_open_if_elapsed(name='svc', wait_duration=0.0, permitted=3, ttl=TTL)
+
+    storage.lease_probe(name='svc', ttl=TTL * 2)
+
+    assert redis_client.pttl(f'{prefix}svc') > TTL * 1000
 
 
 @pytest.mark.asyncio
@@ -270,14 +343,20 @@ async def test__async__full_cycle(prefix: str) -> None:
         )
         assert half.state is State.HALF_OPEN
 
-        lease = await storage.lease_probe(name='svc')
+        lease = await storage.lease_probe(name='svc', ttl=TTL)
         assert lease.granted is True
 
         tally = await storage.record_probe(name='svc', outcome=Outcome.FAILURE, ttl=TTL)
         assert tally.probes_completed == 1
         assert tally.probe_failures == 1
 
-        closed = await storage.close(name='svc', ttl=TTL)
+        fenced = await storage.close(name='svc', ttl=TTL, expected_version=tally.version - 1)
+        assert fenced.state is State.HALF_OPEN  # stale version: fenced out
+
+        closed = await storage.close(name='svc', ttl=TTL, expected_version=tally.version)
         assert closed.state is State.CLOSED
+
+        reopen_fenced = await storage.trip_open(name='svc', ttl=TTL, expected_version=tally.version)
+        assert reopen_fenced.state is State.CLOSED  # stale version: fenced out
     finally:
         await client.aclose()

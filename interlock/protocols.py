@@ -64,12 +64,17 @@ class Storage(Protocol):
         """Return the current shared view, or ``None`` if no key exists."""
         ...
 
-    def trip_open(self, *, name: str, ttl: float) -> SharedState:
+    def trip_open(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
         """Transition to ``OPEN``, stamping the backend's time as ``opened_at``.
 
         Idempotent while already ``OPEN`` (the first opener's time stands);
         from ``HALF_OPEN`` it reopens with a fresh ``opened_at`` and clears
-        probe accounting.
+        probe accounting. With ``expected_version`` set, the transition is
+        fenced: it applies only while the backend still holds that version, so
+        a decision computed from a stale view cannot clobber a newer state.
+        A fenced-out call is a no-op returning the current view.
         """
         ...
 
@@ -84,7 +89,7 @@ class Storage(Protocol):
         """
         ...
 
-    def lease_probe(self, *, name: str) -> ProbeLease:
+    def lease_probe(self, *, name: str, ttl: float) -> ProbeLease:
         """Claim one global probe slot, decrementing the shared budget.
 
         ``granted`` is true only in ``HALF_OPEN`` with budget remaining; this
@@ -95,13 +100,20 @@ class Storage(Protocol):
     def record_probe(self, *, name: str, outcome: Outcome, ttl: float) -> SharedState:
         """Tally one completed probe's outcome into the shared accounting.
 
-        Returns the updated view; the caller treats
+        Tallies only while ``HALF_OPEN`` — a probe outcome that arrives after
+        the state has already moved on (another instance tripped or closed) is
+        dropped, returning the current view untouched. The caller treats
         ``probes_completed >= probes_permitted`` as "round finished, decide now".
         """
         ...
 
-    def close(self, *, name: str, ttl: float) -> SharedState:
-        """Transition to ``CLOSED`` and clear probe accounting."""
+    def close(self, *, name: str, ttl: float, expected_version: int | None = None) -> SharedState:
+        """Transition to ``CLOSED`` and clear probe accounting.
+
+        With ``expected_version`` set, fenced exactly like ``trip_open``: a
+        delayed "probes passed" decision cannot close a breaker that has since
+        re-opened.
+        """
         ...
 
 
@@ -117,7 +129,9 @@ class AsyncStorage(Protocol):
         """Return the current shared view, or ``None`` if no key exists."""
         ...
 
-    async def trip_open(self, *, name: str, ttl: float) -> SharedState:
+    async def trip_open(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
         """Transition to ``OPEN``, stamping the backend's time as ``opened_at``."""
         ...
 
@@ -127,15 +141,17 @@ class AsyncStorage(Protocol):
         """Move ``OPEN`` → ``HALF_OPEN`` once ``wait_duration`` has elapsed."""
         ...
 
-    async def lease_probe(self, *, name: str) -> ProbeLease:
+    async def lease_probe(self, *, name: str, ttl: float) -> ProbeLease:
         """Claim one global probe slot, decrementing the shared budget."""
         ...
 
     async def record_probe(self, *, name: str, outcome: Outcome, ttl: float) -> SharedState:
-        """Tally one completed probe's outcome into the shared accounting."""
+        """Tally one completed probe's outcome (only while ``HALF_OPEN``)."""
         ...
 
-    async def close(self, *, name: str, ttl: float) -> SharedState:
+    async def close(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
         """Transition to ``CLOSED`` and clear probe accounting."""
         ...
 
