@@ -4,9 +4,23 @@ The `interlock-cb[httpx2]` extra wraps an [httpx2](https://pypi.org/project/http
 transport so a circuit breaker is applied **per host** transparently — no
 decorators or `call` wrappers in your request code.
 
-```bash
-uv add 'interlock-cb[httpx2]'
-```
+=== "uv"
+
+    ```bash
+    uv add 'interlock-cb[httpx2]'
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install 'interlock-cb[httpx2]'
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add 'interlock-cb[httpx2]'
+    ```
 
 ## Synchronous client
 

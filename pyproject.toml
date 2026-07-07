@@ -135,6 +135,7 @@ typeCheckingMode = "strict"
 plugins.MD013.enabled = false   # line-length limit disabled
 plugins.MD029.style = "ordered" # consistent ordered list numbering
 plugins.MD033.enabled = false   # allow inline HTML (useful for docs)
+plugins.MD046.enabled = false   # pymdownx.tabbed indents fenced blocks; the style check misfires
 plugins.MD041.enabled = false   # do not require an H1 at the top of every file
 
 [tool.pytest.ini_options]

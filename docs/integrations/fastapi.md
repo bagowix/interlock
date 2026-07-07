@@ -4,9 +4,23 @@ The `interlock-cb[fastapi]` extra protects a route's outgoing dependency with a
 shared `Registry` and turns a tripped breaker into a clean
 `503 Service Unavailable` response with a `Retry-After` header.
 
-```bash
-uv add 'interlock-cb[fastapi]'
-```
+=== "uv"
+
+    ```bash
+    uv add 'interlock-cb[fastapi]'
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install 'interlock-cb[fastapi]'
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add 'interlock-cb[fastapi]'
+    ```
 
 ## Usage
 

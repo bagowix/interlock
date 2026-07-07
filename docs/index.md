@@ -22,9 +22,44 @@ integrations at the transport level.
 
 ## Installation
 
-```bash
-uv add interlock-cb
+=== "uv"
+
+    ```bash
+    uv add interlock-cb
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install interlock-cb
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add interlock-cb
+    ```
+
+## At a glance
+
+```python
+from interlock import CircuitBreaker, CircuitOpenError
+
+breaker = CircuitBreaker(name='payments')
+
+@breaker
+def charge(amount: int) -> str:
+    return gateway.charge(amount)
+
+try:
+    charge(100)
+except CircuitOpenError as exc:
+    ...  # rejected fast: the dependency is unhealthy; retry after exc.retry_after
 ```
+
+The same instance protects async callables, works as a (sync and async) context
+manager, and can be called directly via `breaker.call(fn, ...)` — start with
+[Getting started](getting-started.md).
 
 ## Status
 

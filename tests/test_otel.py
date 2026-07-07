@@ -62,3 +62,25 @@ def test__default_meter__constructs_and_is_usable() -> None:
     listener = OTelEventListener()
 
     listener.on_call(name='svc', outcome=Outcome.SUCCESS, duration=0.1)
+
+
+def test__on_storage_degraded__counts_event_with_error_label() -> None:
+    meter, instruments = _meter_with_named_instruments()
+    listener = OTelEventListener(meter=meter)
+
+    listener.on_storage_degraded(name='svc', error=ConnectionError('down'))
+
+    instruments['interlock.storage.events'].add.assert_called_once_with(
+        1, {'breaker': 'svc', 'event': 'degraded', 'error': 'ConnectionError'}
+    )
+
+
+def test__on_storage_recovered__counts_event() -> None:
+    meter, instruments = _meter_with_named_instruments()
+    listener = OTelEventListener(meter=meter)
+
+    listener.on_storage_recovered(name='svc')
+
+    instruments['interlock.storage.events'].add.assert_called_once_with(
+        1, {'breaker': 'svc', 'event': 'recovered'}
+    )

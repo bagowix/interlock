@@ -49,3 +49,22 @@ def test__default_logger__uses_interlock_namespace(caplog: pytest.LogCaptureFixt
         listener.on_reset(name='svc')
 
     assert any(record.name == 'interlock' for record in caplog.records)
+
+
+def test__on_storage_degraded__logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    listener = LoggingEventListener(logging.getLogger('interlock.test'))
+
+    with caplog.at_level(logging.WARNING, logger='interlock.test'):
+        listener.on_storage_degraded(name='svc', error=ConnectionError('down'))
+
+    assert 'degraded' in caplog.text
+    assert 'down' in caplog.text
+
+
+def test__on_storage_recovered__logs_info(caplog: pytest.LogCaptureFixture) -> None:
+    listener = LoggingEventListener(logging.getLogger('interlock.test'))
+
+    with caplog.at_level(logging.INFO, logger='interlock.test'):
+        listener.on_storage_recovered(name='svc')
+
+    assert 'recovered' in caplog.text

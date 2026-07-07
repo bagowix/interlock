@@ -4,9 +4,23 @@ The `interlock-cb[redis]` extra coordinates breaker state across processes and
 machines through Redis: when one instance trips, every instance backs off, and
 recovery probes are budgeted globally instead of per process.
 
-```bash
-uv add 'interlock-cb[redis]'
-```
+=== "uv"
+
+    ```bash
+    uv add 'interlock-cb[redis]'
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install 'interlock-cb[redis]'
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add 'interlock-cb[redis]'
+    ```
 
 ## When to share state — and when not to
 

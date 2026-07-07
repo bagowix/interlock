@@ -61,9 +61,6 @@ CI runs both.
 - **Update the docs and CHANGELOG.** User-facing changes update the relevant
   page under `docs/` and the `[Unreleased]` section of `CHANGELOG.md`.
 
-For coding conventions and architectural decisions, see
-[`AGENTS.md`](AGENTS.md) and [`planning/PLAN.md`](planning/PLAN.md).
-
 ## Proposing larger changes
 
 For anything beyond a small fix, open an issue first so we can agree on the

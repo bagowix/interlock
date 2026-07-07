@@ -768,3 +768,40 @@ async def test__async__lane_op_failure_and_degraded_drop(
     assert len(listener.degraded) == 1
     await coordinator.execute_op(bad_op)  # gate closed: dropped, no second event
     assert len(listener.degraded) == 1
+
+
+def test__recovery__default_noop_listener__does_not_break(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky = FlakyStorage(storage)
+    breaker = _breaker(config, fake_clock, flaky)  # no listener: default noop
+    flaky.fail = True
+    _coordinator(breaker).poll_once()  # degrade
+
+    flaky.fail = False
+    fake_clock.advance(flaky.retry_backoff)
+    _coordinator(breaker).poll_once()  # recover through the noop listener
+
+    assert breaker.call(lambda: 'ok') == 'ok'
+
+
+@pytest.mark.asyncio
+async def test__async__lease_failure_falls_back_to_local_admission(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    inner = AsyncInMemoryStorage(clock=fake_clock)
+    inner.poll_interval = 3600.0
+    await inner.trip_open(name=NAME, ttl=60.0)
+    flaky = AsyncFlakyStorage(inner)
+    listener = StorageEventsListener()
+    breaker = _breaker(config, fake_clock, flaky, listener)
+    coordinator = _async_coordinator(breaker)
+    fake_clock.advance(WAIT)
+    await coordinator.poll_once()  # discovers the external OPEN
+    await coordinator.poll_once()  # drives OPEN -> HALF_OPEN
+    assert breaker.state is State.HALF_OPEN
+
+    flaky.fail = True
+    assert await breaker.call(_async_ok) == 'ok'  # lease failed -> local CLOSED admits
+
+    assert len(listener.degraded) == 1

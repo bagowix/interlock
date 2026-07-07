@@ -8,8 +8,8 @@ A breaker has three core states plus three operator overrides.
 stateDiagram-v2
     CLOSED --> OPEN: failure/slow rate crosses threshold
     OPEN --> HALF_OPEN: first call after wait_duration_in_open (or timer, if auto_transition)
-    HALF_OPEN --> CLOSED: probes succeed
-    HALF_OPEN --> OPEN: a probe fails
+    HALF_OPEN --> CLOSED: probe round passes
+    HALF_OPEN --> OPEN: probe round fails
 ```
 
 - **`CLOSED`** — traffic flows; outcomes are recorded. When the failure rate (or
@@ -19,10 +19,12 @@ stateDiagram-v2
   `wait_duration_in_open` seconds, the **next** call lazily moves the breaker to
   `HALF_OPEN`. Enable [`auto_transition`](#proactive-transition-auto_transition)
   to have a timer make that move on its own.
-- **`HALF_OPEN`** — a limited number of probe calls are admitted, with a cap on
-  how many run concurrently, so a barely-recovered dependency is not hit by the
-  full parallel load at once. Probes succeeding closes the breaker; a probe
-  failing re-opens it.
+- **`HALF_OPEN`** — up to `permitted_calls_in_half_open` probe calls are
+  admitted, with a cap on how many run concurrently, so a barely-recovered
+  dependency is not hit by the full parallel load at once. Once the round
+  completes, the breaker decides from the probes' outcomes using the same
+  thresholds as `CLOSED`: rates below the thresholds close it, at or above
+  re-open it. Calls beyond the probe caps are rejected while the round runs.
 
 ## Proactive transition (`auto_transition`)
 
@@ -78,6 +80,15 @@ Shadow mode is the key to introducing a breaker without risk: it records the
 exact failure and slow-call rates real traffic produces, so you can tune
 thresholds against live data before letting the breaker reject anything. It
 costs almost nothing to leave on.
+
+## Coordinated state (optional)
+
+With a shared [storage](../integrations/redis.md), `OPEN` and `HALF_OPEN` can
+also be *adopted* from other instances: a trip anywhere in the fleet gates
+admission everywhere, and the HALF_OPEN probe budget is shared globally.
+`breaker.state` then reports the effective state — the shared one when it
+governs admission, the local one otherwise (including while the storage is
+unreachable).
 
 ## Observing transitions
 
