@@ -36,3 +36,11 @@ class LoggingEventListener:
     def on_reset(self, *, name: str) -> None:
         """Log a manual reset at INFO."""
         self._log.info('circuit %r: reset', name)
+
+    def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
+        """Log a storage degradation at WARNING."""
+        self._log.warning('circuit %r: shared storage degraded, running local: %s', name, error)
+
+    def on_storage_recovered(self, *, name: str) -> None:
+        """Log a storage recovery at INFO."""
+        self._log.info('circuit %r: shared storage recovered', name)

@@ -117,6 +117,10 @@ class InMemoryStorage:
 
     def __init__(self, *, clock: Clock) -> None:
         self._core = _Core(clock)
+        # Coordination tuning knobs, mirroring RedisStorage (tests override them).
+        self.state_ttl = 300.0
+        self.poll_interval = 1.0
+        self.retry_backoff = 5.0
 
     def read(self, name: str) -> SharedState | None:
         return self._core.read(name)
@@ -148,6 +152,10 @@ class AsyncInMemoryStorage:
 
     def __init__(self, *, clock: Clock) -> None:
         self._core = _Core(clock)
+        # Coordination tuning knobs, mirroring AsyncRedisStorage.
+        self.state_ttl = 300.0
+        self.poll_interval = 1.0
+        self.retry_backoff = 5.0
 
     async def read(self, name: str) -> SharedState | None:
         return self._core.read(name)

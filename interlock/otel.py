@@ -46,6 +46,10 @@ class OTelEventListener:
             'interlock.reset',
             description='Manual breaker resets.',
         )
+        self._storage_events = meter.create_counter(
+            'interlock.storage.events',
+            description='Shared storage degradations and recoveries.',
+        )
 
     def on_state_change(self, *, name: str, old: State, new: State) -> None:
         """Count a state transition, labelled with the breaker and direction."""
@@ -62,3 +66,13 @@ class OTelEventListener:
     def on_reset(self, *, name: str) -> None:
         """Count a manual reset, labelled with the breaker."""
         self._resets.add(1, {'breaker': name})
+
+    def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
+        """Count a storage degradation, labelled with the breaker and error type."""
+        self._storage_events.add(
+            1, {'breaker': name, 'event': 'degraded', 'error': type(error).__name__}
+        )
+
+    def on_storage_recovered(self, *, name: str) -> None:
+        """Count a storage recovery, labelled with the breaker."""
+        self._storage_events.add(1, {'breaker': name, 'event': 'recovered'})

@@ -220,12 +220,12 @@ async def test__call_async__open_circuit__rejects_without_executing(engine: Engi
 def test__stale_block__settling_in_half_open__not_counted_as_probe(
     engine: Engine, fake_clock: FakeClock
 ) -> None:
-    start, generation = engine.enter_block()  # admitted while CLOSED
+    start, admission = engine.enter_block()  # admitted while CLOSED
     _trip_to_open(engine)  # breaker trips while the block is still running
     fake_clock.advance(5.0)
     assert engine.call_sync(lambda: 'probe') == 'probe'  # -> HALF_OPEN, first probe succeeds
 
-    engine.exit_block(start=start, generation=generation, exception=None)
+    engine.exit_block(start=start, admission=admission, exception=None)
 
     # permitted_calls_in_half_open=2: had the stale block counted as the second
     # probe, the round would have finished and the breaker would have closed.

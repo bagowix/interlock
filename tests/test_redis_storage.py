@@ -23,7 +23,7 @@ import pytest
 import redis.asyncio as aredis
 
 import redis as redis_mod
-from interlock import Outcome, State
+from interlock import CircuitBreaker, CircuitOpenError, Config, Outcome, State
 from interlock.redis import AsyncRedisStorage, RedisStorage
 
 REDIS_URL = os.environ.get('INTERLOCK_TEST_REDIS_URL')
@@ -360,3 +360,54 @@ async def test__async__full_cycle(prefix: str) -> None:
         assert reopen_fenced.state is State.CLOSED  # stale version: fenced out
     finally:
         await client.aclose()
+
+
+def test__constructor__rejects_non_positive_knobs(redis_client: redis_mod.Redis) -> None:
+    with pytest.raises(ValueError, match='state_ttl'):
+        RedisStorage(redis_client, state_ttl=0.0)
+    with pytest.raises(ValueError, match='poll_interval'):
+        RedisStorage(redis_client, poll_interval=-1.0)
+    with pytest.raises(ValueError, match='retry_backoff'):
+        RedisStorage(redis_client, retry_backoff=0.0)
+
+
+# --- e2e: coordinated breaker over RedisStorage ---
+
+
+def test__e2e__coordinated_breaker_trips_and_recovers_over_redis(
+    redis_client: redis_mod.Redis, prefix: str
+) -> None:
+    storage = RedisStorage(redis_client, key_prefix=prefix, poll_interval=3600.0)
+    config = Config(
+        minimum_number_of_calls=2,
+        window_size=10,
+        permitted_calls_in_half_open=1,
+        wait_duration_in_open=0.1,  # shared elapse runs on server TIME: real wait
+    )
+    tripper = CircuitBreaker(name='svc', config=config, storage=storage)
+    follower = CircuitBreaker(name='svc', config=config, storage=storage)
+
+    def boom() -> None:
+        raise ValueError('boom')
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match='boom'):
+            tripper.call(boom)
+    tripper._engine._sync_coordinator.wait_idle()
+
+    follower._engine._sync_coordinator.poll_once()
+    assert follower.state is State.OPEN
+    with pytest.raises(CircuitOpenError):
+        follower.call(lambda: 'nope')
+
+    time.sleep(0.15)  # sanctioned: shared elapse is server-side TIME
+    follower._engine._sync_coordinator.poll_once()
+    follower._engine._sync_coordinator.poll_once()
+    assert follower.state is State.HALF_OPEN
+    assert follower.call(lambda: 'probe') == 'probe'  # the single permitted probe
+    follower._engine._sync_coordinator.wait_idle()  # final probe -> coordinated close
+
+    tripper._engine._sync_coordinator.poll_once()
+    assert tripper.state is State.CLOSED
+    assert follower.state is State.CLOSED
+    assert tripper.call(lambda: 'back') == 'back'

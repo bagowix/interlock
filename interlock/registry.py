@@ -10,7 +10,7 @@ import threading
 from interlock._clock import SystemClock
 from interlock.breaker import CircuitBreaker
 from interlock.config import Config
-from interlock.protocols import Clock, EventListener, FailureClassifier
+from interlock.protocols import AsyncStorage, Clock, EventListener, FailureClassifier, Storage
 
 __all__ = ('Registry',)
 
@@ -26,6 +26,8 @@ class Registry:
             breaker's own default (any raised exception is a failure).
         listener: Observability hooks shared by every breaker. Defaults to
             no observation.
+        storage: Shared backend for coordinated state, handed to every breaker
+            (each coordinates under its own name). Defaults to local state.
     """
 
     def __init__(
@@ -35,11 +37,13 @@ class Registry:
         clock: Clock | None = None,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
+        storage: Storage | AsyncStorage | None = None,
     ) -> None:
         self._config = config if config is not None else Config()
         self._clock = clock if clock is not None else SystemClock()
         self._classifier = classifier
         self._listener = listener
+        self._storage = storage
         self._breakers: dict[str, CircuitBreaker] = {}
         self._lock = threading.Lock()
 
@@ -63,6 +67,7 @@ class Registry:
                     clock=self._clock,
                     classifier=self._classifier,
                     listener=self._listener,
+                    storage=self._storage,
                 )
                 self._breakers[name] = breaker
 
