@@ -27,6 +27,8 @@ The core is pure standard library. External integrations are optional extras:
 ```bash
 uv add 'interlock-cb[otel]'    # OpenTelemetry metrics listener
 uv add 'interlock-cb[httpx2]'  # per-host httpx2 transport
+uv add 'interlock-cb[fastapi]' # CircuitOpenError -> 503 + Retry-After
+uv add 'interlock-cb[redis]'   # shared distributed state
 ```
 
 ## Create a breaker
@@ -373,7 +375,7 @@ which treats transport exceptions and the canonical retryable statuses
 
 # Observability
 
-A breaker reports everything it does through an `EventListener`. The same four
+A breaker reports everything it does through an `EventListener`. The same
 hooks back logging, metrics, and any custom sink.
 
 ## The hooks
@@ -384,11 +386,17 @@ class EventListener(Protocol):
     def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None: ...
     def on_rejected(self, *, name: str) -> None: ...
     def on_reset(self, *, name: str) -> None: ...
+    def on_storage_degraded(self, *, name: str, error: BaseException) -> None: ...
+    def on_storage_recovered(self, *, name: str) -> None: ...
 ```
 
 Listeners are called **outside** the breaker's lock, after the protected call
 returns, so a slow listener never serialises throughput. Implementations must
 not raise back into the core.
+
+The two storage hooks fire only for breakers coordinated through a shared
+[storage](../integrations/redis.md), and the engine dispatches them only if
+present — a listener without them keeps working.
 
 Attach one per breaker, or share one across a `Registry`:
 
@@ -432,7 +440,7 @@ from interlock.otel import OTelEventListener
 breaker = CircuitBreaker(name='payments', listener=OTelEventListener())
 ```
 
-It records four instruments on the `interlock` meter (or a meter you pass in):
+It records five instruments on the `interlock` meter (or a meter you pass in):
 
 | Instrument | Type | Labels |
 |------------|------|--------|
@@ -440,12 +448,13 @@ It records four instruments on the `interlock` meter (or a meter you pass in):
 | `interlock.call.rejected` | counter | `breaker` |
 | `interlock.state.changes` | counter | `breaker`, `from`, `to` |
 | `interlock.reset` | counter | `breaker` |
+| `interlock.storage.events` | counter | `breaker`, `event` (`degraded`/`recovered`), `error` |
 
 ## Custom listeners
 
-Any object with the four methods satisfies the protocol — no base class to
-inherit. The core calls all four, so define each one, leaving the hooks you do
-not need as no-ops:
+Any object with the four core methods satisfies the protocol — no base class to
+inherit (the two storage hooks are dispatched only if present). The core calls
+all four, so define each one, leaving the hooks you do not need as no-ops:
 
 ```python
 class RejectionCounter:
@@ -619,6 +628,259 @@ fail on `408 Request Timeout`.
 
 ---
 
+<!-- source: docs/integrations/fastapi.md -->
+
+# FastAPI integration
+
+The `interlock-cb[fastapi]` extra protects a route's outgoing dependency with a
+shared `Registry` and turns a tripped breaker into a clean
+`503 Service Unavailable` response with a `Retry-After` header.
+
+```bash
+uv add 'interlock-cb[fastapi]'
+```
+
+## Usage
+
+Install the exception handler once, then inject a per-name breaker into any route
+with `Depends`:
+
+```python
+from typing import Annotated
+
+from fastapi import Depends, FastAPI
+from interlock import CircuitBreaker, Registry
+from interlock.fastapi import breaker_dependency, install_exception_handler
+
+app = FastAPI()
+registry = Registry()
+install_exception_handler(app)
+
+orders_db = breaker_dependency('orders-db', registry=registry)
+
+
+@app.get('/orders')
+async def orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
+    return await breaker.call(fetch_orders)
+```
+
+When `fetch_orders` fails often enough, the breaker opens. The next request is
+rejected with `CircuitOpenError` *before* `fetch_orders` runs, and the installed
+handler converts it into:
+
+```http
+HTTP/1.1 503 Service Unavailable
+Retry-After: 30
+Content-Type: application/json
+
+{"detail": "Circuit 'orders-db' is open"}
+```
+
+## How it works
+
+- **`breaker_dependency(name, *, registry)`** returns a FastAPI dependency that
+  yields the named breaker from the shared `Registry`. The breaker is created
+  lazily on first use and reused on every later request, so all requests to that
+  route share one breaker (and one view of the dependency's health).
+- **`install_exception_handler(app)`** registers a handler for
+  `CircuitOpenError`. It responds `503` and sets `Retry-After` to the breaker's
+  `retry_after` estimate, rounded up to whole seconds (per RFC 7231). The header
+  is omitted when there is no estimate (for example after `force_open()`).
+
+You protect the *outgoing* call (`breaker.call(...)`) rather than the route
+itself: only the dependency you wrap counts toward the breaker, and the breaker's
+own admission logic (probes, half-open) keeps working.
+
+## Sharing breakers across routes
+
+Reuse the same `name` (and the same `registry`) to share one breaker across
+several routes that all depend on the same downstream:
+
+```python
+orders_db = breaker_dependency('orders-db', registry=registry)
+
+
+@app.get('/orders')
+async def list_orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
+    return await breaker.call(fetch_orders)
+
+
+@app.get('/orders/{order_id}')
+async def get_order(
+    order_id: int, breaker: Annotated[CircuitBreaker, Depends(orders_db)]
+) -> dict:
+    return await breaker.call(fetch_order, order_id)
+```
+
+Pass `config`, `clock`, `classifier` or `listener` to the `Registry` to tune
+every breaker it creates, or override per name via `registry.get(name, config=...)`.
+
+## Custom responses
+
+For a different response shape, register your own handler instead of
+`install_exception_handler`:
+
+```python
+from fastapi import Request, Response
+from interlock import CircuitOpenError
+
+
+@app.exception_handler(CircuitOpenError)
+async def on_open(request: Request, exc: CircuitOpenError) -> Response:
+    ...
+```
+
+---
+
+<!-- source: docs/integrations/redis.md -->
+
+# Redis integration (shared state)
+
+The `interlock-cb[redis]` extra coordinates breaker state across processes and
+machines through Redis: when one instance trips, every instance backs off, and
+recovery probes are budgeted globally instead of per process.
+
+```bash
+uv add 'interlock-cb[redis]'
+```
+
+## When to share state — and when not to
+
+Per-instance state is the default for a reason. A local breaker reacts only to
+what *this* process observes, cannot be affected by another instance's problem,
+and keeps working when Redis does not.
+
+Reach for shared state when all of these hold:
+
+- Many instances call the **same downstream**, and its failure affects all of
+  them equally (a shared database, a rate-limited third-party API).
+- You want **coordinated back-off**: once the downstream is declared unhealthy,
+  no instance should keep hammering it just because its own window has not
+  filled yet.
+- You want **bounded recovery probing**: N instances should send at most
+  `permitted_calls_in_half_open` probes *in total*, not each.
+
+Stay local when instances see genuinely different views of the dependency
+(per-AZ endpoints, canary deployments), or when one instance's network problems
+must not silence the whole fleet. A shared OPEN gates traffic *everywhere* —
+that is the point, and the risk. It is a trade-off you opt into, not a default.
+
+## Usage
+
+Pass a storage to the breaker (or to a `Registry`, which hands it to every
+breaker it creates — each coordinates under its own name):
+
+```python
+import redis
+from interlock import CircuitBreaker, Registry
+from interlock.redis import RedisStorage
+
+storage = RedisStorage(redis.Redis(host='redis.internal'))
+breaker = CircuitBreaker(name='payments', storage=storage)
+
+registry = Registry(storage=storage)  # or share one storage across many breakers
+```
+
+Async services use the async client and storage:
+
+```python
+import redis.asyncio
+from interlock import CircuitBreaker
+from interlock.redis import AsyncRedisStorage
+
+storage = AsyncRedisStorage(redis.asyncio.Redis(host='redis.internal'))
+breaker = CircuitBreaker(name='payments', storage=storage)
+```
+
+A coordinated breaker matches its storage's runtime: a `RedisStorage` serves
+only the sync API (`with`, sync `call`), an `AsyncRedisStorage` only the async
+one (`async with`, async `call`); mixing the styles raises `InterlockError`
+with a clear message. A breaker *without* a storage stays fully dual.
+
+## How coordination works
+
+The local state machine keeps owning the sliding window and trip detection;
+Redis owns the shared OPEN/HALF_OPEN state and the global probe budget. All
+state for one breaker lives in a single hash (`interlock:cb:<name>` by
+default), and every transition runs as a Lua script, so racing instances stay
+consistent.
+
+The protected path stays fast:
+
+- **CLOSED / OPEN admission** reads a locally cached view of the shared state —
+  zero inline Redis calls. A background poller refreshes the cache every
+  `poll_interval` seconds, so a trip on one instance reaches the others within
+  roughly one interval.
+- **HALF_OPEN admission** is the single inline Redis operation: an atomic probe
+  lease that decrements the shared budget, bounding probes across the fleet.
+- **Writes** (propagating a local trip, tallying probe outcomes, the final
+  close-or-reopen decision) are fire-and-forget on a background worker; they
+  never block a protected call.
+
+Time comparisons ("has `wait_duration_in_open` elapsed?") use the *Redis
+server's* clock, since instance clocks are not comparable. After the last probe
+of a round, the deciding instance applies the same thresholds as the local
+state machine and writes the transition guarded by a version check, so a
+delayed decision can never overwrite a newer state.
+
+## Degradation: Redis down ≠ breaker down
+
+A storage error never reaches your calls. On the first failure the breaker
+switches to its local state and keeps protecting the process on its own window;
+pending shared writes are dropped, and Redis is left alone for `retry_backoff`
+seconds before the poller tries again. On the first successful operation the
+shared view becomes authoritative again — including adopting a shared OPEN that
+happened while this instance was cut off.
+
+Both edges are observable through the listener:
+
+```python
+class StorageWatch:
+    def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
+        ...  # alert: running on local state
+
+    def on_storage_recovered(self, *, name: str) -> None:
+        ...  # back to coordinated state
+```
+
+`LoggingEventListener` logs degradation at `WARNING` and recovery at `INFO`;
+`OTelEventListener` counts both on `interlock.storage.events`. Listeners
+written before these hooks existed keep working — the engine calls them only if
+present.
+
+## Tuning
+
+All knobs live on the storage constructor; the core `Config` stays
+storage-agnostic:
+
+```python
+RedisStorage(
+    client,
+    key_prefix='interlock:cb:',  # hash key namespace
+    state_ttl=300.0,             # key lifetime (s); refreshed on every write
+    poll_interval=1.0,           # cache refresh cadence (s)
+    retry_backoff=5.0,           # local-only time after a storage failure (s)
+)
+```
+
+- **`state_ttl`** keeps abandoned state from lingering: if every instance
+  disappears, the key expires and the breaker starts CLOSED. Keep it well above
+  `wait_duration_in_open`.
+- **`poll_interval`** is the propagation latency of a coordinated trip. Each
+  breaker costs about one Redis read per interval.
+- **`retry_backoff`** bounds how often a degraded breaker re-tests Redis.
+
+## Compatibility
+
+`RedisStorage` speaks plain commands and `EVAL` — no server-specific features —
+so it works against Redis, [Valkey](https://valkey.io), or any RESP-compatible
+server. The scripts call `TIME` before writing, which requires effect-based
+script replication: **Redis 5.0 or newer**, or any Valkey release. (The
+`redis>=5.0.0` dependency pin is the *client* library's version, not the
+server's.)
+
+---
+
 <!-- source: docs/reference.md -->
 
 # API reference
@@ -630,7 +892,7 @@ dependency-free.
 ## `CircuitBreaker`
 
 ```python
-CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None)
+CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None, storage=None)
 ```
 
 A named breaker for sync and async callables.
@@ -640,6 +902,11 @@ A named breaker for sync and async callables.
 - **Properties:** `name: str`, `state: State`.
 - **`snapshot() -> WindowSnapshot`** — current window aggregates.
 - **Manual control:** `reset()`, `force_open()`, `disable()`, `metrics_only()`.
+- **`storage`** — optional shared backend (`Storage` or `AsyncStorage`) for
+  coordinated state across instances; see the
+  [Redis integration](integrations/redis.md). A coordinated breaker matches its
+  storage's runtime (sync storage → sync API, async storage → async API);
+  without a storage the breaker stays fully dual.
 
 ## `Config`
 
@@ -650,12 +917,14 @@ See [Configuration](guides/configuration.md) for every field. Raises
 ## `Registry`
 
 ```python
-Registry(*, config=None, clock=None, classifier=None, listener=None)
+Registry(*, config=None, clock=None, classifier=None, listener=None, storage=None)
 registry.get(name, *, config=None) -> CircuitBreaker
 ```
 
 Creates and caches named breakers. The same name always returns the same
-instance; the per-call `config` override applies only at creation.
+instance; the per-call `config` override applies only at creation. A `storage`
+is handed to every breaker the registry creates; each coordinates under its own
+name.
 
 ## Enums
 
@@ -701,11 +970,28 @@ Implement any of these to swap a core behaviour:
 
 - **`Clock`** — `monotonic() -> float`. Inject a fake for deterministic tests.
 - **`SlidingWindow`** — `record(outcome)`, `snapshot() -> WindowSnapshot`.
-- **`Storage`** — `load(name) -> State`, `save(*, name, state)`.
+- **`Storage`** / **`AsyncStorage`** — shared-state backend as atomic *intent*
+  operations: `read`, `trip_open`, `begin_half_open_if_elapsed`, `lease_probe`,
+  `record_probe`, `close`. `trip_open`/`close` take an optional
+  `expected_version` (version-fenced CAS); every write carries a `ttl`.
+  Mechanism only — threshold policy stays in the core. `AsyncStorage` is the
+  awaitable mirror. See the [Redis integration](integrations/redis.md).
 - **`FailureClassifier`** — `is_failure(*, result, exception) -> bool`. See
   [Failure classification](guides/failure-classification.md).
-- **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`.
-  See [Observability](guides/observability.md).
+- **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`,
+  plus `on_storage_degraded` / `on_storage_recovered` for coordinated breakers
+  (dispatched only if present, so pre-1.2 listeners keep working). See
+  [Observability](guides/observability.md).
+
+## Shared-state types
+
+- **`SharedState`** — frozen snapshot of one breaker's coordinated state:
+  `state`, `opened_at` (backend time), `version` (for fencing), and the
+  HALF_OPEN probe accounting (`probes_permitted`, `probes_remaining`,
+  `probes_completed`, `probe_failures`, `probe_slows`).
+  `SharedState.closed()` is the baseline an absent key implies.
+- **`ProbeLease`** — result of `lease_probe`: `granted: bool` plus the
+  post-attempt `state: SharedState`.
 
 ## Listeners
 
@@ -735,3 +1021,18 @@ Extra `interlock-cb[fastapi]`, module `interlock.fastapi`:
   registration.
 
 See the [FastAPI integration](integrations/fastapi.md).
+
+## Redis adapters
+
+Extra `interlock-cb[redis]`, module `interlock.redis`:
+
+- **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0)`** —
+  sync `Storage` over a `redis.Redis` client.
+- **`AsyncRedisStorage(client, *, ...)`** — async mirror over
+  `redis.asyncio.Redis`.
+
+One Redis hash per breaker; every transition is a Lua script (atomic across
+racing instances), elapse checks use the server's `TIME`. Works against Redis
+(5.0+), Valkey, or any RESP-compatible server.
+
+See the [Redis integration](integrations/redis.md).

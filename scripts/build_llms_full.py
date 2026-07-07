@@ -23,6 +23,8 @@ _PAGES = (
     'guides/observability.md',
     'guides/timeout.md',
     'integrations/httpx2.md',
+    'integrations/fastapi.md',
+    'integrations/redis.md',
     'reference.md',
 )
 

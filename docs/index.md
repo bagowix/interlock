@@ -16,6 +16,9 @@ integrations at the transport level.
   ships `py.typed` and passes mypy in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
   optional extras.
+- **Distributed state (optional).** Coordinate tripping and recovery probing
+  across instances through Redis/Valkey, with graceful degradation to local
+  state — see the [Redis integration](integrations/redis.md).
 
 ## Installation
 
@@ -25,6 +28,7 @@ uv add interlock-cb
 
 ## Status
 
-interlock ships v1.0-first: a polished core (state machine, windows,
-sync/async, slow-call detection) before breadth. Distributed state, retries,
-and a full resilience pipeline are planned for later releases.
+interlock shipped a polished core first (state machine, windows, sync/async,
+slow-call detection), then grew deliberately: v1.1 added timeouts, proactive
+`OPEN → HALF_OPEN` and FastAPI; v1.2 adds coordinated distributed state over
+Redis. Retries and a full resilience pipeline are planned for v2.

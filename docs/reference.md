@@ -7,7 +7,7 @@ dependency-free.
 ## `CircuitBreaker`
 
 ```python
-CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None)
+CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None, storage=None)
 ```
 
 A named breaker for sync and async callables.
@@ -17,6 +17,11 @@ A named breaker for sync and async callables.
 - **Properties:** `name: str`, `state: State`.
 - **`snapshot() -> WindowSnapshot`** — current window aggregates.
 - **Manual control:** `reset()`, `force_open()`, `disable()`, `metrics_only()`.
+- **`storage`** — optional shared backend (`Storage` or `AsyncStorage`) for
+  coordinated state across instances; see the
+  [Redis integration](integrations/redis.md). A coordinated breaker matches its
+  storage's runtime (sync storage → sync API, async storage → async API);
+  without a storage the breaker stays fully dual.
 
 ## `Config`
 
@@ -27,12 +32,14 @@ See [Configuration](guides/configuration.md) for every field. Raises
 ## `Registry`
 
 ```python
-Registry(*, config=None, clock=None, classifier=None, listener=None)
+Registry(*, config=None, clock=None, classifier=None, listener=None, storage=None)
 registry.get(name, *, config=None) -> CircuitBreaker
 ```
 
 Creates and caches named breakers. The same name always returns the same
-instance; the per-call `config` override applies only at creation.
+instance; the per-call `config` override applies only at creation. A `storage`
+is handed to every breaker the registry creates; each coordinates under its own
+name.
 
 ## Enums
 
@@ -78,11 +85,28 @@ Implement any of these to swap a core behaviour:
 
 - **`Clock`** — `monotonic() -> float`. Inject a fake for deterministic tests.
 - **`SlidingWindow`** — `record(outcome)`, `snapshot() -> WindowSnapshot`.
-- **`Storage`** — `load(name) -> State`, `save(*, name, state)`.
+- **`Storage`** / **`AsyncStorage`** — shared-state backend as atomic *intent*
+  operations: `read`, `trip_open`, `begin_half_open_if_elapsed`, `lease_probe`,
+  `record_probe`, `close`. `trip_open`/`close` take an optional
+  `expected_version` (version-fenced CAS); every write carries a `ttl`.
+  Mechanism only — threshold policy stays in the core. `AsyncStorage` is the
+  awaitable mirror. See the [Redis integration](integrations/redis.md).
 - **`FailureClassifier`** — `is_failure(*, result, exception) -> bool`. See
   [Failure classification](guides/failure-classification.md).
-- **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`.
-  See [Observability](guides/observability.md).
+- **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`,
+  plus `on_storage_degraded` / `on_storage_recovered` for coordinated breakers
+  (dispatched only if present, so pre-1.2 listeners keep working). See
+  [Observability](guides/observability.md).
+
+## Shared-state types
+
+- **`SharedState`** — frozen snapshot of one breaker's coordinated state:
+  `state`, `opened_at` (backend time), `version` (for fencing), and the
+  HALF_OPEN probe accounting (`probes_permitted`, `probes_remaining`,
+  `probes_completed`, `probe_failures`, `probe_slows`).
+  `SharedState.closed()` is the baseline an absent key implies.
+- **`ProbeLease`** — result of `lease_probe`: `granted: bool` plus the
+  post-attempt `state: SharedState`.
 
 ## Listeners
 
@@ -112,3 +136,18 @@ Extra `interlock-cb[fastapi]`, module `interlock.fastapi`:
   registration.
 
 See the [FastAPI integration](integrations/fastapi.md).
+
+## Redis adapters
+
+Extra `interlock-cb[redis]`, module `interlock.redis`:
+
+- **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0)`** —
+  sync `Storage` over a `redis.Redis` client.
+- **`AsyncRedisStorage(client, *, ...)`** — async mirror over
+  `redis.asyncio.Redis`.
+
+One Redis hash per breaker; every transition is a Lua script (atomic across
+racing instances), elapse checks use the server's `TIME`. Works against Redis
+(5.0+), Valkey, or any RESP-compatible server.
+
+See the [Redis integration](integrations/redis.md).

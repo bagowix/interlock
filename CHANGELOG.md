@@ -6,6 +6,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-07
+
+### Added
+
+- **Distributed shared state** via the `redis` extra (`interlock.redis`):
+  `RedisStorage` (sync) and `AsyncRedisStorage` (async) coordinate breaker
+  state across processes and machines through one Redis hash per breaker.
+  Every transition runs as a Lua script (atomic across racing instances,
+  version-fenced against stale decisions), elapse checks use the Redis
+  server's `TIME`, and keys carry a TTL so abandoned state self-expires.
+  Works against Redis 5.0+, Valkey, or any RESP-compatible server.
+- `CircuitBreaker` and `Registry` accept an optional `storage`
+  (`Storage` / `AsyncStorage`). Without one, behaviour is unchanged and purely
+  local. With one, a shared OPEN gates admission on every instance, and
+  HALF_OPEN recovery probes are budgeted globally
+  (`permitted_calls_in_half_open` in total across the fleet) via an atomic
+  probe lease — the single inline storage operation on the protected path;
+  everything else is a locally cached view refreshed by a background poller
+  plus fire-and-forget writes. A coordinated breaker matches its storage's
+  runtime: a sync storage serves the sync API, an async storage the async one;
+  mixing styles raises `InterlockError`.
+- **Graceful degradation:** a storage failure never reaches the protected
+  path. The breaker falls back to its local state, leaves the backend alone
+  for `retry_backoff` seconds, and resynchronises (shared view authoritative
+  again) once the backend recovers.
+- `EventListener` gains `on_storage_degraded` / `on_storage_recovered`,
+  implemented by `LoggingEventListener` (WARNING/INFO) and `OTelEventListener`
+  (new `interlock.storage.events` counter). The engine dispatches the two new
+  hooks only if present, so existing listeners keep working unchanged.
+- Reworked `Storage` protocol (plus new `AsyncStorage`) as atomic *intent*
+  operations — `read`, `trip_open`, `begin_half_open_if_elapsed`,
+  `lease_probe`, `record_probe`, `close` — with new public DTOs `SharedState`
+  and `ProbeLease`. The previous `Storage` shape (`load`/`save`) was declared
+  but never consumed by the engine; this release gives it its first
+  functional form.
+
+### Fixed
+
+- Outcomes are now recorded into the state-machine era that admitted them:
+  a call admitted in CLOSED can no longer settle as a HALF_OPEN probe, and a
+  probe settling after a close or reset no longer pollutes the fresh window.
+- `reset()` clears the remembered last failure, so a `CircuitOpenError` raised
+  after a reset no longer reports a pre-reset exception.
+
 ## [1.1.0] - 2026-06-28
 
 ### Added
@@ -58,6 +102,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/bagowix/interlock/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bagowix/interlock/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bagowix/interlock/releases/tag/v1.0.0

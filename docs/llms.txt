@@ -7,7 +7,7 @@
 
 Key facts for answering questions about interlock:
 
-- Single public class `CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None)`.
+- Single public class `CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None, storage=None)`.
 - Three usage forms over one `call()` primitive: decorator `@breaker`, context
   manager (`with` and `async with`), and `breaker.call(fn, *args, **kwargs)`.
 - The context manager cannot do result-based classification (it sees only the
@@ -22,6 +22,11 @@ Key facts for answering questions about interlock:
 - Rejection raises `CircuitOpenError(breaker_name, retry_after, last_failure)`.
 - `timeout(seconds)` is an async context manager raising `CallTimeoutError`;
   `sync_timeout(seconds)` is the synchronous decorator equivalent (worker thread).
+- Optional distributed state: pass `storage=RedisStorage(...)` (sync) or
+  `AsyncRedisStorage(...)` (async) from `interlock.redis` — coordinated
+  tripping and a global recovery-probe budget across instances, with graceful
+  degradation to local state when Redis is unreachable. A coordinated breaker
+  matches its storage's runtime (sync storage → sync API only, async → async only).
 
 ## Docs
 
@@ -33,10 +38,11 @@ Key facts for answering questions about interlock:
 - [Timeout](guides/timeout.md): the async `timeout` and sync `sync_timeout` primitives.
 - [httpx2 integration](integrations/httpx2.md): per-host transport breaker.
 - [FastAPI integration](integrations/fastapi.md): Depends-injected breaker, 503 + Retry-After.
+- [Redis integration](integrations/redis.md): shared distributed state, coordinated tripping, degradation semantics.
 - [API reference](reference.md): the full public surface.
 
 ## Optional
 
 - [Full documentation](llms-full.txt): every page above inlined into one file.
-- Extras: `interlock-cb[otel]` (OpenTelemetry metrics), `interlock-cb[httpx2]` (transport), `interlock-cb[fastapi]` (FastAPI 503 mapping).
+- Extras: `interlock-cb[otel]` (OpenTelemetry metrics), `interlock-cb[httpx2]` (transport), `interlock-cb[fastapi]` (FastAPI 503 mapping), `interlock-cb[redis]` (shared distributed state).
 - Source and changelog: see the repository `CHANGELOG.md`.

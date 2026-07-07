@@ -11,6 +11,8 @@ The core is pure standard library. External integrations are optional extras:
 ```bash
 uv add 'interlock-cb[otel]'    # OpenTelemetry metrics listener
 uv add 'interlock-cb[httpx2]'  # per-host httpx2 transport
+uv add 'interlock-cb[fastapi]' # CircuitOpenError -> 503 + Retry-After
+uv add 'interlock-cb[redis]'   # shared distributed state
 ```
 
 ## Create a breaker
