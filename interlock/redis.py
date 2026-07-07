@@ -194,17 +194,44 @@ def _shared_from_map(mapping: dict[Any, Any]) -> SharedState | None:
     return _shared_from_values([fields.get(name) for name in order])
 
 
+def _positive(name: str, value: float) -> float:
+    if value <= 0:
+        msg = f'{name} must be positive, got {value!r}'
+        raise ValueError(msg)
+    return value
+
+
 class RedisStorage:
     """Synchronous ``Storage`` backed by a ``redis.Redis`` client.
+
+    The three keyword floats are the coordination tuning knobs the engine reads
+    off the storage object: how long state keys live without a refresh
+    (``state_ttl``), how often the cached shared view is refreshed
+    (``poll_interval``), and how long the breaker runs purely locally after a
+    storage failure before retrying (``retry_backoff``).
 
     Args:
         client: A connected ``redis.Redis`` instance.
         key_prefix: Namespace prepended to every breaker name.
+        state_ttl: Key lifetime in seconds; refreshed on every write.
+        poll_interval: Seconds between background view refreshes.
+        retry_backoff: Seconds to stay degraded after a storage failure.
     """
 
-    def __init__(self, client: redis.Redis, *, key_prefix: str = _DEFAULT_PREFIX) -> None:
+    def __init__(
+        self,
+        client: redis.Redis,
+        *,
+        key_prefix: str = _DEFAULT_PREFIX,
+        state_ttl: float = 300.0,
+        poll_interval: float = 1.0,
+        retry_backoff: float = 5.0,
+    ) -> None:
         self._client = client
         self._prefix = key_prefix
+        self.state_ttl = _positive('state_ttl', state_ttl)
+        self.poll_interval = _positive('poll_interval', poll_interval)
+        self.retry_backoff = _positive('retry_backoff', retry_backoff)
 
     def _key(self, name: str) -> str:
         return f'{self._prefix}{name}'
@@ -265,14 +292,30 @@ class RedisStorage:
 class AsyncRedisStorage:
     """Asynchronous ``AsyncStorage`` backed by a ``redis.asyncio.Redis`` client.
 
+    See ``RedisStorage`` for the coordination tuning knobs.
+
     Args:
         client: A connected ``redis.asyncio.Redis`` instance.
         key_prefix: Namespace prepended to every breaker name.
+        state_ttl: Key lifetime in seconds; refreshed on every write.
+        poll_interval: Seconds between background view refreshes.
+        retry_backoff: Seconds to stay degraded after a storage failure.
     """
 
-    def __init__(self, client: redis.asyncio.Redis, *, key_prefix: str = _DEFAULT_PREFIX) -> None:
+    def __init__(
+        self,
+        client: redis.asyncio.Redis,
+        *,
+        key_prefix: str = _DEFAULT_PREFIX,
+        state_ttl: float = 300.0,
+        poll_interval: float = 1.0,
+        retry_backoff: float = 5.0,
+    ) -> None:
         self._client = client
         self._prefix = key_prefix
+        self.state_ttl = _positive('state_ttl', state_ttl)
+        self.poll_interval = _positive('poll_interval', poll_interval)
+        self.retry_backoff = _positive('retry_backoff', retry_backoff)
 
     def _key(self, name: str) -> str:
         return f'{self._prefix}{name}'

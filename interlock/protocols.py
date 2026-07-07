@@ -188,3 +188,17 @@ class EventListener(Protocol):
     def on_reset(self, *, name: str) -> None:
         """Called when the breaker is manually reset."""
         ...
+
+    def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
+        """Called when the shared storage backend becomes unavailable.
+
+        The breaker keeps working on local state; this event makes the
+        degradation observable instead of silent. The engine invokes the two
+        storage hooks via safe ``getattr``, so listeners written before they
+        existed keep working unchanged.
+        """
+        ...
+
+    def on_storage_recovered(self, *, name: str) -> None:
+        """Called when the shared storage backend becomes reachable again."""
+        ...

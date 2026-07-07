@@ -99,6 +99,16 @@ ban-relative-imports = "all"
 "scripts/**/*.py" = [
   "INP001",  # scripts is a run-directly directory, not an importable package
 ]
+"interlock/_coordination.py" = [
+  "BLE001",  # storage failures of any type must degrade, never reach the protected path
+  "PLR0913", # coordinators take keyword-only collaborators injected by the engine
+]
+"interlock/_engine.py" = [
+  "PLR0913", # the engine takes keyword-only collaborators (config/clock/classifier/...)
+]
+"interlock/breaker.py" = [
+  "PLR0913", # the public constructor mirrors the engine's keyword-only collaborators
+]
 "tests/**/*.py" = [
   "S101",    # asserts are the point of tests
   "PLR2004", # magic values are fine in tests
@@ -106,6 +116,7 @@ ban-relative-imports = "all"
   "INP001",  # tests is not an importable package
   "FBT001",  # boolean params come from @parametrize, not real flag args
   "ARG002",  # test doubles accept protocol args they intentionally ignore
+  "SLF001",  # coordination tests drive internal lanes/coordinators deterministically
 ]
 
 [tool.mypy]

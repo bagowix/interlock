@@ -22,10 +22,10 @@ from typing import Literal, Self, cast, overload
 
 from interlock._clock import SystemClock
 from interlock._detect import is_async_callable
-from interlock._engine import Engine
+from interlock._engine import Admission, Engine
 from interlock._typing import AsyncCallable, P, R, SyncCallable
 from interlock.config import Config
-from interlock.protocols import Clock, EventListener, FailureClassifier
+from interlock.protocols import AsyncStorage, Clock, EventListener, FailureClassifier, Storage
 from interlock.state import State
 from interlock.window import WindowSnapshot
 
@@ -44,6 +44,11 @@ class CircuitBreaker:
             raised exception being a failure.
         listener: Observability hooks (state changes, calls, rejections,
             resets). Defaults to no observation.
+        storage: Optional shared backend (e.g. ``interlock.redis.RedisStorage``)
+            for coordinated state across instances. Defaults to purely local
+            state. A coordinated breaker matches its storage's runtime: a sync
+            ``Storage`` serves only the sync API, an ``AsyncStorage`` only the
+            async one; without a storage the breaker stays fully dual.
     """
 
     def __init__(
@@ -54,6 +59,7 @@ class CircuitBreaker:
         clock: Clock | None = None,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
+        storage: Storage | AsyncStorage | None = None,
     ) -> None:
         self._name = name
         self._engine = Engine(
@@ -62,8 +68,9 @@ class CircuitBreaker:
             clock=clock if clock is not None else SystemClock(),
             classifier=classifier,
             listener=listener,
+            storage=storage,
         )
-        self._blocks: list[tuple[float, int]] = []
+        self._blocks: list[tuple[float, Admission]] = []
 
     @property
     def name(self) -> str:
@@ -152,12 +159,12 @@ class CircuitBreaker:
         exc: BaseException | None,
         _traceback: TracebackType | None,
     ) -> Literal[False]:
-        start, generation = self._blocks.pop()
-        self._engine.exit_block(start=start, generation=generation, exception=exc)
+        start, admission = self._blocks.pop()
+        self._engine.exit_block(start=start, admission=admission, exception=exc)
         return False
 
     async def __aenter__(self) -> Self:
-        self._blocks.append(self._engine.enter_block())
+        self._blocks.append(await self._engine.enter_block_async())
         return self
 
     async def __aexit__(
@@ -166,6 +173,6 @@ class CircuitBreaker:
         exc: BaseException | None,
         _traceback: TracebackType | None,
     ) -> Literal[False]:
-        start, generation = self._blocks.pop()
-        self._engine.exit_block(start=start, generation=generation, exception=exc)
+        start, admission = self._blocks.pop()
+        self._engine.exit_block(start=start, admission=admission, exception=exc)
         return False
