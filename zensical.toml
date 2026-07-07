@@ -10,7 +10,7 @@ nav = [
     { "Home" = "index.md" },
     { "Getting started" = "getting-started.md" },
     { "Guides" = ["guides/configuration.md", "guides/states.md", "guides/failure-classification.md", "guides/observability.md", "guides/timeout.md"] },
-    { "Integrations" = ["integrations/httpx2.md", "integrations/fastapi.md"] },
+    { "Integrations" = ["integrations/httpx2.md", "integrations/fastapi.md", "integrations/redis.md"] },
     { "API reference" = "reference.md" },
 ]
 

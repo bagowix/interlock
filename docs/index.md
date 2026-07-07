@@ -16,15 +16,54 @@ integrations at the transport level.
   ships `py.typed` and passes mypy in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
   optional extras.
+- **Distributed state (optional).** Coordinate tripping and recovery probing
+  across instances through Redis/Valkey, with graceful degradation to local
+  state — see the [Redis integration](integrations/redis.md).
 
 ## Installation
 
-```bash
-uv add interlock-cb
+=== "uv"
+
+    ```bash
+    uv add interlock-cb
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install interlock-cb
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add interlock-cb
+    ```
+
+## At a glance
+
+```python
+from interlock import CircuitBreaker, CircuitOpenError
+
+breaker = CircuitBreaker(name='payments')
+
+@breaker
+def charge(amount: int) -> str:
+    return gateway.charge(amount)
+
+try:
+    charge(100)
+except CircuitOpenError as exc:
+    ...  # rejected fast: the dependency is unhealthy; retry after exc.retry_after
 ```
+
+The same instance protects async callables, works as a (sync and async) context
+manager, and can be called directly via `breaker.call(fn, ...)` — start with
+[Getting started](getting-started.md).
 
 ## Status
 
-interlock ships v1.0-first: a polished core (state machine, windows,
-sync/async, slow-call detection) before breadth. Distributed state, retries,
-and a full resilience pipeline are planned for later releases.
+interlock shipped a polished core first (state machine, windows, sync/async,
+slow-call detection), then grew deliberately: v1.1 added timeouts, proactive
+`OPEN → HALF_OPEN` and FastAPI; v1.2 adds coordinated distributed state over
+Redis. Retries and a full resilience pipeline are planned for v2.

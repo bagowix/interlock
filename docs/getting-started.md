@@ -2,15 +2,32 @@
 
 ## Install
 
-```bash
-uv add interlock-cb          # or: pip install interlock-cb
-```
+=== "uv"
 
-The core is pure standard library. External integrations are optional extras:
+    ```bash
+    uv add interlock-cb
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install interlock-cb
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add interlock-cb
+    ```
+
+The core is pure standard library. External integrations are optional extras —
+add the ones you need (same names with `pip install` / `poetry add`):
 
 ```bash
 uv add 'interlock-cb[otel]'    # OpenTelemetry metrics listener
 uv add 'interlock-cb[httpx2]'  # per-host httpx2 transport
+uv add 'interlock-cb[fastapi]' # CircuitOpenError -> 503 + Retry-After
+uv add 'interlock-cb[redis]'   # shared distributed state
 ```
 
 ## Create a breaker
@@ -27,8 +44,9 @@ breaker = CircuitBreaker(
 ```
 
 The defaults follow resilience4j: trip at a 50% failure rate over at least 10
-calls, stay open for 60s before allowing a single probe. See
-[Configuration](guides/configuration.md) for every option.
+calls, stay open for 60s, then admit up to 10 probe calls (one at a time) and
+decide from their outcomes. See [Configuration](guides/configuration.md) for
+every option.
 
 ## Three ways to protect work
 

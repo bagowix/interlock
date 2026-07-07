@@ -1,6 +1,6 @@
 # Observability
 
-A breaker reports everything it does through an `EventListener`. The same four
+A breaker reports everything it does through an `EventListener`. The same
 hooks back logging, metrics, and any custom sink.
 
 ## The hooks
@@ -11,11 +11,17 @@ class EventListener(Protocol):
     def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None: ...
     def on_rejected(self, *, name: str) -> None: ...
     def on_reset(self, *, name: str) -> None: ...
+    def on_storage_degraded(self, *, name: str, error: BaseException) -> None: ...
+    def on_storage_recovered(self, *, name: str) -> None: ...
 ```
 
 Listeners are called **outside** the breaker's lock, after the protected call
 returns, so a slow listener never serialises throughput. Implementations must
 not raise back into the core.
+
+The two storage hooks fire only for breakers coordinated through a shared
+[storage](../integrations/redis.md), and the engine dispatches them only if
+present — a listener without them keeps working.
 
 Attach one per breaker, or share one across a `Registry`:
 
@@ -59,7 +65,7 @@ from interlock.otel import OTelEventListener
 breaker = CircuitBreaker(name='payments', listener=OTelEventListener())
 ```
 
-It records four instruments on the `interlock` meter (or a meter you pass in):
+It records five instruments on the `interlock` meter (or a meter you pass in):
 
 | Instrument | Type | Labels |
 |------------|------|--------|
@@ -67,12 +73,13 @@ It records four instruments on the `interlock` meter (or a meter you pass in):
 | `interlock.call.rejected` | counter | `breaker` |
 | `interlock.state.changes` | counter | `breaker`, `from`, `to` |
 | `interlock.reset` | counter | `breaker` |
+| `interlock.storage.events` | counter | `breaker`, `event` (`degraded`/`recovered`), `error` |
 
 ## Custom listeners
 
-Any object with the four methods satisfies the protocol — no base class to
-inherit. The core calls all four, so define each one, leaving the hooks you do
-not need as no-ops:
+Any object with the four core methods satisfies the protocol — no base class to
+inherit (the two storage hooks are dispatched only if present). The core calls
+all four, so define each one, leaving the hooks you do not need as no-ops:
 
 ```python
 class RejectionCounter:
