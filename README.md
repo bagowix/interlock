@@ -2,33 +2,34 @@
 
 [Full report](https://htmlpreview.github.io/?https://github.com/bagowix/interlock/blob/python-coverage-comment-action-data/htmlcov/index.html)
 
-| Name                          |    Stmts |     Miss |   Branch |   BrPart |    Cover |   Missing |
-|------------------------------ | -------: | -------: | -------: | -------: | -------: | --------: |
-| interlock/\_\_init\_\_.py     |       15 |        0 |        0 |        0 |     100% |           |
-| interlock/\_classify.py       |        4 |        0 |        0 |        0 |     100% |           |
-| interlock/\_clock.py          |        5 |        0 |        0 |        0 |     100% |           |
-| interlock/\_detect.py         |        9 |        0 |        4 |        0 |     100% |           |
-| interlock/\_engine.py         |      145 |        0 |       26 |        0 |     100% |           |
-| interlock/\_state\_machine.py |      119 |        0 |       30 |        0 |     100% |           |
-| interlock/\_typing.py         |        9 |        0 |        0 |        0 |     100% |           |
-| interlock/\_windows.py        |       61 |        0 |       10 |        0 |     100% |           |
-| interlock/breaker.py          |       62 |        0 |        2 |        0 |     100% |           |
-| interlock/config.py           |       32 |        0 |       16 |        0 |     100% |           |
-| interlock/errors.py           |       19 |        0 |        2 |        0 |     100% |           |
-| interlock/fastapi.py          |       23 |        0 |        2 |        0 |     100% |           |
-| interlock/httpx2.py           |       35 |        0 |        2 |        0 |     100% |           |
-| interlock/listeners.py        |       15 |        0 |        0 |        0 |     100% |           |
-| interlock/otel.py             |       20 |        0 |        0 |        0 |     100% |           |
-| interlock/outcome.py          |       13 |        0 |        0 |        0 |     100% |           |
-| interlock/protocols.py        |       38 |        0 |        0 |        0 |     100% |           |
-| interlock/redis.py            |       82 |        0 |        6 |        0 |     100% |           |
-| interlock/registry.py         |       21 |        0 |        2 |        0 |     100% |           |
-| interlock/shared.py           |       11 |        0 |        0 |        0 |     100% |           |
-| interlock/state.py            |        9 |        0 |        0 |        0 |     100% |           |
-| interlock/timeout.py          |       38 |        0 |        6 |        0 |     100% |           |
-| interlock/version.py          |        3 |        0 |        0 |        0 |     100% |           |
-| interlock/window.py           |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                     |  **806** |    **0** |  **112** |    **0** | **100%** |           |
+| Name                          |    Stmts |     Miss |   Branch |   BrPart |   Cover |   Missing |
+|------------------------------ | -------: | -------: | -------: | -------: | ------: | --------: |
+| interlock/\_\_init\_\_.py     |       15 |        0 |        0 |        0 |    100% |           |
+| interlock/\_classify.py       |        4 |        0 |        0 |        0 |    100% |           |
+| interlock/\_clock.py          |        5 |        0 |        0 |        0 |    100% |           |
+| interlock/\_coordination.py   |      223 |        0 |       46 |        0 |    100% |           |
+| interlock/\_detect.py         |        9 |        0 |        4 |        0 |    100% |           |
+| interlock/\_engine.py         |      263 |        0 |       70 |        2 |     99% |59-\>exit, 318-\>321 |
+| interlock/\_state\_machine.py |      119 |        0 |       30 |        0 |    100% |           |
+| interlock/\_typing.py         |        9 |        0 |        0 |        0 |    100% |           |
+| interlock/\_windows.py        |       61 |        0 |       10 |        0 |    100% |           |
+| interlock/breaker.py          |       62 |        0 |        2 |        0 |    100% |           |
+| interlock/config.py           |       32 |        0 |       16 |        0 |    100% |           |
+| interlock/errors.py           |       19 |        0 |        2 |        0 |    100% |           |
+| interlock/fastapi.py          |       23 |        0 |        2 |        0 |    100% |           |
+| interlock/httpx2.py           |       35 |        0 |        2 |        0 |    100% |           |
+| interlock/listeners.py        |       19 |        2 |        0 |        0 |     89% |    42, 46 |
+| interlock/otel.py             |       25 |        2 |        0 |        0 |     92% |    72, 78 |
+| interlock/outcome.py          |       13 |        0 |        0 |        0 |    100% |           |
+| interlock/protocols.py        |       40 |        0 |        0 |        0 |    100% |           |
+| interlock/redis.py            |       93 |        0 |        8 |        0 |    100% |           |
+| interlock/registry.py         |       22 |        0 |        2 |        0 |    100% |           |
+| interlock/shared.py           |       11 |        0 |        0 |        0 |    100% |           |
+| interlock/state.py            |        9 |        0 |        0 |        0 |    100% |           |
+| interlock/timeout.py          |       38 |        0 |        6 |        0 |    100% |           |
+| interlock/version.py          |        3 |        0 |        0 |        0 |    100% |           |
+| interlock/window.py           |       18 |        0 |        4 |        0 |    100% |           |
+| **TOTAL**                     | **1170** |    **4** |  **204** |    **2** | **99%** |           |
 
 
 ## Setup coverage badge
