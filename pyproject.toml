@@ -166,6 +166,9 @@ exclude_lines = [
   "@abstractmethod",
   "raise NotImplementedError",
   "^\\s*\\.\\.\\.\\s*$",
+  # One-line stub defs (`def f(...) -> None: ...`): the 3.14 sys.monitoring
+  # tracer reports def→def arcs in class bodies as partial branches.
+  "def .*: \\.\\.\\.$",
 ]
 fail_under = 100
 
