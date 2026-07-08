@@ -24,7 +24,8 @@ integrations at the transport level.
   signature *and* its sync/async nature; ships `py.typed`, passes mypy and
   pyright in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
-  optional extras (`interlock-cb[otel]`, `interlock-cb[httpx2]`, `interlock-cb[fastapi]`).
+  optional extras (`interlock-cb[otel]`, `interlock-cb[httpx2]`,
+  `interlock-cb[fastapi]`, `interlock-cb[redis]`).
 
 ## How it compares
 
@@ -40,7 +41,7 @@ library is strong in different places:
 | Zero-dependency core | ✅ | ✅ | ✅ |
 | `async` / `await` (asyncio) | ✅ | Tornado | ✅ |
 | Event / state-change listeners | ✅ | ✅ | — |
-| Shared state across processes (Redis) | planned | ✅ | — |
+| Shared state across processes (Redis) | ✅ | ✅ | — |
 | Fallback function | planned | — | ✅ |
 | Years of production use | new | ✅ | ✅ |
 | Failure-**rate** sliding window | ✅ | — | — |
@@ -53,13 +54,14 @@ library is strong in different places:
 
 <sub>Compared against pybreaker 1.x and circuitbreaker 2.1 as documented in mid-2026.
 pybreaker's async support is Tornado-based, not asyncio. "planned" items are on
-the interlock-cb roadmap (Redis-backed state, fallback). Both established
+the interlock-cb roadmap (fallback). Both established
 libraries trip on a consecutive-failure count rather than a rate window.
 Something out of date? Please open a PR.</sub>
 
-Reach for an established library if you want a small, proven breaker today, state
-shared across hosts, or a built-in fallback. Choose interlock-cb when you want
-rate-based windows, slow-call detection and a fully typed API.
+Reach for an established library if you want a small, proven breaker today or a
+built-in fallback. Choose interlock-cb when you want rate-based windows,
+slow-call detection, coordinated state with graceful degradation and a fully
+typed API.
 
 [pybreaker]: https://github.com/danielfm/pybreaker
 [circuitbreaker]: https://github.com/fabfuel/circuitbreaker
@@ -76,6 +78,7 @@ Optional extras:
 uv add 'interlock-cb[otel]'    # OpenTelemetry metrics listener
 uv add 'interlock-cb[httpx2]'  # per-host httpx2 transport
 uv add 'interlock-cb[fastapi]' # FastAPI dependency + 503 Retry-After handler
+uv add 'interlock-cb[redis]'   # shared breaker state across processes
 ```
 
 ## Quickstart
@@ -134,7 +137,7 @@ Apply a breaker **per host** transparently, with no decorators in call sites:
 
 ```python
 import httpx2
-from interlock.httpx2 import CircuitBreakerTransport
+from interlock.integrations.httpx2 import CircuitBreakerTransport
 
 transport = CircuitBreakerTransport(httpx2.HTTPTransport())
 client = httpx2.Client(transport=transport)
@@ -153,7 +156,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI
 from interlock import CircuitBreaker, Registry
-from interlock.fastapi import breaker_dependency, install_exception_handler
+from interlock.integrations.fastapi import breaker_dependency, install_exception_handler
 
 app = FastAPI()
 registry = Registry()
@@ -166,6 +169,26 @@ orders_db = breaker_dependency('orders-db', registry=registry)
 async def orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
     return await breaker.call(fetch_orders)
 ```
+
+## Redis integration (shared state)
+
+Coordinate breaker state across processes and machines: when one instance
+trips, every instance backs off, and recovery probes are budgeted globally.
+Redis failures never reach the protected call — the breaker degrades to local
+state and re-syncs when Redis recovers:
+
+```python
+import redis
+from interlock import CircuitBreaker, Registry
+from interlock.integrations.redis import RedisStorage
+
+storage = RedisStorage(redis.Redis(host='redis.internal'))
+breaker = CircuitBreaker(name='payments', storage=storage)
+
+registry = Registry(storage=storage)  # or share one storage across many breakers
+```
+
+Async services use `AsyncRedisStorage` with `redis.asyncio.Redis` the same way.
 
 ## Documentation
 
@@ -180,6 +203,7 @@ The sources live in [`docs/`](docs/):
 - [Timeout](docs/guides/timeout.md)
 - [httpx2 integration](docs/integrations/httpx2.md)
 - [FastAPI integration](docs/integrations/fastapi.md)
+- [Redis integration](docs/integrations/redis.md)
 - [API reference](docs/reference.md)
 
 ## Contributing

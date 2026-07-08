@@ -20,11 +20,11 @@ from collections.abc import Iterator
 
 import fakeredis
 import pytest
+import redis as redis_mod
 import redis.asyncio as aredis
 
-import redis as redis_mod
 from interlock import CircuitBreaker, CircuitOpenError, Config, Outcome, State
-from interlock.redis import AsyncRedisStorage, RedisStorage
+from interlock.integrations.redis import AsyncRedisStorage, RedisStorage
 
 REDIS_URL = os.environ.get('INTERLOCK_TEST_REDIS_URL')
 USE_REAL_REDIS = REDIS_URL is not None

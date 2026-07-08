@@ -14,12 +14,12 @@ of sleeping — real HTTP, deterministic time.
 
 from collections.abc import Callable
 
+import httpx2
 import pytest
 from tests.conftest import FakeClock, Upstream, closed_port
 
-import httpx2
 from interlock import CircuitOpenError, Config
-from interlock.httpx2 import AsyncCircuitBreakerTransport, CircuitBreakerTransport
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport, CircuitBreakerTransport
 
 # Trip after two failures so scenarios stay short; the default 10-call minimum
 # would only add noise to an end-to-end flow test. One half-open probe decides

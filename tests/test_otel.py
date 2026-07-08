@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 
 from interlock import Outcome, State
-from interlock.otel import OTelEventListener
+from interlock.integrations.otel import OTelEventListener
 
 
 def _meter_with_named_instruments() -> tuple[Mock, dict[str, Mock]]:

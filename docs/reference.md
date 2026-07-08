@@ -111,11 +111,11 @@ Implement any of these to swap a core behaviour:
 ## Listeners
 
 - **`LoggingEventListener(logger=None)`** — top-level; zero dependencies.
-- **`interlock.otel.OTelEventListener(meter=None)`** — extra `interlock-cb[otel]`.
+- **`interlock.integrations.otel.OTelEventListener(meter=None)`** — extra `interlock-cb[otel]`.
 
 ## httpx2 adapters
 
-Extra `interlock-cb[httpx2]`, module `interlock.httpx2`:
+Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
@@ -126,7 +126,7 @@ See the [httpx2 integration](integrations/httpx2.md).
 
 ## FastAPI adapters
 
-Extra `interlock-cb[fastapi]`, module `interlock.fastapi`:
+Extra `interlock-cb[fastapi]`, module `interlock.integrations.fastapi`:
 
 - **`breaker_dependency(name, *, registry)`** — returns a `Depends`-compatible
   callable yielding the named breaker from a shared `Registry`.
@@ -139,7 +139,7 @@ See the [FastAPI integration](integrations/fastapi.md).
 
 ## Redis adapters
 
-Extra `interlock-cb[redis]`, module `interlock.redis`:
+Extra `interlock-cb[redis]`, module `interlock.integrations.redis`:
 
 - **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0)`** —
   sync `Storage` over a `redis.Redis` client.

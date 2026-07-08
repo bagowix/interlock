@@ -12,7 +12,7 @@ breaker that has tripped surface as ``503 Service Unavailable`` with a
 
     from fastapi import Depends, FastAPI
     from interlock import CircuitBreaker, Registry
-    from interlock.fastapi import breaker_dependency, install_exception_handler
+    from interlock.integrations.fastapi import breaker_dependency, install_exception_handler
 
     app = FastAPI()
     registry = Registry()
@@ -34,9 +34,9 @@ import math
 from collections.abc import Callable
 from typing import cast
 
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from fastapi import FastAPI, Request, Response
 from interlock.breaker import CircuitBreaker
 from interlock.errors import CircuitOpenError
 from interlock.registry import Registry

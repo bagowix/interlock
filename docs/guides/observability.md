@@ -60,7 +60,7 @@ uv add 'interlock-cb[otel]'
 
 ```python
 from interlock import CircuitBreaker
-from interlock.otel import OTelEventListener
+from interlock.integrations.otel import OTelEventListener
 
 breaker = CircuitBreaker(name='payments', listener=OTelEventListener())
 ```

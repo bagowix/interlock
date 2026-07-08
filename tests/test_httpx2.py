@@ -1,12 +1,12 @@
 from collections.abc import Callable
 
+import httpx2
 import pytest
+from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
 from tests.conftest import FakeClock
 
-import httpx2
-from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
 from interlock import CircuitOpenError, Config
-from interlock.httpx2 import (
+from interlock.integrations.httpx2 import (
     AsyncCircuitBreakerTransport,
     CircuitBreakerTransport,
     HttpStatusClassifier,

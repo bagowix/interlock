@@ -26,7 +26,7 @@ decorators or `call` wrappers in your request code.
 
 ```python
 import httpx2
-from interlock.httpx2 import CircuitBreakerTransport
+from interlock.integrations.httpx2 import CircuitBreakerTransport
 
 transport = CircuitBreakerTransport(httpx2.HTTPTransport())
 client = httpx2.Client(transport=transport)
@@ -38,7 +38,7 @@ response = client.get('https://api.example.com/v1/users')
 
 ```python
 import httpx2
-from interlock.httpx2 import AsyncCircuitBreakerTransport
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
 
 transport = AsyncCircuitBreakerTransport(httpx2.AsyncHTTPTransport())
 client = httpx2.AsyncClient(transport=transport)
@@ -75,7 +75,7 @@ flow to every per-host breaker:
 
 ```python
 from interlock import Config, LoggingEventListener
-from interlock.httpx2 import CircuitBreakerTransport
+from interlock.integrations.httpx2 import CircuitBreakerTransport
 
 transport = CircuitBreakerTransport(
     httpx2.HTTPTransport(),

@@ -51,7 +51,7 @@ breaker it creates — each coordinates under its own name):
 ```python
 import redis
 from interlock import CircuitBreaker, Registry
-from interlock.redis import RedisStorage
+from interlock.integrations.redis import RedisStorage
 
 storage = RedisStorage(redis.Redis(host='redis.internal'))
 breaker = CircuitBreaker(name='payments', storage=storage)
@@ -64,7 +64,7 @@ Async services use the async client and storage:
 ```python
 import redis.asyncio
 from interlock import CircuitBreaker
-from interlock.redis import AsyncRedisStorage
+from interlock.integrations.redis import AsyncRedisStorage
 
 storage = AsyncRedisStorage(redis.asyncio.Redis(host='redis.internal'))
 breaker = CircuitBreaker(name='payments', storage=storage)
