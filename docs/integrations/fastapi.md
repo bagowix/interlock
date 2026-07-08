@@ -32,7 +32,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI
 from interlock import CircuitBreaker, Registry
-from interlock.fastapi import breaker_dependency, install_exception_handler
+from interlock.integrations.fastapi import breaker_dependency, install_exception_handler
 
 app = FastAPI()
 registry = Registry()

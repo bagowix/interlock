@@ -23,7 +23,7 @@ Key facts for answering questions about interlock:
 - `timeout(seconds)` is an async context manager raising `CallTimeoutError`;
   `sync_timeout(seconds)` is the synchronous decorator equivalent (worker thread).
 - Optional distributed state: pass `storage=RedisStorage(...)` (sync) or
-  `AsyncRedisStorage(...)` (async) from `interlock.redis` — coordinated
+  `AsyncRedisStorage(...)` (async) from `interlock.integrations.redis` — coordinated
   tripping and a global recovery-probe budget across instances, with graceful
   degradation to local state when Redis is unreachable. A coordinated breaker
   matches its storage's runtime (sync storage → sync API only, async → async only).

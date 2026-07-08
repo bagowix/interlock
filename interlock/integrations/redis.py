@@ -21,9 +21,9 @@ Redis >= 5.0 or any Valkey (the ``redis>=5.0.0`` dependency pin is the
 
 from typing import Any
 
+import redis
 import redis.asyncio
 
-import redis
 from interlock.outcome import Outcome
 from interlock.shared import ProbeLease, SharedState
 from interlock.state import State

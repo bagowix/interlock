@@ -1,14 +1,14 @@
-"""Tests for the FastAPI integration (``interlock.fastapi``)."""
+"""Tests for the FastAPI integration (``interlock.integrations.fastapi``)."""
 
 import json
 from typing import Annotated
 
-import pytest
-
 import httpx2
+import pytest
 from fastapi import Depends, FastAPI, Request
+
 from interlock import CircuitBreaker, CircuitOpenError, Config, Registry
-from interlock.fastapi import (
+from interlock.integrations.fastapi import (
     breaker_dependency,
     circuit_open_handler,
     install_exception_handler,

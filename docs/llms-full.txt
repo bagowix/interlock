@@ -462,7 +462,7 @@ uv add 'interlock-cb[otel]'
 
 ```python
 from interlock import CircuitBreaker
-from interlock.otel import OTelEventListener
+from interlock.integrations.otel import OTelEventListener
 
 breaker = CircuitBreaker(name='payments', listener=OTelEventListener())
 ```
@@ -606,7 +606,7 @@ decorators or `call` wrappers in your request code.
 
 ```python
 import httpx2
-from interlock.httpx2 import CircuitBreakerTransport
+from interlock.integrations.httpx2 import CircuitBreakerTransport
 
 transport = CircuitBreakerTransport(httpx2.HTTPTransport())
 client = httpx2.Client(transport=transport)
@@ -618,7 +618,7 @@ response = client.get('https://api.example.com/v1/users')
 
 ```python
 import httpx2
-from interlock.httpx2 import AsyncCircuitBreakerTransport
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
 
 transport = AsyncCircuitBreakerTransport(httpx2.AsyncHTTPTransport())
 client = httpx2.AsyncClient(transport=transport)
@@ -655,7 +655,7 @@ flow to every per-host breaker:
 
 ```python
 from interlock import Config, LoggingEventListener
-from interlock.httpx2 import CircuitBreakerTransport
+from interlock.integrations.httpx2 import CircuitBreakerTransport
 
 transport = CircuitBreakerTransport(
     httpx2.HTTPTransport(),
@@ -705,7 +705,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI
 from interlock import CircuitBreaker, Registry
-from interlock.fastapi import breaker_dependency, install_exception_handler
+from interlock.integrations.fastapi import breaker_dependency, install_exception_handler
 
 app = FastAPI()
 registry = Registry()
@@ -842,7 +842,7 @@ breaker it creates — each coordinates under its own name):
 ```python
 import redis
 from interlock import CircuitBreaker, Registry
-from interlock.redis import RedisStorage
+from interlock.integrations.redis import RedisStorage
 
 storage = RedisStorage(redis.Redis(host='redis.internal'))
 breaker = CircuitBreaker(name='payments', storage=storage)
@@ -855,7 +855,7 @@ Async services use the async client and storage:
 ```python
 import redis.asyncio
 from interlock import CircuitBreaker
-from interlock.redis import AsyncRedisStorage
+from interlock.integrations.redis import AsyncRedisStorage
 
 storage = AsyncRedisStorage(redis.asyncio.Redis(host='redis.internal'))
 breaker = CircuitBreaker(name='payments', storage=storage)
@@ -1065,11 +1065,11 @@ Implement any of these to swap a core behaviour:
 ## Listeners
 
 - **`LoggingEventListener(logger=None)`** — top-level; zero dependencies.
-- **`interlock.otel.OTelEventListener(meter=None)`** — extra `interlock-cb[otel]`.
+- **`interlock.integrations.otel.OTelEventListener(meter=None)`** — extra `interlock-cb[otel]`.
 
 ## httpx2 adapters
 
-Extra `interlock-cb[httpx2]`, module `interlock.httpx2`:
+Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
@@ -1080,7 +1080,7 @@ See the [httpx2 integration](integrations/httpx2.md).
 
 ## FastAPI adapters
 
-Extra `interlock-cb[fastapi]`, module `interlock.fastapi`:
+Extra `interlock-cb[fastapi]`, module `interlock.integrations.fastapi`:
 
 - **`breaker_dependency(name, *, registry)`** — returns a `Depends`-compatible
   callable yielding the named breaker from a shared `Registry`.
@@ -1093,7 +1093,7 @@ See the [FastAPI integration](integrations/fastapi.md).
 
 ## Redis adapters
 
-Extra `interlock-cb[redis]`, module `interlock.redis`:
+Extra `interlock-cb[redis]`, module `interlock.integrations.redis`:
 
 - **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0)`** —
   sync `Storage` over a `redis.Redis` client.

@@ -5,7 +5,7 @@ This module imports ``httpx2`` and is deliberately *not* re-exported from
 ``pip install interlock[httpx2]`` and wrap your transport explicitly::
 
     import httpx2
-    from interlock.httpx2 import CircuitBreakerTransport
+    from interlock.integrations.httpx2 import CircuitBreakerTransport
 
     transport = CircuitBreakerTransport(httpx2.HTTPTransport())
     client = httpx2.Client(transport=transport)
@@ -24,6 +24,7 @@ import http
 from typing import cast
 
 from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
+
 from interlock.config import Config
 from interlock.protocols import Clock, EventListener, FailureClassifier
 from interlock.registry import Registry

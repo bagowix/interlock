@@ -44,7 +44,7 @@ class CircuitBreaker:
             raised exception being a failure.
         listener: Observability hooks (state changes, calls, rejections,
             resets). Defaults to no observation.
-        storage: Optional shared backend (e.g. ``interlock.redis.RedisStorage``)
+        storage: Optional shared backend (e.g. ``interlock.integrations.redis.RedisStorage``)
             for coordinated state across instances. Defaults to purely local
             state. A coordinated breaker matches its storage's runtime: a sync
             ``Storage`` serves only the sync API, an ``AsyncStorage`` only the

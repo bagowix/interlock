@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Integration modules moved into the `interlock.integrations` subpackage:
+  `interlock.integrations.httpx2`, `interlock.integrations.otel`,
+  `interlock.integrations.fastapi`, `interlock.integrations.redis`. The old
+  top-level import paths (`interlock.httpx2`, `interlock.otel`,
+  `interlock.fastapi`, `interlock.redis`) are removed. Update imports
+  accordingly; extras names and all public classes are unchanged.
+
 ## [1.2.0] - 2026-07-07
 
 ### Added

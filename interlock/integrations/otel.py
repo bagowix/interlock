@@ -4,7 +4,7 @@ This module imports ``opentelemetry`` and is deliberately *not* re-exported from
 ``interlock`` so the core stays zero-dependency. Install with
 ``pip install interlock[otel]`` and import explicitly::
 
-    from interlock.otel import OTelEventListener
+    from interlock.integrations.otel import OTelEventListener
 
 It maps breaker events onto three instruments: a duration histogram per call, a
 counter of rejected calls, and a counter of state transitions (plus resets).
