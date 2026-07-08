@@ -55,6 +55,45 @@ jobs:
       - name: Tests
         run: uv run pytest --cov
 
+  extras-min:
+    name: Extras (minimum versions)
+    runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: '3.11'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Pin extras to minimum supported versions
+        run: >-
+          uv pip install
+          'httpx2==2.4.0'
+          'fastapi==0.128.0'
+          'redis==5.0.0'
+          'opentelemetry-api==1.43.0'
+          'tenacity==9.0.0'
+          'requests==2.31.0'
+          'aiohttp==3.12.0'
+
+      - name: Integration tests against minimum versions
+        run: >-
+          uv run --no-sync pytest
+          tests/test_httpx2.py
+          tests/test_httpx2_e2e.py
+          tests/test_fastapi.py
+          tests/test_otel.py
+          tests/test_redis_storage.py
+          tests/test_tenacity.py
+          tests/test_requests.py
+          tests/test_aiohttp.py
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

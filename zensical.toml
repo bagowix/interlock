@@ -9,8 +9,8 @@ copyright = "Copyright &copy; 2026 interlock authors"
 nav = [
     { "Home" = "index.md" },
     { "Getting started" = "getting-started.md" },
-    { "Guides" = ["guides/configuration.md", "guides/states.md", "guides/failure-classification.md", "guides/observability.md", "guides/timeout.md"] },
-    { "Integrations" = ["integrations/httpx2.md", "integrations/fastapi.md", "integrations/redis.md"] },
+    { "Guides" = ["guides/configuration.md", "guides/states.md", "guides/failure-classification.md", "guides/observability.md", "guides/timeout.md", "guides/retries.md"] },
+    { "Integrations" = ["integrations/index.md", "integrations/httpx2.md", "integrations/aiohttp.md", "integrations/requests.md", "integrations/tenacity.md", "integrations/fastapi.md", "integrations/redis.md", "integrations/llm.md", "integrations/frameworks.md"] },
     { "API reference" = "reference.md" },
 ]
 

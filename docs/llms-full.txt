@@ -576,6 +576,192 @@ metrics as any other.
 
 ---
 
+<!-- source: docs/guides/retries.md -->
+
+# Retries and circuit breakers
+
+Retries and circuit breakers pull in opposite directions: a retry *adds*
+load to a struggling dependency, a breaker *sheds* it. Combined carelessly
+they cancel each other out — retries hammer a dependency the breaker is
+trying to protect, or the breaker's window never sees the real failure rate.
+This guide fixes the composition; the ready-made tenacity helpers live in the
+[tenacity integration](../integrations/tenacity.md).
+
+## Which goes on the outside?
+
+Both orders are valid — they answer different questions. What changes is what
+the breaker's sliding window *sees*:
+
+| Order | What the window sees | When to choose |
+|---|---|---|
+| **Retry outside → breaker inside** (recommended) | Every attempt individually — honest failure rate, the breaker trips as early as the dependency deserves | Default. Also the order used by Polly and resilience4j |
+| Breaker outside → retry inside | One aggregated outcome per *operation* (all attempts folded into it) | When thresholds are tuned per business operation, not per request |
+
+With retry outside, a rejected attempt is also visible to the retry loop —
+which is exactly where the two failure modes below come from.
+
+## Failure mode 1: retrying an open circuit
+
+`CircuitOpenError` is not a transient error. The breaker rejects instantly,
+so an exponential backoff loop around it burns its attempt budget in
+milliseconds, never reaches the dependency, and buries the real signal in log
+noise. Stop retrying the moment the circuit opens:
+
+```python
+from tenacity import Retrying, stop_after_attempt, wait_exponential_jitter
+
+from interlock.integrations.tenacity import retry_unless_open
+
+retrying = Retrying(
+    retry=retry_unless_open(TimeoutError, ConnectionError),
+    wait=wait_exponential_jitter(),
+    stop=stop_after_attempt(5),
+    reraise=True,
+)
+```
+
+## Failure mode 2: blind waiting
+
+Sometimes waiting *is* the right call — a nightly job would rather sleep
+than fail. But `2^n` seconds is the wrong amount: the breaker already knows
+when it will allow the next probe (`CircuitOpenError.retry_after`). Wait
+exactly that long:
+
+```python
+from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt
+from tenacity import wait_exponential_jitter
+
+from interlock import CircuitOpenError
+from interlock.integrations.tenacity import wait_probe
+
+retrying = AsyncRetrying(
+    retry=retry_if_exception_type((TimeoutError, CircuitOpenError)),
+    wait=wait_probe(wait_exponential_jitter()),
+    stop=stop_after_attempt(10),
+    reraise=True,
+)
+```
+
+Pick one mode per call site. Fail fast at request/latency-sensitive
+boundaries; be patient in background work.
+
+## Retrying on HTTP statuses
+
+The HTTP integrations classify statuses for the *breaker* without raising —
+a `503` response is returned to you, recorded as a failure. tenacity,
+however, is exception-driven. Do **not** reach for `retry_if_result`: with
+aiohttp a retried-away response is never released and leaks its connection.
+Turn bad statuses into exceptions instead, then retry exceptions:
+
+```python
+import requests
+from tenacity import Retrying, stop_after_attempt, wait_exponential_jitter
+
+from interlock.integrations.requests import CircuitBreakerAdapter
+from interlock.integrations.tenacity import retry_unless_open
+
+session = requests.Session()
+session.mount('https://', CircuitBreakerAdapter())
+
+
+def fetch_orders() -> dict:
+    response = session.get('https://api.example.com/orders')
+    response.raise_for_status()
+    return response.json()
+
+
+retrying = Retrying(
+    retry=retry_unless_open(requests.HTTPError, requests.ConnectionError),
+    wait=wait_exponential_jitter(),
+    stop=stop_after_attempt(5),
+    reraise=True,
+)
+
+orders = retrying(fetch_orders)
+```
+
+The breaker still classifies by status (no exception needed), the retry loop
+reacts to `raise_for_status()` — each tool sees the signal in its native
+form. To align which statuses trip the breaker, pass
+`HttpStatusClassifier(failure_statuses={...})` to the integration.
+
+## Anti-patterns
+
+- **Unbounded retries.** Always set a `stop` condition. A breaker caps
+  concurrent damage, not the lifetime of a stubborn loop.
+- **Retries without a breaker.** N clients × M retries is an N·M-fold
+  amplification aimed at a dependency that is already failing — the classic
+  retry storm. The breaker inside the loop is what breaks it.
+- **Retrying non-transient errors.** A `404` or a validation error will not
+  succeed on attempt five. List transient exception types explicitly in
+  `retry_unless_open(...)` rather than retrying everything.
+- **Nested retry layers.** urllib3's `max_retries`, your service mesh and
+  tenacity each multiply attempts. Budget them together — one deliberate
+  retry layer beats three accidental ones.
+
+---
+
+<!-- source: docs/integrations/index.md -->
+
+# Integrations
+
+interlock plugs into the HTTP client, framework or retry library you already
+use — you configure thresholds once and the breaker applies **per host** (or
+per named dependency) with no decorators in call sites.
+
+## Supported integrations
+
+| Integration | Extra | What you get |
+|---|---|---|
+| [httpx2](httpx2.md) | `interlock-cb[httpx2]` | `CircuitBreakerTransport` / `AsyncCircuitBreakerTransport` — per-host breaker at the transport level |
+| [aiohttp](aiohttp.md) | `interlock-cb[aiohttp]` | `CircuitBreakerMiddleware` — per-host breaker as a client middleware (aiohttp ≥ 3.12) |
+| [requests](requests.md) | `interlock-cb[requests]` | `CircuitBreakerAdapter` — per-host breaker mounted on a `Session` |
+| [tenacity](tenacity.md) | `interlock-cb[tenacity]` | Retry × breaker glue: stop retrying when the circuit opens, or wait exactly until the next probe |
+| [FastAPI](fastapi.md) | `interlock-cb[fastapi]` | `Depends`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler |
+| [Redis](redis.md) | `interlock-cb[redis]` | Shared breaker state across processes with graceful degradation |
+| [LLM SDKs](llm.md) | — (recipe) | Guard OpenAI / Anthropic SDK calls with a breaker + bounded retries |
+| [Flask / Django](frameworks.md) | — (recipe) | Map `CircuitOpenError` to `503 + Retry-After` in other web frameworks |
+
+## How integrations are built
+
+Every integration follows the same rules, so learning one means knowing all:
+
+- **Native extension points only.** A transport (httpx2), a client middleware
+  (aiohttp), an adapter (requests), an exception handler (FastAPI). No
+  monkey-patching, no private APIs — an integration survives minor releases
+  of its host library.
+- **One breaker per host.** HTTP integrations key breakers by request host:
+  a failing `api.a` never trips `api.b`. Breakers are created lazily in a
+  shared [`Registry`](../reference.md).
+- **One classification model.** Responses are classified by an
+  `HttpStatusClassifier` — by default the canonical retryable set
+  (`429, 500, 502, 503, 504`) plus any transport exception counts as a
+  failure, while `4xx` client mistakes do not. Pass
+  `HttpStatusClassifier(failure_statuses={...})` or your own
+  `FailureClassifier` to change the policy.
+- **One rejection signal.** An open circuit always raises
+  [`CircuitOpenError`](../reference.md) — carrying the breaker name, a
+  `retry_after` estimate and the last recorded failure — *before* a
+  connection is attempted.
+- **Zero-dependency core.** Integrations live in `interlock.integrations.*`
+  as optional extras; `import interlock` itself never pulls anything beyond
+  the standard library.
+
+## Support tiers
+
+- **Tier 1 — shipped code.** Modules under `interlock.integrations.*`,
+  covered by the test suite and CI against both the minimum supported and the
+  latest version of the host library. Semver applies.
+- **Tier 2 — recipes.** Documented, runnable patterns (LLM SDKs,
+  Flask/Django) that need no dedicated glue code. They can graduate to Tier 1
+  when demand shows up.
+
+Missing an integration — gRPC, SQLAlchemy, Kafka, Celery?
+[Open an issue](https://github.com/bagowix/interlock/issues): the next wave
+is prioritised by demand.
+
+---
+
 <!-- source: docs/integrations/httpx2.md -->
 
 # httpx2 integration
@@ -666,6 +852,277 @@ transport = CircuitBreakerTransport(
 
 Supply your own `classifier` to change the failure policy — for example to also
 fail on `408 Request Timeout`.
+
+---
+
+<!-- source: docs/integrations/aiohttp.md -->
+
+# aiohttp integration
+
+The `interlock-cb[aiohttp]` extra guards every request a `ClientSession`
+sends with a circuit breaker **per host**, wired in as a client middleware —
+no decorators in call sites. Requires aiohttp ≥ 3.12 (client middlewares).
+
+=== "uv"
+
+    ```bash
+    uv add 'interlock-cb[aiohttp]'
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install 'interlock-cb[aiohttp]'
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add 'interlock-cb[aiohttp]'
+    ```
+
+## Usage
+
+```python
+import aiohttp
+
+from interlock.integrations.aiohttp import CircuitBreakerMiddleware
+
+middleware = CircuitBreakerMiddleware()
+
+async with aiohttp.ClientSession(middlewares=(middleware,)) as session:
+    async with session.get('https://api.example.com/orders') as response:
+        orders = await response.json()
+```
+
+Each host gets its own breaker (a failing `api.a` never trips `api.b`),
+created lazily and shared across requests. When a host's circuit is open the
+request raises [`CircuitOpenError`](../reference.md) *before* a connection is
+made.
+
+The breaker observes the time to *response headers*; reading the body happens
+outside the guarded call — the same semantics as the
+[httpx2 transport](httpx2.md).
+
+## Failure policy
+
+By default a response counts as a failure when its status is in the canonical
+retryable set (`429, 500, 502, 503, 504`) and any exception raised while
+sending (connect/read errors) is a failure; `4xx` client mistakes like `404`
+are successes. Change the statuses, or the whole policy:
+
+```python
+from interlock import Config
+from interlock.integrations.aiohttp import CircuitBreakerMiddleware, HttpStatusClassifier
+
+middleware = CircuitBreakerMiddleware(
+    config=Config(failure_rate_threshold=0.3),
+    classifier=HttpStatusClassifier(failure_statuses={408, 429, 500, 502, 503, 504}),
+)
+```
+
+Any custom `FailureClassifier` works too — see
+[Failure classification](../guides/failure-classification.md).
+
+## Tuning and observability
+
+The middleware accepts the same collaborators as `CircuitBreaker` — `config`,
+`clock`, `classifier`, `listener`. One middleware instance holds one registry
+of per-host breakers; reuse the instance across sessions to share breaker
+state, or create separate instances to isolate them. For application-level
+retries combine with the [tenacity integration](tenacity.md) and read
+[Retries and circuit breakers](../guides/retries.md) first.
+
+---
+
+<!-- source: docs/integrations/requests.md -->
+
+# requests integration
+
+The `interlock-cb[requests]` extra guards every request a `Session` sends
+with a circuit breaker **per host** — mounted once, no decorators in call
+sites.
+
+=== "uv"
+
+    ```bash
+    uv add 'interlock-cb[requests]'
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install 'interlock-cb[requests]'
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add 'interlock-cb[requests]'
+    ```
+
+## Usage
+
+`CircuitBreakerAdapter` subclasses `requests.adapters.HTTPAdapter` — the
+library's native transport extension point — so it mounts like any adapter:
+
+```python
+import requests
+
+from interlock.integrations.requests import CircuitBreakerAdapter
+
+session = requests.Session()
+adapter = CircuitBreakerAdapter()
+session.mount('https://', adapter)
+session.mount('http://', adapter)
+
+response = session.get('https://api.example.com/orders')
+```
+
+Each host gets its own breaker (a failing `api.a` never trips `api.b`),
+created lazily and shared across requests. When a host's circuit is open the
+request raises [`CircuitOpenError`](../reference.md) *before* a connection is
+made.
+
+## Failure policy
+
+By default a response counts as a failure when its status is in the canonical
+retryable set (`429, 500, 502, 503, 504`) and any transport exception
+(connect/read errors) is a failure; `4xx` client mistakes like `404` are
+successes. Change the statuses, or the whole policy:
+
+```python
+from interlock import Config
+from interlock.integrations.requests import CircuitBreakerAdapter, HttpStatusClassifier
+
+adapter = CircuitBreakerAdapter(
+    config=Config(failure_rate_threshold=0.3),
+    classifier=HttpStatusClassifier(failure_statuses={408, 429, 500, 502, 503, 504}),
+)
+```
+
+Any custom `FailureClassifier` works too — see
+[Failure classification](../guides/failure-classification.md).
+
+## Tuning and observability
+
+The adapter accepts the same collaborators as `CircuitBreaker` — `config`,
+`clock`, `classifier`, `listener` — and forwards everything else
+(`pool_connections`, `max_retries`, ...) to `HTTPAdapter`. Note that
+`max_retries` is urllib3's connection-level retry; for application-level
+retries combine with the [tenacity integration](tenacity.md) and read
+[Retries and circuit breakers](../guides/retries.md) first.
+
+---
+
+<!-- source: docs/integrations/tenacity.md -->
+
+# tenacity integration (retries)
+
+interlock deliberately ships no retry engine of its own:
+[tenacity](https://tenacity.readthedocs.io/) already does backoff, jitter,
+stop conditions and predicates well. The `interlock-cb[tenacity]` extra adds
+the glue where retry × breaker composition goes wrong in practice.
+
+=== "uv"
+
+    ```bash
+    uv add 'interlock-cb[tenacity]'
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install 'interlock-cb[tenacity]'
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add 'interlock-cb[tenacity]'
+    ```
+
+Read [Retries and circuit breakers](../guides/retries.md) first if you are
+deciding *how* to combine the two patterns; this page documents the helpers.
+
+## Fail fast (recommended default)
+
+`retry_unless_open(*transient)` retries the listed transient exceptions but
+stops as soon as the breaker opens. `CircuitOpenError` is not transient: the
+breaker rejects instantly, so backing off and retrying it only burns the
+attempt budget without ever reaching the dependency.
+
+```python
+from tenacity import Retrying, stop_after_attempt, wait_exponential_jitter
+
+from interlock import CircuitBreaker
+from interlock.integrations.tenacity import retry_unless_open
+
+breaker = CircuitBreaker(name='payments')
+
+
+@breaker
+def charge(amount: int) -> str:
+    return gateway.charge(amount)
+
+
+retrying = Retrying(
+    retry=retry_unless_open(TimeoutError, ConnectionError),
+    wait=wait_exponential_jitter(),
+    stop=stop_after_attempt(5),
+    reraise=True,
+)
+
+result = retrying(charge, 100)
+```
+
+Called without arguments, `retry_unless_open()` retries any ordinary
+`Exception` — still never `CircuitOpenError`.
+
+## Patient mode (wait for the probe)
+
+Background jobs often prefer waiting over failing. `wait_probe(fallback)` is
+a wait strategy: when the last attempt was rejected with a `retry_after`
+estimate, it sleeps *exactly* until the breaker allows the next probe (plus a
+small jitter so concurrent waiters do not storm the single probe slot). Any
+other outcome delegates to the `fallback` strategy.
+
+```python
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
+
+from interlock import CircuitOpenError
+from interlock.integrations.tenacity import wait_probe
+
+retrying = AsyncRetrying(
+    retry=retry_if_exception_type((TimeoutError, CircuitOpenError)),
+    wait=wait_probe(wait_exponential_jitter()),
+    stop=stop_after_attempt(10),
+    reraise=True,
+)
+
+report = await retrying(nightly_export)
+```
+
+Note the retry predicate: patient mode deliberately *does* retry
+`CircuitOpenError` — that is what makes `wait_probe` see the rejection and
+wait the right amount. Keep a `stop` condition anyway; a dependency can stay
+down longer than any job should wait.
+
+`wait_probe(..., jitter=0.5)` widens the random extra wait (seconds) added on
+top of `retry_after`; when the rejection carries no estimate (for example
+after `force_open()`), the fallback strategy decides.
+
+## Everything else is plain tenacity
+
+`Retrying`, `AsyncRetrying`, the `@retry` decorator, stop and wait strategies
+compose as usual — the helpers are ordinary tenacity predicates and wait
+objects, so you can combine them with `|`, `retry_any`, `wait_chain` and
+friends.
 
 ---
 
@@ -950,6 +1407,204 @@ server's.)
 
 ---
 
+<!-- source: docs/integrations/llm.md -->
+
+# LLM SDKs (OpenAI, Anthropic) — recipe
+
+LLM APIs fail in exactly the ways circuit breakers exist for: rate limits
+(`429`), overloaded backends (`529`/`503`), long hangs. A breaker around your
+LLM calls stops a degraded provider from stalling every request thread, and
+bounded retries recover from blips without amplifying an outage.
+
+This is a **recipe** — no extra needed beyond `interlock-cb[tenacity]`; the
+SDKs raise typed exceptions, which is all the breaker needs.
+
+## Classify SDK errors
+
+Both SDKs raise `APIStatusError` subclasses carrying `status_code`, plus
+connection/timeout errors. Not every error should trip the circuit: an
+invalid request (`400`) or a missing model (`404`) is your bug, not the
+provider's outage.
+
+```python
+import anthropic
+
+
+class LLMFailureClassifier:
+    """Trip on provider-side trouble, not on caller mistakes."""
+
+    _FAILURE_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
+
+    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+        if exception is None:
+            return False
+        if isinstance(exception, anthropic.APIStatusError):
+            return exception.status_code in self._FAILURE_STATUSES
+        return isinstance(exception, (anthropic.APIConnectionError, anthropic.APITimeoutError))
+```
+
+For OpenAI, swap the exception types (`openai.APIStatusError`,
+`openai.APIConnectionError`, `openai.APITimeoutError`) — the shape is
+identical.
+
+## Guard the calls
+
+```python
+import anthropic
+from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential_jitter
+
+from interlock import CircuitBreaker, Config
+from interlock.integrations.tenacity import retry_unless_open
+
+client = anthropic.AsyncAnthropic()
+
+breaker = CircuitBreaker(
+    name='anthropic',
+    config=Config(slow_call_duration_threshold=30.0),
+    classifier=LLMFailureClassifier(),
+)
+
+
+@breaker
+async def complete(prompt: str) -> str:
+    message = await client.messages.create(
+        model='claude-sonnet-5',
+        max_tokens=1024,
+        messages=[{'role': 'user', 'content': prompt}],
+    )
+    return message.content[0].text
+
+
+retrying = AsyncRetrying(
+    retry=retry_unless_open(
+        anthropic.APIStatusError,
+        anthropic.APIConnectionError,
+        anthropic.APITimeoutError,
+    ),
+    wait=wait_exponential_jitter(initial=1.0, max=30.0),
+    stop=stop_after_attempt(4),
+    reraise=True,
+)
+
+answer = await retrying(complete, 'Summarise this document...')
+```
+
+What each layer contributes:
+
+- **Slow-call detection** (`slow_call_duration_threshold`) counts calls
+  slower than 30s as failures — a provider that still answers but takes a
+  minute per completion trips the breaker too. No other signal catches this.
+- **The breaker** stops sending after the failure rate crosses the threshold;
+  while open, callers get `CircuitOpenError` in microseconds instead of
+  hanging — fail over to a second provider or degrade gracefully.
+- **`retry_unless_open`** retries provider blips with jittered backoff but
+  stops the moment the circuit opens. The SDK's own retries overlap here —
+  either set `max_retries=0` on the client and let tenacity own retries, or
+  keep the SDK's and drop the tenacity layer; running both multiplies
+  attempts.
+
+## Multiple providers, one pattern
+
+Give each provider its own breaker name (`anthropic`, `openai`, ...) via a
+shared `Registry` and check `breaker.state` to route around an open provider.
+The [states guide](../guides/states.md) covers manual failover controls.
+
+!!! note "Transport-level alternative"
+    The SDKs are built on classic httpx, which does not take httpx2
+    transports; once they migrate to httpx2 you will be able to drop the
+    decorator entirely and pass a client wrapped with the
+    [httpx2 transport](httpx2.md) instead.
+
+---
+
+<!-- source: docs/integrations/frameworks.md -->
+
+# Flask / Django — recipe
+
+When a route's outgoing dependency trips its breaker, the raised
+[`CircuitOpenError`](../reference.md) should become a clean
+`503 Service Unavailable` with a `Retry-After` header — the same behaviour
+the [FastAPI extra](fastapi.md) ships as code. For other frameworks the
+handler is a few lines; no extra needed.
+
+## Flask
+
+```python
+import math
+
+from flask import Flask, jsonify
+
+from interlock import CircuitOpenError
+
+app = Flask(__name__)
+
+
+@app.errorhandler(CircuitOpenError)
+def on_circuit_open(exc: CircuitOpenError):
+    response = jsonify({'detail': str(exc)})
+    response.status_code = 503
+    if exc.retry_after is not None:
+        response.headers['Retry-After'] = str(math.ceil(exc.retry_after))
+    return response
+```
+
+## Django
+
+```python
+# middleware.py
+import json
+import math
+
+from django.http import HttpResponse
+
+from interlock import CircuitOpenError
+
+
+class CircuitOpenMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_exception(self, request, exception):
+        if not isinstance(exception, CircuitOpenError):
+            return None
+        response = HttpResponse(
+            json.dumps({'detail': str(exception)}),
+            status=503,
+            content_type='application/json',
+        )
+        if exception.retry_after is not None:
+            response['Retry-After'] = str(math.ceil(exception.retry_after))
+        return response
+```
+
+Add it to `MIDDLEWARE` in `settings.py`.
+
+## Where the breakers live
+
+The handler only translates the rejection. The breakers themselves guard your
+*outgoing* calls — share one `Registry` across the app and wrap the
+dependencies:
+
+```python
+from interlock import Registry
+
+registry = Registry()
+payments = registry.get('payments-api')
+
+
+def charge(amount: int) -> str:
+    return payments.call(gateway.charge, amount)
+```
+
+`Retry-After` is rounded up to whole seconds (per RFC 7231) and omitted when
+the breaker cannot estimate the next probe (for example after
+`force_open()`).
+
+---
+
 <!-- source: docs/reference.md -->
 
 # API reference
@@ -1073,10 +1728,49 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier`** — fails on transport exceptions and statuses
-  `429, 500, 502, 503, 504`.
+- **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
+  exceptions and statuses `429, 500, 502, 503, 504` (override the set via
+  `failure_statuses`).
 
 See the [httpx2 integration](integrations/httpx2.md).
+
+## aiohttp adapters
+
+Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations.aiohttp`:
+
+- **`CircuitBreakerMiddleware(*, config=None, clock=None, classifier=None, listener=None)`** —
+  client middleware for `ClientSession(middlewares=(...,))`; one breaker per
+  request host.
+- **`HttpStatusClassifier(failure_statuses=None)`** — same policy as the
+  httpx2 variant, reading `ClientResponse.status`.
+
+See the [aiohttp integration](integrations/aiohttp.md).
+
+## requests adapters
+
+Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
+
+- **`CircuitBreakerAdapter(*, config=None, clock=None, classifier=None, listener=None, **adapter_kwargs)`** —
+  `HTTPAdapter` subclass for `session.mount(...)`; one breaker per request
+  host. Extra kwargs go to `HTTPAdapter`.
+- **`HttpStatusClassifier(failure_statuses=None)`** — same policy, reading
+  `Response.status_code`.
+
+See the [requests integration](integrations/requests.md).
+
+## tenacity helpers
+
+Extra `interlock-cb[tenacity]`, module `interlock.integrations.tenacity`:
+
+- **`retry_unless_open(*transient)`** — tenacity retry predicate: retries the
+  listed transient exception types (default: any `Exception`), never
+  `CircuitOpenError`.
+- **`wait_probe(fallback, *, jitter=0.1)`** — tenacity wait strategy: sleeps
+  `CircuitOpenError.retry_after` (+ up to `jitter` seconds) after a
+  rejection, delegates to `fallback` otherwise.
+
+See the [tenacity integration](integrations/tenacity.md) and the
+[retries guide](guides/retries.md).
 
 ## FastAPI adapters
 

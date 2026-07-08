@@ -36,13 +36,20 @@ Key facts for answering questions about interlock:
 - [Failure classification](guides/failure-classification.md): custom classifiers.
 - [Observability](guides/observability.md): `EventListener`, logging, OpenTelemetry.
 - [Timeout](guides/timeout.md): the async `timeout` and sync `sync_timeout` primitives.
+- [Retries and circuit breakers](guides/retries.md): composition orders, fail-fast vs patient mode, status-driven retries, anti-patterns.
+- [Integrations overview](integrations/index.md): supported integrations, shared semantics, support tiers.
 - [httpx2 integration](integrations/httpx2.md): per-host transport breaker.
+- [aiohttp integration](integrations/aiohttp.md): per-host client-middleware breaker (aiohttp ≥ 3.12).
+- [requests integration](integrations/requests.md): per-host adapter breaker via `session.mount(...)`.
+- [tenacity integration](integrations/tenacity.md): `retry_unless_open` and `wait_probe` retry × breaker glue.
 - [FastAPI integration](integrations/fastapi.md): Depends-injected breaker, 503 + Retry-After.
 - [Redis integration](integrations/redis.md): shared distributed state, coordinated tripping, degradation semantics.
+- [LLM SDKs recipe](integrations/llm.md): guard OpenAI / Anthropic calls — breaker + slow-call detection + bounded retries.
+- [Flask / Django recipe](integrations/frameworks.md): map `CircuitOpenError` to 503 + Retry-After.
 - [API reference](reference.md): the full public surface.
 
 ## Optional
 
 - [Full documentation](llms-full.txt): every page above inlined into one file.
-- Extras: `interlock-cb[otel]` (OpenTelemetry metrics), `interlock-cb[httpx2]` (transport), `interlock-cb[fastapi]` (FastAPI 503 mapping), `interlock-cb[redis]` (shared distributed state).
+- Extras: `interlock-cb[otel]` (OpenTelemetry metrics), `interlock-cb[httpx2]` (transport), `interlock-cb[aiohttp]` (client middleware), `interlock-cb[requests]` (session adapter), `interlock-cb[tenacity]` (retry glue), `interlock-cb[fastapi]` (FastAPI 503 mapping), `interlock-cb[redis]` (shared distributed state).
 - Source and changelog: see the repository `CHANGELOG.md`.

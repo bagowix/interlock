@@ -21,6 +21,7 @@ a custom ``classifier`` to change that policy.
 """
 
 import http
+from collections.abc import Iterable
 from typing import cast
 
 from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
@@ -53,18 +54,28 @@ _FAILURE_STATUSES = frozenset(
 class HttpStatusClassifier:
     """Counts transport exceptions and unhealthy-status responses as failures.
 
-    A returned response is a failure when its status is in the canonical
-    retryable set (``429, 500, 502, 503, 504``); any raised exception is a
-    failure. Other responses — including ``4xx`` client mistakes like ``404`` —
-    are successes, so they never trip the breaker.
+    A returned response is a failure when its status is in ``failure_statuses``
+    — by default the canonical retryable set (``429, 500, 502, 503, 504``);
+    any raised exception is a failure. Other responses — including ``4xx``
+    client mistakes like ``404`` — are successes, so they never trip the
+    breaker.
+
+    Args:
+        failure_statuses: Statuses to count as failures instead of the
+            canonical set.
     """
+
+    def __init__(self, *, failure_statuses: Iterable[int] | None = None) -> None:
+        self._failure_statuses = (
+            frozenset(failure_statuses) if failure_statuses is not None else _FAILURE_STATUSES
+        )
 
     def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
         """Return whether a completed request counts as a failure."""
         if exception is not None:
             return True
 
-        return cast('Response', result).status_code in _FAILURE_STATUSES
+        return cast('Response', result).status_code in self._failure_statuses
 
 
 def _build_registry(

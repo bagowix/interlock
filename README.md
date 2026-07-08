@@ -24,8 +24,8 @@ integrations at the transport level.
   signature *and* its sync/async nature; ships `py.typed`, passes mypy and
   pyright in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
-  optional extras (`interlock-cb[otel]`, `interlock-cb[httpx2]`,
-  `interlock-cb[fastapi]`, `interlock-cb[redis]`).
+  optional extras (`httpx2`, `aiohttp`, `requests`, `tenacity`, `fastapi`,
+  `redis`, `otel`).
 
 ## How it compares
 
@@ -75,10 +75,13 @@ uv add interlock-cb          # or: pip install interlock-cb
 Optional extras:
 
 ```bash
-uv add 'interlock-cb[otel]'    # OpenTelemetry metrics listener
-uv add 'interlock-cb[httpx2]'  # per-host httpx2 transport
-uv add 'interlock-cb[fastapi]' # FastAPI dependency + 503 Retry-After handler
-uv add 'interlock-cb[redis]'   # shared breaker state across processes
+uv add 'interlock-cb[otel]'     # OpenTelemetry metrics listener
+uv add 'interlock-cb[httpx2]'   # per-host httpx2 transport
+uv add 'interlock-cb[aiohttp]'  # per-host aiohttp client middleware
+uv add 'interlock-cb[requests]' # per-host requests session adapter
+uv add 'interlock-cb[tenacity]' # retry × breaker composition helpers
+uv add 'interlock-cb[fastapi]'  # FastAPI dependency + 503 Retry-After handler
+uv add 'interlock-cb[redis]'    # shared breaker state across processes
 ```
 
 ## Quickstart
@@ -190,6 +193,16 @@ registry = Registry(storage=storage)  # or share one storage across many breaker
 
 Async services use `AsyncRedisStorage` with `redis.asyncio.Redis` the same way.
 
+## More integrations
+
+The same per-host pattern ships for **aiohttp** (client middleware) and
+**requests** (session adapter), and the **tenacity** extra composes retries
+with the breaker correctly (stop retrying once the circuit opens, or wait
+exactly until the next probe). Recipes cover **OpenAI / Anthropic SDK** calls
+and **Flask / Django** handlers — see the
+[integrations overview](docs/integrations/index.md) and the
+[retries guide](docs/guides/retries.md).
+
 ## Documentation
 
 The full documentation is hosted at **<https://bagowix.github.io/interlock/>**.
@@ -201,9 +214,9 @@ The sources live in [`docs/`](docs/):
 - [Failure classification](docs/guides/failure-classification.md)
 - [Observability](docs/guides/observability.md)
 - [Timeout](docs/guides/timeout.md)
-- [httpx2 integration](docs/integrations/httpx2.md)
-- [FastAPI integration](docs/integrations/fastapi.md)
-- [Redis integration](docs/integrations/redis.md)
+- [Retries and circuit breakers](docs/guides/retries.md)
+- [Integrations overview](docs/integrations/index.md) — httpx2, aiohttp,
+  requests, tenacity, FastAPI, Redis, LLM SDKs, Flask/Django
 - [API reference](docs/reference.md)
 
 ## Contributing

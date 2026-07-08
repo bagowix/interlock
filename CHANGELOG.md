@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **tenacity integration** via the `tenacity` extra
+  (`interlock.integrations.tenacity`): `retry_unless_open(*transient)` — a
+  retry predicate that retries transient exceptions but stops as soon as the
+  circuit opens — and `wait_probe(fallback, *, jitter=0.1)` — a wait strategy
+  that sleeps exactly `CircuitOpenError.retry_after` (plus jitter) after a
+  rejection and delegates to the fallback strategy otherwise.
+- **aiohttp integration** via the `aiohttp` extra
+  (`interlock.integrations.aiohttp`, requires aiohttp ≥ 3.12):
+  `CircuitBreakerMiddleware` — a client middleware applying one breaker per
+  request host.
+- **requests integration** via the `requests` extra
+  (`interlock.integrations.requests`): `CircuitBreakerAdapter` — an
+  `HTTPAdapter` for `session.mount(...)` applying one breaker per request
+  host.
+- `HttpStatusClassifier` (httpx2, aiohttp, requests variants) now accepts
+  `failure_statuses` to override the canonical retryable set
+  (`429, 500, 502, 503, 504`).
+- New docs: integrations overview, "Retries and circuit breakers" guide, and
+  recipes for LLM SDKs (OpenAI/Anthropic) and Flask/Django 503 handlers.
+
 ### Changed
 
 - Integration modules moved into the `interlock.integrations` subpackage:
