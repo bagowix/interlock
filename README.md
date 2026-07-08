@@ -9,7 +9,7 @@
 | interlock/\_clock.py                   |        5 |        0 |        0 |        0 |     100% |           |
 | interlock/\_coordination.py            |      223 |        0 |       46 |        0 |     100% |           |
 | interlock/\_detect.py                  |        9 |        0 |        4 |        0 |     100% |           |
-| interlock/\_engine.py                  |      263 |        0 |       70 |        0 |     100% |           |
+| interlock/\_engine.py                  |      257 |        0 |       58 |        0 |     100% |           |
 | interlock/\_state\_machine.py          |      119 |        0 |       30 |        0 |     100% |           |
 | interlock/\_typing.py                  |        9 |        0 |        0 |        0 |     100% |           |
 | interlock/\_windows.py                 |       61 |        0 |       10 |        0 |     100% |           |
@@ -17,10 +17,13 @@
 | interlock/config.py                    |       32 |        0 |       16 |        0 |     100% |           |
 | interlock/errors.py                    |       19 |        0 |        2 |        0 |     100% |           |
 | interlock/integrations/\_\_init\_\_.py |        0 |        0 |        0 |        0 |     100% |           |
+| interlock/integrations/aiohttp.py      |       28 |        0 |        4 |        0 |     100% |           |
 | interlock/integrations/fastapi.py      |       23 |        0 |        2 |        0 |     100% |           |
-| interlock/integrations/httpx2.py       |       35 |        0 |        2 |        0 |     100% |           |
+| interlock/integrations/httpx2.py       |       38 |        0 |        2 |        0 |     100% |           |
 | interlock/integrations/otel.py         |       25 |        0 |        0 |        0 |     100% |           |
 | interlock/integrations/redis.py        |       93 |        0 |        8 |        0 |     100% |           |
+| interlock/integrations/requests.py     |       31 |        0 |        4 |        0 |     100% |           |
+| interlock/integrations/tenacity.py     |       23 |        0 |        6 |        0 |     100% |           |
 | interlock/listeners.py                 |       19 |        0 |        0 |        0 |     100% |           |
 | interlock/outcome.py                   |       13 |        0 |        0 |        0 |     100% |           |
 | interlock/protocols.py                 |       40 |        0 |        0 |        0 |     100% |           |
@@ -30,7 +33,7 @@
 | interlock/timeout.py                   |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py                   |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py                    |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                              | **1170** |    **0** |  **204** |    **0** | **100%** |           |
+| **TOTAL**                              | **1249** |    **0** |  **206** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge

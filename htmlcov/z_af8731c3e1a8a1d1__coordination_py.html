@@ -67,7 +67,7 @@
             <a id="nextFileLink" class="nav" href="z_af8731c3e1a8a1d1__detect_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.14.3">coverage.py v7.14.3</a>,
-            created at 2026-07-08 18:13 +0000
+            created at 2026-07-08 19:54 +0000
         </p>
         <aside class="hidden">
             <button type="button" class="button_next_chunk" data-shortcut="j"></button>
@@ -554,8 +554,10 @@
     <p class="run run2"><span class="n"><a id="t470" href="#t470">470</a></span><span class="t">    <span class="nam">work</span><span class="op">:</span> <span class="str">'asyncio.Queue[_AsyncOp]'</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t471" href="#t471">471</a></span><span class="t">    <span class="nam">interval</span><span class="op">:</span> <span class="nam">float</span><span class="op">,</span>&nbsp;</span><span class="r"></span></p>
     <p class="run run2"><span class="n"><a id="t472" href="#t472">472</a></span><span class="t"><span class="op">)</span> <span class="op">-></span> <span class="key">None</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t473" href="#t473">473</a></span><span class="t">    <span class="key">while</span> <span class="key">await</span> <span class="nam">_async_lane_tick</span><span class="op">(</span><span class="nam">ref</span><span class="op">,</span> <span class="nam">work</span><span class="op">,</span> <span class="nam">interval</span><span class="op">)</span><span class="op">:</span>&nbsp;</span><span class="r"></span></p>
-    <p class="run"><span class="n"><a id="t474" href="#t474">474</a></span><span class="t">        <span class="key">pass</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t473" href="#t473">473</a></span><span class="t">    <span class="com"># pragma-no-branch: on 3.14 the sys.monitoring tracer misses the normal</span>&nbsp;</span><span class="r"></span></p>
+    <p class="pln"><span class="n"><a id="t474" href="#t474">474</a></span><span class="t">    <span class="com"># exit arc when the lane task is torn down by loop shutdown in tests.</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t475" href="#t475">475</a></span><span class="t">    <span class="key">while</span> <span class="key">await</span> <span class="nam">_async_lane_tick</span><span class="op">(</span><span class="nam">ref</span><span class="op">,</span> <span class="nam">work</span><span class="op">,</span> <span class="nam">interval</span><span class="op">)</span><span class="op">:</span>  <span class="com"># pragma: no branch</span>&nbsp;</span><span class="r"></span></p>
+    <p class="run"><span class="n"><a id="t476" href="#t476">476</a></span><span class="t">        <span class="key">pass</span>&nbsp;</span><span class="r"></span></p>
 </main>
 <footer>
     <div class="content">
@@ -565,7 +567,7 @@
             <a class="nav" href="z_af8731c3e1a8a1d1__detect_py.html">&#xbb; next</a>
             &nbsp; &nbsp; &nbsp;
             <a class="nav" href="https://coverage.readthedocs.io/en/7.14.3">coverage.py v7.14.3</a>,
-            created at 2026-07-08 18:13 +0000
+            created at 2026-07-08 19:54 +0000
         </p>
     </div>
 </footer>
