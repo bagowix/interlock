@@ -55,6 +55,15 @@ def _async_client() -> aredis.Redis:
     return aredis.Redis.from_url(REDIS_URL)
 
 
+async def _aclose(client: aredis.Redis) -> None:
+    # redis-py < 5.0.1 has no aclose(); on newer versions close() warns
+    # (and filterwarnings=error would trip), so branch on availability.
+    if hasattr(client, 'aclose'):
+        await client.aclose()
+    else:  # pragma: no cover - exercised only in the extras-min CI job
+        await client.close()
+
+
 @pytest.fixture
 def prefix() -> str:
     return f'interlock:test:{uuid.uuid4().hex}:'
@@ -359,7 +368,7 @@ async def test__async__full_cycle(prefix: str) -> None:
         reopen_fenced = await storage.trip_open(name='svc', ttl=TTL, expected_version=tally.version)
         assert reopen_fenced.state is State.CLOSED  # stale version: fenced out
     finally:
-        await client.aclose()
+        await _aclose(client)
 
 
 def test__constructor__rejects_non_positive_knobs(redis_client: redis_mod.Redis) -> None:

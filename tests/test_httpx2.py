@@ -168,3 +168,11 @@ async def test__async_transport__aclose__delegates_to_wrapped() -> None:
     await transport.aclose()
 
     assert inner.closed
+
+
+def test__http_status_classifier__custom_statuses__override_default_set() -> None:
+    classifier = HttpStatusClassifier(failure_statuses={404, 408})
+
+    assert classifier.is_failure(result=Response(404), exception=None)
+    assert classifier.is_failure(result=Response(408), exception=None)
+    assert not classifier.is_failure(result=Response(500), exception=None)

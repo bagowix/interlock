@@ -30,6 +30,9 @@ otel = ["opentelemetry-api>=1.43.0"]
 httpx2 = ["httpx2>=2.4.0"]
 fastapi = ["fastapi>=0.128.0"]
 redis = ["redis>=5.0.0"]
+tenacity = ["tenacity>=9.0.0"]
+requests = ["requests>=2.31.0"]
+aiohttp = ["aiohttp>=3.12.0"]
 
 [project.urls]
 Homepage = "https://github.com/bagowix/interlock"
@@ -163,11 +166,15 @@ exclude_lines = [
   "@abstractmethod",
   "raise NotImplementedError",
   "^\\s*\\.\\.\\.\\s*$",
+  # One-line stub defs (`def f(...) -> None: ...`): the 3.14 sys.monitoring
+  # tracer reports def→def arcs in class bodies as partial branches.
+  "def .*: \\.\\.\\.$",
 ]
-fail_under = 98
+fail_under = 100
 
 [dependency-groups]
 dev = [
+    "aiohttp>=3.14.1",
     "faker>=40.23.0",
     "fakeredis[lua]>=2.20.0",
     "fastapi>=0.128.0",
@@ -183,7 +190,10 @@ dev = [
     "pytest-mock>=3.15.1",
     "pytest-sugar>=1.1.1",
     "redis>=5.0.0",
+    "requests>=2.31.0",
     "ruff>=0.15.18",
+    "tenacity>=9.0.0",
+    "types-requests>=2.31.0",
     "ty>=0.0.55",
     "zensical>=0.0.46",
 ]

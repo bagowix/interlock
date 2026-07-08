@@ -22,9 +22,16 @@ _PAGES = (
     'guides/failure-classification.md',
     'guides/observability.md',
     'guides/timeout.md',
+    'guides/retries.md',
+    'integrations/index.md',
     'integrations/httpx2.md',
+    'integrations/aiohttp.md',
+    'integrations/requests.md',
+    'integrations/tenacity.md',
     'integrations/fastapi.md',
     'integrations/redis.md',
+    'integrations/llm.md',
+    'integrations/frameworks.md',
     'reference.md',
 )
 

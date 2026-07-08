@@ -470,5 +470,7 @@ async def _async_lane(
     work: 'asyncio.Queue[_AsyncOp]',
     interval: float,
 ) -> None:
-    while await _async_lane_tick(ref, work, interval):
+    # pragma-no-branch: on 3.14 the sys.monitoring tracer misses the normal
+    # exit arc when the lane task is torn down by loop shutdown in tests.
+    while await _async_lane_tick(ref, work, interval):  # pragma: no branch
         pass

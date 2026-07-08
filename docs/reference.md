@@ -119,10 +119,49 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier`** — fails on transport exceptions and statuses
-  `429, 500, 502, 503, 504`.
+- **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
+  exceptions and statuses `429, 500, 502, 503, 504` (override the set via
+  `failure_statuses`).
 
 See the [httpx2 integration](integrations/httpx2.md).
+
+## aiohttp adapters
+
+Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations.aiohttp`:
+
+- **`CircuitBreakerMiddleware(*, config=None, clock=None, classifier=None, listener=None)`** —
+  client middleware for `ClientSession(middlewares=(...,))`; one breaker per
+  request host.
+- **`HttpStatusClassifier(failure_statuses=None)`** — same policy as the
+  httpx2 variant, reading `ClientResponse.status`.
+
+See the [aiohttp integration](integrations/aiohttp.md).
+
+## requests adapters
+
+Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
+
+- **`CircuitBreakerAdapter(*, config=None, clock=None, classifier=None, listener=None, **adapter_kwargs)`** —
+  `HTTPAdapter` subclass for `session.mount(...)`; one breaker per request
+  host. Extra kwargs go to `HTTPAdapter`.
+- **`HttpStatusClassifier(failure_statuses=None)`** — same policy, reading
+  `Response.status_code`.
+
+See the [requests integration](integrations/requests.md).
+
+## tenacity helpers
+
+Extra `interlock-cb[tenacity]`, module `interlock.integrations.tenacity`:
+
+- **`retry_unless_open(*transient)`** — tenacity retry predicate: retries the
+  listed transient exception types (default: any `Exception`), never
+  `CircuitOpenError`.
+- **`wait_probe(fallback, *, jitter=0.1)`** — tenacity wait strategy: sleeps
+  `CircuitOpenError.retry_after` (+ up to `jitter` seconds) after a
+  rejection, delegates to `fallback` otherwise.
+
+See the [tenacity integration](integrations/tenacity.md) and the
+[retries guide](guides/retries.md).
 
 ## FastAPI adapters
 
