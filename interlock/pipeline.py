@@ -17,15 +17,19 @@ One ``Pipeline`` serves sync and async callables alike — ``call`` dispatches
 on the callable's nature, the same contract as ``CircuitBreaker.call``.
 """
 
+import asyncio
+import threading
 from collections.abc import Awaitable, Callable
 from typing import Protocol, TypeVar, cast, runtime_checkable
 
 from interlock._detect import is_async_callable
 from interlock._typing import AsyncCallable, P, R, SyncCallable
 from interlock.breaker import CircuitBreaker
+from interlock.errors import BulkheadFullError
 from interlock.timeout import sync_timeout, timeout
 
 __all__ = (
+    'BulkheadStrategy',
     'CircuitBreakerStrategy',
     'Pipeline',
     'Strategy',
@@ -168,3 +172,77 @@ class TimeoutStrategy:
         """Run the next async layer, raising ``CallTimeoutError`` on overrun."""
         async with timeout(self._seconds):
             return await call()
+
+
+class BulkheadStrategy:
+    """Cap how many calls run through the pipeline layer concurrently.
+
+    A classic bulkhead: at most ``max_concurrent`` calls execute the next
+    layer at once. When no slot is free, the call either fails immediately
+    (``max_wait=0``, the default) or waits up to ``max_wait`` seconds for a
+    slot — and raises :class:`BulkheadFullError` when none frees up in time.
+    The rejection is deliberately not ``CircuitOpenError``: a full bulkhead
+    signals local saturation, not dependency health.
+
+    One configuration drives both runtimes: sync calls share a
+    ``threading.Semaphore``, async calls an ``asyncio.Semaphore``. The two
+    pools are independent — a strategy instance guarding both sync and async
+    callers admits up to ``max_concurrent`` of each. As with any asyncio
+    primitive, the async side of one instance belongs to a single event loop.
+
+    Args:
+        max_concurrent: Concurrency limit per runtime. Must be >= 1.
+        max_wait: Seconds to wait for a slot before rejecting. ``0`` rejects
+            immediately. Must be >= 0.
+
+    Raises:
+        ValueError: If ``max_concurrent`` or ``max_wait`` is out of range.
+    """
+
+    __slots__ = ('_async_semaphore', '_max_concurrent', '_max_wait', '_sync_semaphore')
+
+    def __init__(self, max_concurrent: int, *, max_wait: float = 0.0) -> None:
+        if max_concurrent < 1:
+            raise ValueError(f'max_concurrent must be >= 1, got {max_concurrent!r}')
+        if max_wait < 0.0:
+            raise ValueError(f'max_wait must be >= 0, got {max_wait!r}')
+
+        self._max_concurrent = max_concurrent
+        self._max_wait = max_wait
+        self._sync_semaphore = threading.Semaphore(max_concurrent)
+        self._async_semaphore = asyncio.Semaphore(max_concurrent)
+
+    def execute(self, call: Callable[[], T]) -> T:
+        """Run the next layer inside a concurrency slot.
+
+        Raises:
+            BulkheadFullError: If no slot frees up within ``max_wait``.
+        """
+        if self._max_wait > 0.0:
+            acquired = self._sync_semaphore.acquire(timeout=self._max_wait)
+        else:
+            acquired = self._sync_semaphore.acquire(blocking=False)
+        if not acquired:
+            raise BulkheadFullError(self._max_concurrent, max_wait=self._max_wait)
+
+        try:
+            return call()
+        finally:
+            self._sync_semaphore.release()
+
+    async def execute_async(self, call: Callable[[], Awaitable[T]]) -> T:
+        """Run the next async layer inside a concurrency slot.
+
+        Raises:
+            BulkheadFullError: If no slot frees up within ``max_wait``.
+        """
+        try:
+            async with asyncio.timeout(self._max_wait):
+                await self._async_semaphore.acquire()
+        except TimeoutError as exc:
+            raise BulkheadFullError(self._max_concurrent, max_wait=self._max_wait) from exc
+
+        try:
+            return await call()
+        finally:
+            self._async_semaphore.release()

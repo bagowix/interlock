@@ -1,6 +1,7 @@
 """Exception and warning hierarchy for interlock."""
 
 __all__ = (
+    'BulkheadFullError',
     'CallTimeoutError',
     'CircuitOpenError',
     'InterlockDeprecationWarning',
@@ -62,6 +63,33 @@ class CallTimeoutError(InterlockError):
         self.timeout = timeout
         message = f'Operation exceeded its {timeout:.3f}s timeout'
         super().__init__(message)
+
+
+class BulkheadFullError(InterlockError):
+    """Raised when a bulkhead rejects a call because no concurrency slot is free.
+
+    Deliberately distinct from ``CircuitOpenError``: a full bulkhead means
+    *this process* is saturated, not that the dependency is unhealthy — the
+    two conditions call for different reactions (shed load vs back off).
+
+    Args:
+        max_concurrent: The bulkhead's concurrency limit.
+        max_wait: Seconds the call was willing to wait for a slot
+            (``0`` means it demanded a free slot immediately).
+    """
+
+    def __init__(self, max_concurrent: int, *, max_wait: float = 0.0) -> None:
+        self.max_concurrent = max_concurrent
+        self.max_wait = max_wait
+
+        super().__init__(self._build_message())
+
+    def _build_message(self) -> str:
+        message = f'Bulkhead is full: {self.max_concurrent} calls in flight'
+        if self.max_wait > 0.0:
+            message = f'{message}; no slot freed within {self.max_wait:.3f}s'
+
+        return message
 
 
 class InterlockDeprecationWarning(UserWarning):

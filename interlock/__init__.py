@@ -4,6 +4,7 @@ from interlock._typing import AsyncCallable, Call, SyncCallable
 from interlock.breaker import CircuitBreaker
 from interlock.config import Config
 from interlock.errors import (
+    BulkheadFullError,
     CallTimeoutError,
     CircuitOpenError,
     InterlockDeprecationWarning,
@@ -32,6 +33,7 @@ __all__ = (
     'VERSION',
     'AsyncCallable',
     'AsyncStorage',
+    'BulkheadFullError',
     'Call',
     'CallTimeoutError',
     'CircuitBreaker',

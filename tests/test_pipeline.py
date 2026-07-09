@@ -8,9 +8,15 @@ from typing import TypeVar
 import pytest
 
 from conftest import FakeClock
-from interlock import CallTimeoutError, CircuitBreaker, CircuitOpenError, Config
+from interlock import BulkheadFullError, CallTimeoutError, CircuitBreaker, CircuitOpenError, Config
 from interlock._detect import is_async_callable
-from interlock.pipeline import CircuitBreakerStrategy, Pipeline, Strategy, TimeoutStrategy
+from interlock.pipeline import (
+    BulkheadStrategy,
+    CircuitBreakerStrategy,
+    Pipeline,
+    Strategy,
+    TimeoutStrategy,
+)
 
 R = TypeVar('R')
 
@@ -135,6 +141,7 @@ def test__strategy__runtime_checkable__adapters_conform() -> None:
 
     assert isinstance(CircuitBreakerStrategy(breaker), Strategy)
     assert isinstance(TimeoutStrategy(1.0), Strategy)
+    assert isinstance(BulkheadStrategy(1), Strategy)
     assert not isinstance(object(), Strategy)
 
 
@@ -292,3 +299,130 @@ def test__composition__sync__order_holds_around_the_breaker(fake_clock: FakeCloc
     assert pipeline.call(lambda: 'ok') == 'ok'
     assert log == ['outer:enter', 'outer:exit']
     assert breaker.snapshot().total_calls == 1
+
+
+def test__bulkhead_strategy__non_positive_limit__raises_value_error() -> None:
+    with pytest.raises(ValueError, match='max_concurrent'):
+        BulkheadStrategy(0)
+
+
+def test__bulkhead_strategy__negative_max_wait__raises_value_error() -> None:
+    with pytest.raises(ValueError, match='max_wait'):
+        BulkheadStrategy(1, max_wait=-0.1)
+
+
+def test__bulkhead_strategy__under_the_limit__runs_and_releases() -> None:
+    pipeline = Pipeline(BulkheadStrategy(1))
+
+    assert pipeline.call(lambda: 'first') == 'first'
+    assert pipeline.call(lambda: 'second') == 'second'  # the slot was released
+
+
+def test__bulkhead_strategy__exception__releases_the_slot() -> None:
+    pipeline = Pipeline(BulkheadStrategy(1))
+
+    def boom() -> None:
+        raise ValueError('boom')
+
+    with pytest.raises(ValueError, match='boom'):
+        pipeline.call(boom)
+    assert pipeline.call(lambda: 'ok') == 'ok'
+
+
+def test__bulkhead_strategy__saturated__rejects_immediately_by_default() -> None:
+    pipeline = Pipeline(BulkheadStrategy(1))
+    inside = threading.Event()
+    release = threading.Event()
+
+    def hold() -> str:
+        inside.set()
+        release.wait(5)
+        return 'held'
+
+    worker = threading.Thread(target=pipeline.call, args=(hold,))
+    worker.start()
+    try:
+        assert inside.wait(5)
+        with pytest.raises(BulkheadFullError):
+            pipeline.call(lambda: 'rejected')
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+
+def test__bulkhead_strategy__slot_freed_within_max_wait__proceeds() -> None:
+    pipeline = Pipeline(BulkheadStrategy(1, max_wait=5.0))
+    inside = threading.Event()
+    release = threading.Event()
+
+    def hold() -> str:
+        inside.set()
+        release.wait(5)
+        return 'held'
+
+    worker = threading.Thread(target=pipeline.call, args=(hold,))
+    worker.start()
+    try:
+        assert inside.wait(5)
+        releaser = threading.Timer(0.05, release.set)
+        releaser.start()
+        assert pipeline.call(lambda: 'ok') == 'ok'  # blocks until the holder frees the slot
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+
+@pytest.mark.asyncio
+async def test__bulkhead_strategy__async_saturated__rejects_immediately() -> None:
+    pipeline = Pipeline(BulkheadStrategy(1))
+    inside = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold() -> str:
+        inside.set()
+        await release.wait()
+        return 'held'
+
+    async def rejected() -> str:
+        return 'never'
+
+    task = asyncio.ensure_future(pipeline.call(hold))
+    await inside.wait()
+    with pytest.raises(BulkheadFullError):
+        await pipeline.call(rejected)
+    release.set()
+    assert await task == 'held'
+
+
+@pytest.mark.asyncio
+async def test__bulkhead_strategy__async_slot_freed_within_max_wait__proceeds() -> None:
+    pipeline = Pipeline(BulkheadStrategy(1, max_wait=5.0))
+    inside = asyncio.Event()
+
+    async def hold() -> str:
+        inside.set()
+        await asyncio.sleep(0.01)
+        return 'held'
+
+    async def follow_up() -> str:
+        return 'ok'
+
+    task = asyncio.ensure_future(pipeline.call(hold))
+    await inside.wait()
+    assert await pipeline.call(follow_up) == 'ok'  # waited for the slot
+    assert await task == 'held'
+
+
+@pytest.mark.asyncio
+async def test__bulkhead_strategy__async_exception__releases_the_slot() -> None:
+    pipeline = Pipeline(BulkheadStrategy(1))
+
+    async def boom() -> None:
+        raise ValueError('boom')
+
+    async def follow_up() -> str:
+        return 'ok'
+
+    with pytest.raises(ValueError, match='boom'):
+        await pipeline.call(boom)
+    assert await pipeline.call(follow_up) == 'ok'
