@@ -126,6 +126,7 @@ breaker.snapshot()       # WindowSnapshot: total_calls, failed_calls, slow_calls
 
 ## Next steps
 
+- [Runnable demo](demo.md) — watch a breaker trip and recover, then debug it
 - [Configuration](guides/configuration.md)
 - [States & manual control](guides/states.md)
 - [Failure classification](guides/failure-classification.md)

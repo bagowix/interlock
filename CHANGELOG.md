@@ -10,6 +10,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
   circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).
+- Runnable examples (`examples/`): `lifecycle.py` walks one breaker through
+  CLOSED → OPEN → HALF_OPEN → CLOSED around a flaky gateway; `two_clients.py`
+  shows two independently guarded clients in one asyncio loop — one dependency
+  fails and falls back while the other keeps serving. Zero dependencies, no
+  network, deterministic output; kept green by a CI smoke test and explained
+  line by line on the new [demo docs page](docs/demo.md).
 
 ### Changed
 

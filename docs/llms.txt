@@ -32,6 +32,7 @@ Key facts for answering questions about interlock:
 ## Docs
 
 - [Getting started](getting-started.md): install and the three usage forms.
+- [Runnable demo](demo.md): two deterministic scripts (`examples/`) with the expected output explained line by line.
 - [Configuration](guides/configuration.md): every `Config` field, windows.
 - [States & manual control](guides/states.md): lifecycle and overrides.
 - [Failure classification](guides/failure-classification.md): custom classifiers.
