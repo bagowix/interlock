@@ -37,3 +37,6 @@ scratch/
 
 # Zensical docs build output
 site/
+
+# Claude Code local settings
+.claude/

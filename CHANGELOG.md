@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Resilience pipeline core** (`interlock.pipeline`): a `Strategy` protocol
+  (sync + async in one class, mirroring the v1 breaker contract), a `Pipeline`
+  executor applying strategies in declaration order (first = outermost, Polly
+  semantics), and adapters for the existing primitives —
+  `CircuitBreakerStrategy` (wraps a standalone `CircuitBreaker` unchanged) and
+  `TimeoutStrategy` (bounds every attempt via `timeout` / `sync_timeout`).
+  `BaseException` passes through every layer unswallowed; the standalone
+  breaker API is untouched.
+
 - Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
   circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).
 - Runnable examples (`examples/`): `lifecycle.py` walks one breaker through
