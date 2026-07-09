@@ -20,7 +20,7 @@ on the callable's nature, the same contract as ``CircuitBreaker.call``.
 import asyncio
 import threading
 from collections.abc import Awaitable, Callable
-from typing import Protocol, TypeVar, cast, runtime_checkable
+from typing import Generic, Protocol, TypeVar, cast, runtime_checkable
 
 from interlock._detect import is_async_callable
 from interlock._typing import AsyncCallable, P, R, SyncCallable
@@ -31,12 +31,14 @@ from interlock.timeout import sync_timeout, timeout
 __all__ = (
     'BulkheadStrategy',
     'CircuitBreakerStrategy',
+    'FallbackStrategy',
     'Pipeline',
     'Strategy',
     'TimeoutStrategy',
 )
 
 T = TypeVar('T')
+F_co = TypeVar('F_co', covariant=True)
 
 
 @runtime_checkable
@@ -73,7 +75,7 @@ class Pipeline:
 
     __slots__ = ('_strategies',)
 
-    def __init__(self, *strategies: Strategy) -> None:
+    def __init__(self, *strategies: 'Strategy | FallbackStrategy[object]') -> None:
         self._strategies = strategies
 
     def call(
@@ -98,7 +100,11 @@ class Pipeline:
             if index == len(self._strategies):
                 return fn(*args, **kwargs)
 
-            return self._strategies[index].execute(lambda: layer(index + 1))
+            # A FallbackStrategy widens its own result to T | F; at the
+            # pipeline level the substitute is the user's contract to shape
+            # like R, so the executor keeps the call's type.
+            strategy = cast('Strategy', self._strategies[index])
+            return strategy.execute(lambda: layer(index + 1))
 
         return layer(0)
 
@@ -110,7 +116,8 @@ class Pipeline:
             async def next_layer() -> R:
                 return await layer(index + 1)
 
-            return await self._strategies[index].execute_async(next_layer)
+            strategy = cast('Strategy', self._strategies[index])
+            return await strategy.execute_async(next_layer)
 
         return await layer(0)
 
@@ -246,3 +253,66 @@ class BulkheadStrategy:
             return await call()
         finally:
             self._async_semaphore.release()
+
+
+class FallbackStrategy(Generic[F_co]):
+    """Replace selected failures of the next layer with an explicit substitute.
+
+    Nothing is silent here: the substitution happens only for the exception
+    types named in ``on``, the ``fallback`` callable receives the exception it
+    is standing in for, and the strategy's return type is honestly ``T | F``
+    — the checkers see the union instead of an ``Any``::
+
+        strategy = FallbackStrategy(lambda exc: [], on=(CircuitOpenError,))
+        picks = strategy.execute(fetch_picks)   # inferred: list[str] | list[Never]
+
+    ``on`` accepts ``Exception`` subclasses only — ``BaseException`` kinds
+    (cancellation, ``KeyboardInterrupt``) always propagate, preserving the v1
+    invariant. Place the fallback outermost so it also covers rejections
+    raised by the inner strategies (``CircuitOpenError``,
+    ``BulkheadFullError``, ``CallTimeoutError``).
+
+    Args:
+        fallback: Called with the caught exception; its return value becomes
+            the call's result. Keep it cheap and local (a cached value, an
+            empty response) — it runs inside the failure path.
+        on: Exception types that trigger the substitution. Defaults to
+            ``(Exception,)``.
+
+    Raises:
+        ValueError: If ``on`` is empty.
+        TypeError: If an ``on`` entry is not an ``Exception`` subclass.
+    """
+
+    __slots__ = ('_fallback', '_on')
+
+    def __init__(
+        self,
+        fallback: Callable[[BaseException], F_co],
+        *,
+        on: tuple[type[Exception], ...] = (Exception,),
+    ) -> None:
+        if not on:
+            raise ValueError('on must name at least one exception type')
+        for kind in on:
+            # The signature already promises Exception subclasses; this guards
+            # untyped callers from silently catching BaseException kinds.
+            if not (isinstance(kind, type) and issubclass(kind, Exception)):  # pyright: ignore[reportUnnecessaryIsInstance]
+                raise TypeError(f'on entries must be Exception subclasses, got {kind!r}')
+
+        self._fallback = fallback
+        self._on = on
+
+    def execute(self, call: Callable[[], T]) -> T | F_co:
+        """Run the next layer, substituting the fallback value on a match."""
+        try:
+            return call()
+        except self._on as exc:
+            return self._fallback(exc)
+
+    async def execute_async(self, call: Callable[[], Awaitable[T]]) -> T | F_co:
+        """Run the next async layer, substituting the fallback value on a match."""
+        try:
+            return await call()
+        except self._on as exc:
+            return self._fallback(exc)

@@ -29,6 +29,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   waits up to `max_wait` seconds, raising the new `BulkheadFullError`
   (exported from `interlock`) — deliberately distinct from `CircuitOpenError`:
   local saturation is not dependency failure.
+- `FallbackStrategy` (`interlock.pipeline`): substitutes an explicit fallback
+  value for selected failures only — the `fallback` callable receives the
+  caught exception, `on` accepts `Exception` subclasses exclusively (so
+  cancellation always propagates), and the strategy's result is typed as the
+  honest union `T | F`, not `Any`. Works outermost over `CircuitOpenError` /
+  `BulkheadFullError` / `CallTimeoutError`, and never masks shadow-mode
+  (`metrics_only`) statistics.
 
 - Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
   circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).
