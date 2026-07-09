@@ -26,6 +26,7 @@
 | interlock/integrations/tenacity.py     |       23 |        0 |        6 |        0 |     100% |           |
 | interlock/listeners.py                 |       19 |        0 |        0 |        0 |     100% |           |
 | interlock/outcome.py                   |       13 |        0 |        0 |        0 |     100% |           |
+| interlock/pipeline.py                  |       55 |        0 |        8 |        0 |     100% |           |
 | interlock/protocols.py                 |       40 |        0 |        0 |        0 |     100% |           |
 | interlock/registry.py                  |       22 |        0 |        2 |        0 |     100% |           |
 | interlock/shared.py                    |       11 |        0 |        0 |        0 |     100% |           |
@@ -33,7 +34,7 @@
 | interlock/timeout.py                   |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py                   |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py                    |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                              | **1249** |    **0** |  **206** |    **0** | **100%** |           |
+| **TOTAL**                              | **1304** |    **0** |  **214** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
