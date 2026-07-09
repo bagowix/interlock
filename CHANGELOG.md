@@ -16,6 +16,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `TimeoutStrategy` (bounds every attempt via `timeout` / `sync_timeout`).
   `BaseException` passes through every layer unswallowed; the standalone
   breaker API is untouched.
+- `RetryStrategy` (`interlock.integrations.tenacity`, requires the `tenacity`
+  extra): a bounded retry layer for the pipeline delegating all policy to
+  tenacity — attempts always capped, the original exception re-raised when the
+  budget runs out, `CircuitOpenError` not retried by default
+  (`retry_unless_open`), patient mode via `wait_probe`, sync/async sleep
+  injectable, `before_sleep` hook passed through. Importing the module without
+  tenacity installed now raises an error pointing at the extra.
 
 - Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
   circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).

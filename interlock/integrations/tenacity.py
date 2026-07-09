@@ -12,6 +12,9 @@ retry × breaker composition goes wrong in practice:
   wait than fail): when the breaker rejects a call, sleep exactly until the
   next probe is allowed (``CircuitOpenError.retry_after``) instead of a blind
   exponential backoff.
+* ``RetryStrategy`` — the same policies packaged as an ``interlock.pipeline``
+  strategy: a bounded tenacity retry layer composable with
+  ``CircuitBreakerStrategy`` and ``TimeoutStrategy``.
 
 Recommended default — fail fast::
 
@@ -41,14 +44,34 @@ Patient mode — wait for the breaker to allow a probe::
     )
 """
 
+import asyncio
 import random
+import time
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
-from tenacity import RetryCallState, retry_base, retry_if_exception
-from tenacity.wait import wait_base
+try:
+    from tenacity import (
+        AsyncRetrying,
+        RetryCallState,
+        Retrying,
+        retry_base,
+        retry_if_exception,
+        stop_after_attempt,
+        wait_exponential_jitter,
+    )
+    from tenacity.wait import wait_base
+except ImportError as exc:
+    raise ImportError(
+        'interlock.integrations.tenacity requires the tenacity package: '
+        "install it with `pip install 'interlock-cb[tenacity]'`"
+    ) from exc
 
 from interlock.errors import CircuitOpenError
 
-__all__ = ('retry_unless_open', 'wait_probe')
+__all__ = ('RetryStrategy', 'retry_unless_open', 'wait_probe')
+
+T = TypeVar('T')
 
 
 def retry_unless_open(*transient: type[BaseException]) -> retry_base:
@@ -108,3 +131,89 @@ class wait_probe(wait_base):  # noqa: N801 - tenacity wait strategies are lower-
             if isinstance(exception, CircuitOpenError) and exception.retry_after is not None:
                 return exception.retry_after + random.uniform(0.0, self._jitter)  # noqa: S311 - jitter, not crypto
         return self._fallback(retry_state)
+
+
+class RetryStrategy:
+    """A bounded retry layer for ``interlock.pipeline``, delegating policy to tenacity.
+
+    The strategy owns no retry logic: it builds a tenacity ``Retrying`` /
+    ``AsyncRetrying`` controller around the next pipeline layer. Attempts are
+    always capped (``stop_after_attempt``) and the original exception is
+    re-raised when the budget runs out (``reraise=True``) — no ``RetryError``
+    wrapping, no unbounded loops.
+
+    The default policy is the fail-fast composition this module documents:
+    retry any ordinary exception, stop immediately on ``CircuitOpenError``
+    (``retry_unless_open()``), exponential backoff with jitter. For the
+    patient mode pass ``retry=retry_if_exception_type((..., CircuitOpenError))``
+    and ``wait=wait_probe(...)``.
+
+    Recommended order in a pipeline — retry outside, breaker inside, so every
+    attempt is an honest breaker call::
+
+        pipeline = Pipeline(
+            RetryStrategy(attempts=4),
+            CircuitBreakerStrategy(breaker),
+            TimeoutStrategy(2.0),
+        )
+
+    Args:
+        attempts: Total attempt cap, including the first call. Must be >= 1.
+        retry: A tenacity retry predicate. Defaults to ``retry_unless_open()``.
+        wait: A tenacity wait strategy. Defaults to ``wait_exponential_jitter()``.
+        sleep: Sleep function for the sync path — injectable in tests.
+            Defaults to ``time.sleep``.
+        async_sleep: Sleep coroutine function for the async path — injectable
+            in tests. Defaults to ``asyncio.sleep``.
+        before_sleep: Optional tenacity hook invoked before each backoff sleep,
+            e.g. ``tenacity.before_sleep_log(logger, logging.WARNING)``.
+
+    Raises:
+        ValueError: If ``attempts`` is not positive.
+    """
+
+    __slots__ = ('_async_sleep', '_attempts', '_before_sleep', '_retry', '_sleep', '_wait')
+
+    def __init__(
+        self,
+        *,
+        attempts: int = 3,
+        retry: retry_base | None = None,
+        wait: wait_base | None = None,
+        sleep: Callable[[int | float], None] | None = None,
+        async_sleep: Callable[[float], Awaitable[None]] | None = None,
+        before_sleep: Callable[[RetryCallState], None] | None = None,
+    ) -> None:
+        if attempts < 1:
+            raise ValueError(f'attempts must be >= 1, got {attempts!r}')
+
+        self._attempts = attempts
+        self._retry = retry if retry is not None else retry_unless_open()
+        self._wait = wait if wait is not None else wait_exponential_jitter()
+        self._sleep = sleep if sleep is not None else time.sleep
+        self._async_sleep = async_sleep if async_sleep is not None else asyncio.sleep
+        self._before_sleep = before_sleep
+
+    def execute(self, call: Callable[[], T]) -> T:
+        """Run the next layer with retries; re-raise the last error when capped."""
+        controller = Retrying(
+            stop=stop_after_attempt(self._attempts),
+            retry=self._retry,
+            wait=self._wait,
+            sleep=self._sleep,
+            before_sleep=self._before_sleep,
+            reraise=True,
+        )
+        return controller(call)
+
+    async def execute_async(self, call: Callable[[], Awaitable[T]]) -> T:
+        """Run the next async layer with retries; re-raise the last error when capped."""
+        controller = AsyncRetrying(
+            stop=stop_after_attempt(self._attempts),
+            retry=self._retry,
+            wait=self._wait,
+            sleep=self._async_sleep,
+            before_sleep=self._before_sleep,
+            reraise=True,
+        )
+        return await controller(call)

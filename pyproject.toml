@@ -117,6 +117,9 @@ ban-relative-imports = "all"
 "interlock/breaker.py" = [
   "PLR0913", # the public constructor mirrors the engine's keyword-only collaborators
 ]
+"interlock/integrations/tenacity.py" = [
+  "PLR0913", # RetryStrategy takes keyword-only tenacity policy collaborators
+]
 "tests/**/*.py" = [
   "S101",    # asserts are the point of tests
   "PLR2004", # magic values are fine in tests
