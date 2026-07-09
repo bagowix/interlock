@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
+  circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).
+
+### Changed
+
+- Docs: integration page titles no longer repeat the word "integration"
+  under the *Integrations* nav section (e.g. "httpx2 integration" → "httpx2").
+
 ## [1.3.0] - 2026-07-08
 
 ### Added

@@ -1,4 +1,4 @@
-# FastAPI integration
+# FastAPI
 
 The `interlock-cb[fastapi]` extra protects a route's outgoing dependency with a
 shared `Registry` and turns a tripped breaker into a clean

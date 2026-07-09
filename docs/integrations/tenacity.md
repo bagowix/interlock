@@ -1,4 +1,4 @@
-# tenacity integration (retries)
+# tenacity (retries)
 
 interlock deliberately ships no retry engine of its own:
 [tenacity](https://tenacity.readthedocs.io/) already does backoff, jitter,

@@ -61,7 +61,8 @@ Something out of date? Please open a PR.</sub>
 Reach for an established library if you want a small, proven breaker today or a
 built-in fallback. Choose interlock-cb when you want rate-based windows,
 slow-call detection, coordinated state with graceful degradation and a fully
-typed API.
+typed API. The [full comparison](docs/comparison.md) also covers **aiobreaker**
+and **purgatory**.
 
 [pybreaker]: https://github.com/danielfm/pybreaker
 [circuitbreaker]: https://github.com/fabfuel/circuitbreaker
@@ -217,6 +218,7 @@ The sources live in [`docs/`](docs/):
 - [Retries and circuit breakers](docs/guides/retries.md)
 - [Integrations overview](docs/integrations/index.md) — httpx2, aiohttp,
   requests, tenacity, FastAPI, Redis, LLM SDKs, Flask/Django
+- [Comparison](docs/comparison.md) — vs pybreaker, circuitbreaker, aiobreaker, purgatory
 - [API reference](docs/reference.md)
 
 ## Contributing

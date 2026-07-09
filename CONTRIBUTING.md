@@ -54,8 +54,8 @@ CI runs both.
 - **Types are part of the API.** Public surface stays fully typed; mypy and
   pyright must pass in strict mode.
 - **Keep the core dependency-free.** Anything external belongs in an extra
-  (`interlock-cb[otel]`, `interlock-cb[httpx2]`, `interlock-cb[redis]`), imported
-  lazily.
+  (e.g. `interlock-cb[httpx2]`, `interlock-cb[tenacity]`, `interlock-cb[redis]`),
+  imported lazily.
 - **Conventional commits.** Use `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
   `chore:`, `perf:`, `ci:` prefixes.
 - **Update the docs and CHANGELOG.** User-facing changes update the relevant

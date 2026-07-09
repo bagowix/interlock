@@ -1,4 +1,4 @@
-# requests integration
+# requests
 
 The `interlock-cb[requests]` extra guards every request a `Session` sends
 with a circuit breaker **per host** — mounted once, no decorators in call
