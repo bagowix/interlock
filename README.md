@@ -23,7 +23,7 @@
 | interlock/integrations/otel.py         |       25 |        0 |        0 |        0 |     100% |           |
 | interlock/integrations/redis.py        |       93 |        0 |        8 |        0 |     100% |           |
 | interlock/integrations/requests.py     |       31 |        0 |        4 |        0 |     100% |           |
-| interlock/integrations/tenacity.py     |       23 |        0 |        6 |        0 |     100% |           |
+| interlock/integrations/tenacity.py     |       48 |        0 |        8 |        0 |     100% |           |
 | interlock/listeners.py                 |       19 |        0 |        0 |        0 |     100% |           |
 | interlock/outcome.py                   |       13 |        0 |        0 |        0 |     100% |           |
 | interlock/pipeline.py                  |       55 |        0 |        8 |        0 |     100% |           |
@@ -34,7 +34,7 @@
 | interlock/timeout.py                   |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py                   |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py                    |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                              | **1304** |    **0** |  **214** |    **0** | **100%** |           |
+| **TOTAL**                              | **1329** |    **0** |  **216** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
