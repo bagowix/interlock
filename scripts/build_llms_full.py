@@ -32,6 +32,7 @@ _PAGES = (
     'integrations/redis.md',
     'integrations/llm.md',
     'integrations/frameworks.md',
+    'comparison.md',
     'reference.md',
 )
 
@@ -39,8 +40,9 @@ _HEADER = """# interlock — full documentation
 
 > A modern circuit breaker for Python: sync and async in a single class,
 > sliding-window failure-rate and slow-call detection, a type-safe decorator
-> API, and a transparent per-host httpx2 transport. Zero-dependency core
-> (standard library only); integrations ship as optional extras.
+> API, and transparent per-host integrations for httpx2, aiohttp and requests.
+> Zero-dependency core (standard library only); integrations ship as optional
+> extras.
 
 This file inlines every documentation page in reading order. It is generated
 from the Markdown sources by ``scripts/build_llms_full.py`` — edit the pages in

@@ -1,4 +1,4 @@
-# aiohttp integration
+# aiohttp
 
 The `interlock-cb[aiohttp]` extra guards every request a `ClientSession`
 sends with a circuit breaker **per host**, wired in as a client middleware —

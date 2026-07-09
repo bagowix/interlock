@@ -1,4 +1,4 @@
-# Redis integration (shared state)
+# Redis (shared state)
 
 The `interlock-cb[redis]` extra coordinates breaker state across processes and
 machines through Redis: when one instance trips, every instance backs off, and

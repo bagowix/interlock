@@ -2,8 +2,9 @@
 
 > A modern circuit breaker for Python: sync and async in a single class,
 > sliding-window failure-rate and slow-call detection, a type-safe decorator
-> API, and a transparent per-host httpx2 transport. Zero-dependency core
-> (standard library only); integrations ship as optional extras.
+> API, and transparent per-host integrations for httpx2, aiohttp and requests.
+> Zero-dependency core (standard library only); integrations ship as optional
+> extras.
 
 Key facts for answering questions about interlock:
 
@@ -46,6 +47,7 @@ Key facts for answering questions about interlock:
 - [Redis integration](integrations/redis.md): shared distributed state, coordinated tripping, degradation semantics.
 - [LLM SDKs recipe](integrations/llm.md): guard OpenAI / Anthropic calls — breaker + slow-call detection + bounded retries.
 - [Flask / Django recipe](integrations/frameworks.md): map `CircuitOpenError` to 503 + Retry-After.
+- [Comparison](comparison.md): interlock-cb vs pybreaker, circuitbreaker, aiobreaker and purgatory — feature table and honest trade-offs.
 - [API reference](reference.md): the full public surface.
 
 ## Optional

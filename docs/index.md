@@ -20,6 +20,9 @@ integrations at the transport level.
   across instances through Redis/Valkey, with graceful degradation to local
   state — see the [Redis integration](integrations/redis.md).
 
+Choosing between libraries? See the honest
+[comparison with pybreaker, circuitbreaker, aiobreaker and purgatory](comparison.md).
+
 ## Installation
 
 === "uv"
@@ -65,5 +68,7 @@ manager, and can be called directly via `breaker.call(fn, ...)` — start with
 
 interlock shipped a polished core first (state machine, windows, sync/async,
 slow-call detection), then grew deliberately: v1.1 added timeouts, proactive
-`OPEN → HALF_OPEN` and FastAPI; v1.2 adds coordinated distributed state over
-Redis. Retries and a full resilience pipeline are planned for v2.
+`OPEN → HALF_OPEN` and FastAPI; v1.2 added coordinated distributed state over
+Redis; v1.3 added the integrations wave — aiohttp, requests and
+[retry × breaker composition via tenacity](guides/retries.md). A full
+declarative resilience pipeline is planned for v2.

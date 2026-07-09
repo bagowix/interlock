@@ -2,8 +2,9 @@
 
 > A modern circuit breaker for Python: sync and async in a single class,
 > sliding-window failure-rate and slow-call detection, a type-safe decorator
-> API, and a transparent per-host httpx2 transport. Zero-dependency core
-> (standard library only); integrations ship as optional extras.
+> API, and transparent per-host integrations for httpx2, aiohttp and requests.
+> Zero-dependency core (standard library only); integrations ship as optional
+> extras.
 
 This file inlines every documentation page in reading order. It is generated
 from the Markdown sources by ``scripts/build_llms_full.py`` — edit the pages in
@@ -40,10 +41,13 @@ The core is pure standard library. External integrations are optional extras —
 add the ones you need (same names with `pip install` / `poetry add`):
 
 ```bash
-uv add 'interlock-cb[otel]'    # OpenTelemetry metrics listener
-uv add 'interlock-cb[httpx2]'  # per-host httpx2 transport
-uv add 'interlock-cb[fastapi]' # CircuitOpenError -> 503 + Retry-After
-uv add 'interlock-cb[redis]'   # shared distributed state
+uv add 'interlock-cb[otel]'     # OpenTelemetry metrics listener
+uv add 'interlock-cb[httpx2]'   # per-host httpx2 transport
+uv add 'interlock-cb[aiohttp]'  # per-host aiohttp client middleware
+uv add 'interlock-cb[requests]' # per-host requests session adapter
+uv add 'interlock-cb[tenacity]' # retry x breaker composition helpers
+uv add 'interlock-cb[fastapi]'  # CircuitOpenError -> 503 + Retry-After
+uv add 'interlock-cb[redis]'    # shared distributed state
 ```
 
 ## Create a breaker
@@ -143,7 +147,7 @@ breaker.snapshot()       # WindowSnapshot: total_calls, failed_calls, slow_calls
 - [States & manual control](guides/states.md)
 - [Failure classification](guides/failure-classification.md)
 - [Observability](guides/observability.md)
-- [httpx2 integration](integrations/httpx2.md)
+- [Integrations](integrations/index.md) — httpx2, aiohttp, requests, tenacity, FastAPI, Redis
 
 ---
 
@@ -764,7 +768,7 @@ is prioritised by demand.
 
 <!-- source: docs/integrations/httpx2.md -->
 
-# httpx2 integration
+# httpx2
 
 The `interlock-cb[httpx2]` extra wraps an [httpx2](https://pypi.org/project/httpx2/)
 transport so a circuit breaker is applied **per host** transparently — no
@@ -857,7 +861,7 @@ fail on `408 Request Timeout`.
 
 <!-- source: docs/integrations/aiohttp.md -->
 
-# aiohttp integration
+# aiohttp
 
 The `interlock-cb[aiohttp]` extra guards every request a `ClientSession`
 sends with a circuit breaker **per host**, wired in as a client middleware —
@@ -937,7 +941,7 @@ retries combine with the [tenacity integration](tenacity.md) and read
 
 <!-- source: docs/integrations/requests.md -->
 
-# requests integration
+# requests
 
 The `interlock-cb[requests]` extra guards every request a `Session` sends
 with a circuit breaker **per host** — mounted once, no decorators in call
@@ -1017,7 +1021,7 @@ retries combine with the [tenacity integration](tenacity.md) and read
 
 <!-- source: docs/integrations/tenacity.md -->
 
-# tenacity integration (retries)
+# tenacity (retries)
 
 interlock deliberately ships no retry engine of its own:
 [tenacity](https://tenacity.readthedocs.io/) already does backoff, jitter,
@@ -1128,7 +1132,7 @@ friends.
 
 <!-- source: docs/integrations/fastapi.md -->
 
-# FastAPI integration
+# FastAPI
 
 The `interlock-cb[fastapi]` extra protects a route's outgoing dependency with a
 shared `Registry` and turns a tripped breaker into a clean
@@ -1246,7 +1250,7 @@ async def on_open(request: Request, exc: CircuitOpenError) -> Response:
 
 <!-- source: docs/integrations/redis.md -->
 
-# Redis integration (shared state)
+# Redis (shared state)
 
 The `interlock-cb[redis]` extra coordinates breaker state across processes and
 machines through Redis: when one instance trips, every instance backs off, and
@@ -1543,8 +1547,10 @@ app = Flask(__name__)
 def on_circuit_open(exc: CircuitOpenError):
     response = jsonify({'detail': str(exc)})
     response.status_code = 503
+
     if exc.retry_after is not None:
         response.headers['Retry-After'] = str(math.ceil(exc.retry_after))
+
     return response
 ```
 
@@ -1570,13 +1576,16 @@ class CircuitOpenMiddleware:
     def process_exception(self, request, exception):
         if not isinstance(exception, CircuitOpenError):
             return None
+
         response = HttpResponse(
             json.dumps({'detail': str(exception)}),
             status=503,
             content_type='application/json',
         )
+
         if exception.retry_after is not None:
             response['Retry-After'] = str(math.ceil(exception.retry_after))
+
         return response
 ```
 
@@ -1602,6 +1611,106 @@ def charge(amount: int) -> str:
 `Retry-After` is rounded up to whole seconds (per RFC 7231) and omitted when
 the breaker cannot estimate the next probe (for example after
 `force_open()`).
+
+---
+
+<!-- source: docs/comparison.md -->
+
+# Comparison
+
+Picking a circuit breaker is mostly about which failure model, runtime and
+coordination story you need. This page compares interlock-cb with the
+established Python circuit breakers — honestly. interlock-cb is the youngest
+of the five (first released in 2026); [pybreaker](https://github.com/danielfm/pybreaker),
+[circuitbreaker](https://github.com/fabfuel/circuitbreaker),
+[aiobreaker](https://github.com/arlyon/aiobreaker) and
+[purgatory](https://github.com/mardiros/purgatory) have carried production
+traffic for years, and for many projects one of them is exactly the right
+choice.
+
+## Feature table
+
+| Feature | interlock-cb | pybreaker | circuitbreaker | aiobreaker | purgatory |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Core states (closed / open / half-open) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Choose which exceptions count as failures | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Zero-dependency core | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `async` / `await` (asyncio) | ✅ | Tornado | ✅ | ✅ | ✅ |
+| Sync and async in **one** breaker class | ✅ | — | ✅ | ✅ | separate factories |
+| Trip condition | failure **rate** over a window | consecutive count | consecutive count | consecutive count | consecutive count |
+| Time-based sliding window | ✅ | — | — | — | — |
+| Slow-call detection | ✅ | — | — | — | — |
+| Result-based failure classification | ✅ | — | — | — | — |
+| Event / state-change listeners | ✅ | ✅ | — | ✅ | ✅ |
+| Shared state across processes (Redis) | ✅ | ✅ | — | ✅ | ✅ |
+| Globally budgeted recovery probes | ✅ | — | — | — | — |
+| Fallback function | planned | — | ✅ | — | — |
+| Fully typed API (`py.typed`) | ✅ | — | — | — | ✅ |
+| Signature-preserving decorator (`ParamSpec`) | ✅ | — | — | — | — |
+| HTTP client integrations (httpx2 / aiohttp / requests) | ✅ | — | — | — | — |
+| Retry composition helpers (tenacity) | ✅ | — | — | — | — |
+| OpenTelemetry metrics | ✅ | — | — | — | — |
+| Operator overrides (force-open / disable / shadow mode) | ✅ | — | — | — | — |
+| Years of production use | new | ✅ | ✅ | ✅ | ✅ |
+| Latest release (as of July 2026) | 1.3.0 · 2026 | 1.4.1 · 2025 | 2.1.3 | 1.2.0 · 2021 | 3.0.1 · 2024 |
+| Python | ≥ 3.11 | ≥ 3.9 | ≥ 3.8 | ≥ 3.6 | ≥ 3.9 |
+
+<sub>Compared against pybreaker 1.4.1, circuitbreaker 2.1.3, aiobreaker 1.2.0
+and purgatory 3.0.1, as documented in July 2026. "planned" items are on the
+interlock-cb roadmap. Something out of date or unfair? Please
+[open a PR](https://github.com/bagowix/interlock/pulls).</sub>
+
+## The four established libraries, honestly
+
+**pybreaker** is the original Python circuit breaker and the most proven one:
+a small, stable sync breaker with listeners and optional Redis-backed state,
+maintained for well over a decade. Its async support targets Tornado, not
+asyncio, and it trips on a consecutive-failure count rather than a failure
+rate. If you run a synchronous stack and want the most battle-tested option,
+start here.
+
+**circuitbreaker** has the smallest API of the five: one `@circuit` decorator
+that also handles async functions, plus the only built-in **fallback
+function** in this table. There are no listeners, no shared state and no rate
+window — which is precisely its appeal when you need a guard on a handful of
+call sites and nothing else.
+
+**aiobreaker** is pybreaker ported to native asyncio, with the same
+listener and Redis-storage features. Its last release was in 2021; for new
+projects, prefer an actively maintained alternative.
+
+**purgatory** brings a fully typed sync + async breaker with Redis storage
+and event hooks. Sync and async live in separate factory classes
+(`SyncCircuitBreakerFactory` / `AsyncCircuitBreakerFactory`), and tripping is
+a consecutive-failure threshold with a TTL on the open state.
+
+## Where interlock-cb differs
+
+- **Rate over a window, not a streak.** A consecutive-failure counter resets
+  on any single success, so a dependency failing 90% of requests under load
+  can keep a breaker closed indefinitely. interlock trips on the failure
+  *rate* across a count- or time-based sliding window
+  ([configuration](guides/configuration.md)).
+- **Slow calls are failures too.** A dependency that answers in 30 s can be
+  worse than one that errors fast. `slow_call_duration_threshold` +
+  `slow_call_rate_threshold` trip the breaker on latency degradation alone.
+- **One class, both runtimes.** The same `CircuitBreaker` instance guards sync
+  and async callables — decorator, context manager, or `call()` — and the
+  decorator preserves the wrapped signature for type checkers.
+- **Coordination built for fleets.** With the Redis storage, tripping is
+  atomic across racing instances and half-open probes are budgeted globally,
+  with graceful degradation to local state when Redis is down
+  ([Redis integration](integrations/redis.md)).
+- **Meets your stack where it is.** Per-host breakers ship for httpx2,
+  aiohttp and requests; tenacity glue composes retries correctly; FastAPI
+  maps rejections to `503 + Retry-After`
+  ([integrations overview](integrations/index.md)).
+
+The honest trade-off: interlock-cb requires Python ≥ 3.11, has no built-in
+fallback yet, and has not had years in production. Reach for an established
+library if that maturity matters more than the feature gap; choose
+interlock-cb when you want rate-based windows, slow-call detection,
+coordinated state and a fully typed API.
 
 ---
 
