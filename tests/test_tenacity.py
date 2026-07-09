@@ -1,5 +1,8 @@
 """Tests for the tenacity integration (``interlock.integrations.tenacity``)."""
 
+import importlib
+import sys
+
 import pytest
 from tenacity import (
     RetryError,
@@ -12,7 +15,8 @@ from tenacity import (
 from tests.conftest import FakeClock
 
 from interlock import CircuitBreaker, CircuitOpenError, Config, State
-from interlock.integrations.tenacity import retry_unless_open, wait_probe
+from interlock.integrations.tenacity import RetryStrategy, retry_unless_open, wait_probe
+from interlock.pipeline import CircuitBreakerStrategy, Pipeline, Strategy
 
 _TRIP_FAST = Config(
     minimum_number_of_calls=2,
@@ -269,3 +273,201 @@ def test__wait_probe__result_based_retry__falls_back() -> None:
     with pytest.raises(RetryError):
         retrying(pending)
     assert waits == [2.0]
+
+
+# --- RetryStrategy -----------------------------------------------------------
+
+
+def test__retry_strategy__attempts_below_one__raises_value_error() -> None:
+    with pytest.raises(ValueError, match='attempts'):
+        RetryStrategy(attempts=0)
+
+
+def test__retry_strategy__conforms_to_strategy_protocol() -> None:
+    assert isinstance(RetryStrategy(sleep=_noop_sleep), Strategy)
+
+
+def test__retry_strategy__transient_failures__retries_to_success() -> None:
+    attempts = 0
+
+    def flaky() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ValueError('transient')
+        return 'ok'
+
+    pipeline = Pipeline(RetryStrategy(attempts=3, sleep=_noop_sleep))
+
+    assert pipeline.call(flaky) == 'ok'
+    assert attempts == 3
+
+
+def test__retry_strategy__attempts_exhausted__reraises_the_original_error() -> None:
+    attempts = 0
+
+    def failing() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise ValueError('still down')
+
+    pipeline = Pipeline(RetryStrategy(attempts=2, sleep=_noop_sleep))
+
+    with pytest.raises(ValueError, match='still down'):
+        pipeline.call(failing)
+    assert attempts == 2
+
+
+def test__retry_strategy__circuit_open__not_retried_by_default() -> None:
+    attempts = 0
+
+    def rejected() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise CircuitOpenError('payments', retry_after=1.0)
+
+    pipeline = Pipeline(RetryStrategy(attempts=5, sleep=_noop_sleep))
+
+    with pytest.raises(CircuitOpenError):
+        pipeline.call(rejected)
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test__retry_strategy__async_transient_failures__retries_to_success() -> None:
+    attempts = 0
+    naps: list[float] = []
+
+    async def record_nap(seconds: float) -> None:
+        naps.append(seconds)
+
+    async def flaky() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ValueError('transient')
+        return 'ok'
+
+    pipeline = Pipeline(RetryStrategy(attempts=3, wait=wait_fixed(1.5), async_sleep=record_nap))
+
+    assert await pipeline.call(flaky) == 'ok'
+    assert attempts == 3
+    assert naps == [1.5, 1.5]
+
+
+@pytest.mark.asyncio
+async def test__retry_strategy__async_circuit_open__not_retried_by_default() -> None:
+    attempts = 0
+
+    async def record_nap(_seconds: float) -> None:
+        return None
+
+    async def rejected() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise CircuitOpenError('payments', retry_after=1.0)
+
+    pipeline = Pipeline(RetryStrategy(attempts=5, async_sleep=record_nap))
+
+    with pytest.raises(CircuitOpenError):
+        await pipeline.call(rejected)
+    assert attempts == 1
+
+
+def test__retry_strategy__custom_wait__drives_the_delays() -> None:
+    waits: list[float] = []
+    attempts = 0
+
+    def failing() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise ValueError('down')
+
+    pipeline = Pipeline(RetryStrategy(attempts=3, wait=wait_fixed(2.5), sleep=waits.append))
+
+    with pytest.raises(ValueError, match='down'):
+        pipeline.call(failing)
+    assert waits == [2.5, 2.5]
+
+
+def test__retry_strategy__before_sleep__observes_every_retry() -> None:
+    observed: list[int] = []
+
+    def failing() -> None:
+        raise ValueError('down')
+
+    strategy = RetryStrategy(
+        attempts=3,
+        sleep=_noop_sleep,
+        before_sleep=lambda retry_state: observed.append(retry_state.attempt_number),
+    )
+
+    with pytest.raises(ValueError, match='down'):
+        Pipeline(strategy).call(failing)
+    assert observed == [1, 2]
+
+
+def test__retry_strategy__retry_outside_breaker__stops_once_the_circuit_opens(
+    fake_clock: FakeClock,
+) -> None:
+    """The recommended order: every attempt is a breaker call, rejection ends the retry."""
+    breaker = CircuitBreaker(name='dep', config=_TRIP_FAST, clock=fake_clock)
+    pipeline = Pipeline(
+        RetryStrategy(attempts=5, sleep=_noop_sleep),
+        CircuitBreakerStrategy(breaker),
+    )
+    reached = 0
+
+    def failing() -> None:
+        nonlocal reached
+        reached += 1
+        raise ValueError('down')
+
+    with pytest.raises(CircuitOpenError):
+        pipeline.call(failing)
+
+    assert reached == 2  # attempts 1-2 trip the breaker; attempt 3 is rejected and not retried
+    assert breaker.state is State.OPEN
+
+
+def test__retry_strategy__patient_mode__waits_for_the_probe_and_recovers(
+    fake_clock: FakeClock,
+) -> None:
+    breaker = CircuitBreaker(name='dep', config=_TRIP_FAST, clock=fake_clock)
+    pipeline = Pipeline(
+        RetryStrategy(
+            attempts=5,
+            retry=retry_if_exception_type((ValueError, CircuitOpenError)),
+            wait=wait_probe(wait_fixed(0.0), jitter=0.0),
+            sleep=fake_clock.advance,
+        ),
+        CircuitBreakerStrategy(breaker),
+    )
+    reached = 0
+
+    def recovering() -> str:
+        nonlocal reached
+        reached += 1
+        if reached < 3:
+            raise ValueError('down')
+        return 'ok'
+
+    # Attempts 1-2 fail and trip the breaker; attempt 3 is rejected and
+    # wait_probe advances the clock to the probe window; attempt 4 is the
+    # probe, succeeds, and closes the circuit.
+    assert pipeline.call(recovering) == 'ok'
+    assert reached == 3
+    assert breaker.state is State.CLOSED
+
+
+def test__module__imported_without_tenacity__raises_a_helpful_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = importlib.import_module('interlock.integrations.tenacity')
+    try:
+        monkeypatch.setitem(sys.modules, 'tenacity', None)
+        with pytest.raises(ImportError, match=r'interlock-cb\[tenacity\]'):
+            importlib.reload(module)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(module)
