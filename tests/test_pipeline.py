@@ -13,6 +13,7 @@ from interlock._detect import is_async_callable
 from interlock.pipeline import (
     BulkheadStrategy,
     CircuitBreakerStrategy,
+    FallbackStrategy,
     Pipeline,
     Strategy,
     TimeoutStrategy,
@@ -142,6 +143,7 @@ def test__strategy__runtime_checkable__adapters_conform() -> None:
     assert isinstance(CircuitBreakerStrategy(breaker), Strategy)
     assert isinstance(TimeoutStrategy(1.0), Strategy)
     assert isinstance(BulkheadStrategy(1), Strategy)
+    assert isinstance(FallbackStrategy(lambda _exc: None), Strategy)
     assert not isinstance(object(), Strategy)
 
 
@@ -426,3 +428,124 @@ async def test__bulkhead_strategy__async_exception__releases_the_slot() -> None:
     with pytest.raises(ValueError, match='boom'):
         await pipeline.call(boom)
     assert await pipeline.call(follow_up) == 'ok'
+
+
+def test__fallback_strategy__empty_on__raises_value_error() -> None:
+    with pytest.raises(ValueError, match='on'):
+        FallbackStrategy(lambda _exc: 'substitute', on=())
+
+
+def test__fallback_strategy__non_exception_entry__raises_type_error() -> None:
+    with pytest.raises(TypeError, match='Exception subclasses'):
+        FallbackStrategy(lambda _exc: 'substitute', on=(KeyboardInterrupt,))  # type: ignore[arg-type]
+
+
+def test__fallback_strategy__success__returns_the_original_result() -> None:
+    invoked: list[BaseException] = []
+    pipeline = Pipeline(FallbackStrategy(invoked.append))
+
+    assert pipeline.call(lambda: 'real') == 'real'
+    assert invoked == []
+
+
+def test__fallback_strategy__matching_failure__returns_the_substitute() -> None:
+    seen: list[BaseException] = []
+
+    def substitute(exc: BaseException) -> str:
+        seen.append(exc)
+        return 'cached'
+
+    pipeline = Pipeline(FallbackStrategy(substitute, on=(ValueError,)))
+    boom = ValueError('down')
+
+    def failing() -> str:
+        raise boom
+
+    assert pipeline.call(failing) == 'cached'
+    assert seen == [boom]  # the fallback sees the exact exception
+
+
+def test__fallback_strategy__non_matching_failure__propagates() -> None:
+    pipeline = Pipeline(FallbackStrategy(lambda _exc: 'cached', on=(ValueError,)))
+
+    def failing() -> str:
+        raise KeyError('other')
+
+    with pytest.raises(KeyError, match='other'):
+        pipeline.call(failing)
+
+
+@pytest.mark.asyncio
+async def test__fallback_strategy__async_matching_failure__returns_the_substitute() -> None:
+    pipeline = Pipeline(FallbackStrategy(lambda _exc: 'cached', on=(ValueError,)))
+
+    async def failing() -> str:
+        raise ValueError('down')
+
+    assert await pipeline.call(failing) == 'cached'
+
+
+@pytest.mark.asyncio
+async def test__fallback_strategy__async_success__returns_the_original_result() -> None:
+    pipeline = Pipeline(FallbackStrategy(lambda _exc: 'cached'))
+
+    async def work() -> str:
+        return 'real'
+
+    assert await pipeline.call(work) == 'real'
+
+
+@pytest.mark.asyncio
+async def test__fallback_strategy__cancellation__passes_through_uncaught() -> None:
+    invoked: list[BaseException] = []
+    pipeline = Pipeline(FallbackStrategy(invoked.append))
+    started = asyncio.Event()
+
+    async def hang() -> None:
+        started.set()
+        await asyncio.sleep(5)
+
+    task = asyncio.ensure_future(pipeline.call(hang))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert invoked == []  # the default on=(Exception,) never catches cancellation
+
+
+def test__fallback_strategy__outside_the_breaker__substitutes_rejections(
+    fake_clock: FakeClock,
+) -> None:
+    breaker = CircuitBreaker(name='dep', config=TRIP_FAST, clock=fake_clock)
+    pipeline = Pipeline(
+        FallbackStrategy(lambda _exc: 'cached', on=(CircuitOpenError,)),
+        CircuitBreakerStrategy(breaker),
+    )
+
+    def failing() -> str:
+        raise ValueError('down')
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match='down'):  # not in `on` — propagates
+            pipeline.call(failing)
+    assert pipeline.call(failing) == 'cached'  # open circuit -> substitute
+
+
+def test__fallback_strategy__metrics_only_breaker__shadow_stats_not_masked(
+    fake_clock: FakeClock,
+) -> None:
+    """The known-problems check: a fallback must not hide shadow-mode statistics."""
+    breaker = CircuitBreaker(name='dep', clock=fake_clock)  # default window fits all 3 calls
+    breaker.metrics_only()
+    pipeline = Pipeline(FallbackStrategy(lambda _exc: 'cached'), CircuitBreakerStrategy(breaker))
+
+    def failing() -> str:
+        raise ValueError('down')
+
+    for _ in range(3):
+        assert pipeline.call(failing) == 'cached'
+
+    snapshot = breaker.snapshot()
+    assert snapshot.total_calls == 3
+    assert snapshot.failed_calls == 3  # every masked failure is still recorded
