@@ -23,6 +23,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`retry_unless_open`), patient mode via `wait_probe`, sync/async sleep
   injectable, `before_sleep` hook passed through. Importing the module without
   tenacity installed now raises an error pointing at the extra.
+- `BulkheadStrategy` (`interlock.pipeline`): caps concurrent calls per runtime
+  (a `threading.Semaphore` for sync, an `asyncio.Semaphore` for async, one
+  config for both). With no free slot it rejects immediately by default or
+  waits up to `max_wait` seconds, raising the new `BulkheadFullError`
+  (exported from `interlock`) — deliberately distinct from `CircuitOpenError`:
+  local saturation is not dependency failure.
 
 - Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
   circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).
