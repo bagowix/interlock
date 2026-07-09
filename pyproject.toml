@@ -102,6 +102,11 @@ ban-relative-imports = "all"
 "scripts/**/*.py" = [
   "INP001",  # scripts is a run-directly directory, not an importable package
 ]
+"examples/**/*.py" = [
+  "INP001",  # examples are run directly, not imported
+  "T201",    # printing is the whole point of a runnable demo
+  "D102",    # the listener hooks are one-line prints; docstrings would drown the demo
+]
 "interlock/_coordination.py" = [
   "BLE001",  # storage failures of any type must degrade, never reach the protected path
   "PLR0913", # coordinators take keyword-only collaborators injected by the engine

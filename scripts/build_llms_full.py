@@ -10,6 +10,7 @@ The page order mirrors the ``## Docs`` section of ``docs/llms.txt`` so the two
 files never disagree on structure.
 """
 
+import re
 from pathlib import Path
 
 _DOCS = Path(__file__).resolve().parent.parent / 'docs'
@@ -17,6 +18,7 @@ _DOCS = Path(__file__).resolve().parent.parent / 'docs'
 # Same order as the index in docs/llms.txt.
 _PAGES = (
     'getting-started.md',
+    'demo.md',
     'guides/configuration.md',
     'guides/states.md',
     'guides/failure-classification.md',
@@ -50,12 +52,27 @@ from the Markdown sources by ``scripts/build_llms_full.py`` — edit the pages i
 """
 
 
+_SNIPPET = re.compile(r'^(?P<indent>[ \t]*)--8<-- "(?P<path>[^"]+)"$', re.MULTILINE)
+_ROOT = _DOCS.parent
+
+
+def _resolve_snippets(body: str) -> str:
+    """Expand ``--8<-- "path"`` include directives the way pymdownx.snippets does."""
+
+    def _include(match: re.Match[str]) -> str:
+        indent = match.group('indent')
+        content = (_ROOT / match.group('path')).read_text(encoding='utf-8').rstrip()
+        return '\n'.join(f'{indent}{line}' if line else '' for line in content.splitlines())
+
+    return _SNIPPET.sub(_include, body)
+
+
 def build() -> str:
     """Return the full inlined documentation as a single string."""
     parts = [_HEADER]
     for page in _PAGES:
         body = (_DOCS / page).read_text(encoding='utf-8').strip()
-        parts.append(f'\n\n---\n\n<!-- source: docs/{page} -->\n\n{body}')
+        parts.append(f'\n\n---\n\n<!-- source: docs/{page} -->\n\n{_resolve_snippets(body)}')
     return ''.join(parts) + '\n'
 
 

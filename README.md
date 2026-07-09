@@ -135,6 +135,10 @@ except CircuitOpenError as exc:
     print(exc.breaker_name, exc.retry_after, exc.last_failure)
 ```
 
+Want to watch a breaker trip and recover? Run the
+[examples](examples/) — deterministic output, no network, every transition
+narrated ([walkthrough](docs/demo.md)).
+
 ## httpx2 integration
 
 Apply a breaker **per host** transparently, with no decorators in call sites:
@@ -210,6 +214,7 @@ The full documentation is hosted at **<https://bagowix.github.io/interlock/>**.
 The sources live in [`docs/`](docs/):
 
 - [Getting started](docs/getting-started.md)
+- [Runnable demo](docs/demo.md) — the [`examples/`](examples/) scripts explained
 - [Configuration](docs/guides/configuration.md)
 - [States & manual control](docs/guides/states.md)
 - [Failure classification](docs/guides/failure-classification.md)
