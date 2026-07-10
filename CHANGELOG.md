@@ -36,6 +36,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   honest union `T | F`, not `Any`. Works outermost over `CircuitOpenError` /
   `BulkheadFullError` / `CallTimeoutError`, and never masks shadow-mode
   (`metrics_only`) statistics.
+- Pipeline DSL: `Pipeline` is now usable as a signature-preserving decorator
+  (`@pipeline`, `ParamSpec`-typed like the breaker's), and
+  `Pipeline.builder()` assembles strategies step by step —
+  `.fallback(...)`, `.retry(...)` (lazy tenacity import), `.circuit_breaker(...)`,
+  `.bulkhead(...)`, `.timeout(...)`, `.add(custom)`, `.build()`. The pipeline
+  surface (`Pipeline`, `PipelineBuilder`, `Strategy` and the four shipped
+  strategies) is re-exported from `interlock`. There is deliberately no
+  context manager: a `with` block cannot be re-run, so retry inside it is
+  semantically impossible.
 
 - Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
   circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).
