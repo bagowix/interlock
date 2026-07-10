@@ -1,6 +1,7 @@
 """Pipeline core: the Strategy protocol, the executor and the v1 adapters (D1-D3)."""
 
 import asyncio
+import inspect
 import threading
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
@@ -574,7 +575,7 @@ async def test__pipeline_decorator__async__preserves_nature_and_applies_strategi
     async def double(value: int) -> int:
         return value * 2
 
-    assert asyncio.iscoroutinefunction(double)
+    assert inspect.iscoroutinefunction(double)
     assert await double(21) == 42
     assert log == ['outer:enter', 'outer:exit']
 
