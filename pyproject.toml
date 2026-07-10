@@ -156,6 +156,8 @@ plugins.MD041.enabled = false   # do not require an H1 at the top of every file
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Parallel by default (pytest-xdist); use `-n 0` for serial runs / --pdb debugging.
+addopts = "-n auto"
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
@@ -211,4 +213,5 @@ dev = [
     "zensical>=0.0.46",
     "litestar>=2.24.0",
     "httpx>=0.28.1",
+    "pytest-xdist>=3.8.0",
 ]
