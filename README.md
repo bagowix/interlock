@@ -4,7 +4,7 @@
 
 | Name                                   |    Stmts |     Miss |   Branch |   BrPart |    Cover |   Missing |
 |--------------------------------------- | -------: | -------: | -------: | -------: | -------: | --------: |
-| interlock/\_\_init\_\_.py              |       15 |        0 |        0 |        0 |     100% |           |
+| interlock/\_\_init\_\_.py              |       16 |        0 |        0 |        0 |     100% |           |
 | interlock/\_classify.py                |        4 |        0 |        0 |        0 |     100% |           |
 | interlock/\_clock.py                   |        5 |        0 |        0 |        0 |     100% |           |
 | interlock/\_coordination.py            |      223 |        0 |       46 |        0 |     100% |           |
@@ -26,7 +26,7 @@
 | interlock/integrations/tenacity.py     |       48 |        0 |        8 |        0 |     100% |           |
 | interlock/listeners.py                 |       19 |        0 |        0 |        0 |     100% |           |
 | interlock/outcome.py                   |       13 |        0 |        0 |        0 |     100% |           |
-| interlock/pipeline.py                  |      110 |        0 |       22 |        0 |     100% |           |
+| interlock/pipeline.py                  |      146 |        0 |       24 |        0 |     100% |           |
 | interlock/protocols.py                 |       40 |        0 |        0 |        0 |     100% |           |
 | interlock/registry.py                  |       22 |        0 |        2 |        0 |     100% |           |
 | interlock/shared.py                    |       11 |        0 |        0 |        0 |     100% |           |
@@ -34,7 +34,7 @@
 | interlock/timeout.py                   |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py                   |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py                    |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                              | **1394** |    **0** |  **232** |    **0** | **100%** |           |
+| **TOTAL**                              | **1431** |    **0** |  **234** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
