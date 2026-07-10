@@ -24,13 +24,14 @@ The core is pure standard library. External integrations are optional extras —
 add the ones you need (same names with `pip install` / `poetry add`):
 
 ```bash
-uv add 'interlock-cb[otel]'     # OpenTelemetry metrics listener
+uv add 'interlock-cb[fastapi]'  # CircuitOpenError -> 503 + Retry-After
+uv add 'interlock-cb[litestar]' # same for Litestar
 uv add 'interlock-cb[httpx2]'   # per-host httpx2 transport
 uv add 'interlock-cb[aiohttp]'  # per-host aiohttp client middleware
 uv add 'interlock-cb[requests]' # per-host requests session adapter
 uv add 'interlock-cb[tenacity]' # retry x breaker composition helpers
-uv add 'interlock-cb[fastapi]'  # CircuitOpenError -> 503 + Retry-After
 uv add 'interlock-cb[redis]'    # shared distributed state
+uv add 'interlock-cb[otel]'     # OpenTelemetry metrics listener
 ```
 
 ## Create a breaker
@@ -131,5 +132,5 @@ breaker.snapshot()       # WindowSnapshot: total_calls, failed_calls, slow_calls
 - [States & manual control](guides/states.md)
 - [Failure classification](guides/failure-classification.md)
 - [Observability](guides/observability.md)
-- [Integrations](integrations/index.md) — FastAPI, httpx2, aiohttp, requests, tenacity, Redis
+- [Integrations](integrations/index.md) — FastAPI, Litestar, httpx2, aiohttp, requests, tenacity, Redis
 - [Resilience pipeline](guides/pipeline.md) — compose timeout, bulkhead, retry and fallback around the breaker

@@ -41,13 +41,14 @@ The core is pure standard library. External integrations are optional extras —
 add the ones you need (same names with `pip install` / `poetry add`):
 
 ```bash
-uv add 'interlock-cb[otel]'     # OpenTelemetry metrics listener
+uv add 'interlock-cb[fastapi]'  # CircuitOpenError -> 503 + Retry-After
+uv add 'interlock-cb[litestar]' # same for Litestar
 uv add 'interlock-cb[httpx2]'   # per-host httpx2 transport
 uv add 'interlock-cb[aiohttp]'  # per-host aiohttp client middleware
 uv add 'interlock-cb[requests]' # per-host requests session adapter
 uv add 'interlock-cb[tenacity]' # retry x breaker composition helpers
-uv add 'interlock-cb[fastapi]'  # CircuitOpenError -> 503 + Retry-After
 uv add 'interlock-cb[redis]'    # shared distributed state
+uv add 'interlock-cb[otel]'     # OpenTelemetry metrics listener
 ```
 
 ## Create a breaker
@@ -148,7 +149,7 @@ breaker.snapshot()       # WindowSnapshot: total_calls, failed_calls, slow_calls
 - [States & manual control](guides/states.md)
 - [Failure classification](guides/failure-classification.md)
 - [Observability](guides/observability.md)
-- [Integrations](integrations/index.md) — FastAPI, httpx2, aiohttp, requests, tenacity, Redis
+- [Integrations](integrations/index.md) — FastAPI, Litestar, httpx2, aiohttp, requests, tenacity, Redis
 - [Resilience pipeline](guides/pipeline.md) — compose timeout, bulkhead, retry and fallback around the breaker
 
 ---
@@ -798,8 +799,8 @@ a consecutive-failure threshold with a TTL on the open state.
   with graceful degradation to local state when Redis is down
   ([Redis integration](integrations/redis.md)).
 - **Meets your stack where it is.** Per-host breakers ship for httpx2,
-  aiohttp and requests; tenacity glue composes retries correctly; FastAPI
-  maps rejections to `503 + Retry-After`
+  aiohttp and requests; tenacity glue composes retries correctly; FastAPI and Litestar
+  map rejections to `503 + Retry-After`
   ([integrations overview](integrations/index.md)).
 
 The honest trade-off: interlock-cb requires Python ≥ 3.11 and has not had
@@ -1640,6 +1641,7 @@ per named dependency) with no decorators in call sites.
 | Integration | Extra | What you get |
 |---|---|---|
 | [FastAPI](fastapi.md) | `interlock-cb[fastapi]` | `Depends`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler |
+| [Litestar](litestar.md) | `interlock-cb[litestar]` | `Provide`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler (Litestar ≥ 2.23) |
 | [httpx2](httpx2.md) | `interlock-cb[httpx2]` | `CircuitBreakerTransport` / `AsyncCircuitBreakerTransport` — per-host breaker at the transport level |
 | [aiohttp](aiohttp.md) | `interlock-cb[aiohttp]` | `CircuitBreakerMiddleware` — per-host breaker as a client middleware (aiohttp ≥ 3.12) |
 | [requests](requests.md) | `interlock-cb[requests]` | `CircuitBreakerAdapter` — per-host breaker mounted on a `Session` |
@@ -1802,6 +1804,119 @@ from interlock import CircuitOpenError
 @app.exception_handler(CircuitOpenError)
 async def on_open(request: Request, exc: CircuitOpenError) -> Response:
     ...
+```
+
+---
+
+<!-- source: docs/integrations/litestar.md -->
+
+# Litestar
+
+The `interlock-cb[litestar]` extra (Litestar ≥ 2.23) protects a route's
+outgoing dependency with a shared `Registry` and turns a tripped breaker into
+a clean `503 Service Unavailable` response with a `Retry-After` header.
+
+=== "uv"
+
+    ```bash
+    uv add 'interlock-cb[litestar]'
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install 'interlock-cb[litestar]'
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add 'interlock-cb[litestar]'
+    ```
+
+## Usage
+
+Litestar wires exception handlers and dependencies at construction time —
+declare both on the app (or a router / controller) and annotate the handler
+parameter with `NamedDependency`:
+
+```python
+from litestar import Litestar, get
+from litestar.di import NamedDependency
+
+from interlock import CircuitBreaker, CircuitOpenError, Registry
+from interlock.integrations.litestar import breaker_dependency, circuit_open_handler
+
+registry = Registry()
+
+
+@get('/orders')
+async def orders(breaker: NamedDependency[CircuitBreaker]) -> list[dict]:
+    return await breaker.call(fetch_orders)
+
+
+app = Litestar(
+    route_handlers=[orders],
+    dependencies={'breaker': breaker_dependency('orders-db', registry=registry)},
+    exception_handlers={CircuitOpenError: circuit_open_handler},
+)
+```
+
+When `fetch_orders` fails often enough, the breaker opens. The next request is
+rejected with `CircuitOpenError` *before* `fetch_orders` runs, and the handler
+converts it into:
+
+```http
+HTTP/1.1 503 Service Unavailable
+Retry-After: 30
+Content-Type: application/json
+
+{"detail": "Circuit 'orders-db' is open"}
+```
+
+## How it works
+
+- **`breaker_dependency(name, *, registry)`** returns a Litestar
+  [`Provide`](https://docs.litestar.dev/latest/usage/dependency-injection.html)
+  that yields the named breaker from the shared `Registry`. The breaker is
+  created lazily on first use and reused on every later request, so all
+  requests sharing the dependency share one breaker (and one view of the
+  downstream's health). Declare it at any layer — app, router, controller or
+  handler.
+- **`circuit_open_handler`** maps `CircuitOpenError` to `503` and sets
+  `Retry-After` to the breaker's `retry_after` estimate, rounded up to whole
+  seconds (per RFC 7231). The header is omitted when there is no estimate
+  (for example after `force_open()`).
+
+You protect the *outgoing* call (`breaker.call(...)`) rather than the route
+itself: only the dependency you wrap counts toward the breaker, and the
+breaker's own admission logic (probes, half-open) keeps working.
+
+## Sharing breakers across routes
+
+Reuse the same `name` (and the same `registry`) wherever routes depend on the
+same downstream — one `dependencies={...}` declaration on the app covers them
+all, and every route sees the same circuit state.
+
+Pass `config`, `clock`, `classifier` or `listener` to the `Registry` to tune
+every breaker it creates, or override per name via
+`registry.get(name, config=...)`.
+
+## Custom responses
+
+For a different response shape, register your own handler instead:
+
+```python
+from litestar import Request, Response
+
+from interlock import CircuitOpenError
+
+
+def on_open(request: Request, exc: CircuitOpenError) -> Response[dict[str, str]]:
+    ...
+
+
+app = Litestar(..., exception_handlers={CircuitOpenError: on_open})
 ```
 
 ---
@@ -2474,8 +2589,8 @@ server's.)
 When a route's outgoing dependency trips its breaker, the raised
 [`CircuitOpenError`](../reference.md) should become a clean
 `503 Service Unavailable` with a `Retry-After` header — the same behaviour
-the [FastAPI extra](fastapi.md) ships as code. For other frameworks the
-handler is a few lines; no extra needed.
+the [FastAPI](fastapi.md) and [Litestar](litestar.md) extras ship as code.
+For other frameworks the handler is a few lines; no extra needed.
 
 ## Flask
 
@@ -2773,6 +2888,19 @@ Extra `interlock-cb[fastapi]`, module `interlock.integrations.fastapi`:
   registration.
 
 See the [FastAPI integration](integrations/fastapi.md).
+
+## Litestar adapters
+
+Extra `interlock-cb[litestar]` (Litestar ≥ 2.23), module
+`interlock.integrations.litestar`:
+
+- **`breaker_dependency(name, *, registry)`** — returns a `Provide` yielding
+  the named breaker from a shared `Registry`; annotate handler parameters
+  with `NamedDependency[CircuitBreaker]`.
+- **`circuit_open_handler(request, exc)`** — maps `CircuitOpenError` to `503`
+  with a `Retry-After` header; pass it in the app's `exception_handlers`.
+
+See the [Litestar integration](integrations/litestar.md).
 
 ## Redis adapters
 

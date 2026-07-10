@@ -85,8 +85,8 @@ a consecutive-failure threshold with a TTL on the open state.
   with graceful degradation to local state when Redis is down
   ([Redis integration](integrations/redis.md)).
 - **Meets your stack where it is.** Per-host breakers ship for httpx2,
-  aiohttp and requests; tenacity glue composes retries correctly; FastAPI
-  maps rejections to `503 + Retry-After`
+  aiohttp and requests; tenacity glue composes retries correctly; FastAPI and Litestar
+  map rejections to `503 + Retry-After`
   ([integrations overview](integrations/index.md)).
 
 The honest trade-off: interlock-cb requires Python ≥ 3.11 and has not had

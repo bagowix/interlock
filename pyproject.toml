@@ -31,6 +31,7 @@ otel = ["opentelemetry-api>=1.43.0"]
 httpx2 = ["httpx2>=2.4.0"]
 fastapi = ["fastapi>=0.128.0"]
 redis = ["redis>=5.0.0"]
+litestar = ["litestar>=2.23.0"]
 tenacity = ["tenacity>=9.0.0"]
 requests = ["requests>=2.31.0"]
 aiohttp = ["aiohttp>=3.12.0"]
@@ -208,4 +209,6 @@ dev = [
     "types-requests>=2.31.0",
     "ty>=0.0.55",
     "zensical>=0.0.46",
+    "litestar>=2.24.0",
+    "httpx>=0.28.1",
 ]

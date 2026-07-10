@@ -8,6 +8,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Litestar integration** via the `litestar` extra
+  (`interlock.integrations.litestar`, requires Litestar ≥ 2.23):
+  `breaker_dependency(name, *, registry)` — a `Provide` factory injecting a
+  shared breaker (annotate handlers with `NamedDependency[CircuitBreaker]`) —
+  and `circuit_open_handler`, mapping `CircuitOpenError` to
+  `503 Service Unavailable` with a `Retry-After` header.
 - `examples/pipeline.py`: a third runnable demo — timeout + breaker +
   fallback composed around a dependency that hangs instead of erroring;
   deterministic output, walked through on the [demo page](docs/demo.md).

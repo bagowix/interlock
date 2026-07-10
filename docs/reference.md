@@ -210,6 +210,19 @@ Extra `interlock-cb[fastapi]`, module `interlock.integrations.fastapi`:
 
 See the [FastAPI integration](integrations/fastapi.md).
 
+## Litestar adapters
+
+Extra `interlock-cb[litestar]` (Litestar ≥ 2.23), module
+`interlock.integrations.litestar`:
+
+- **`breaker_dependency(name, *, registry)`** — returns a `Provide` yielding
+  the named breaker from a shared `Registry`; annotate handler parameters
+  with `NamedDependency[CircuitBreaker]`.
+- **`circuit_open_handler(request, exc)`** — maps `CircuitOpenError` to `503`
+  with a `Retry-After` header; pass it in the app's `exception_handlers`.
+
+See the [Litestar integration](integrations/litestar.md).
+
 ## Redis adapters
 
 Extra `interlock-cb[redis]`, module `interlock.integrations.redis`:

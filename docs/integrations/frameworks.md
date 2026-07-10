@@ -3,8 +3,8 @@
 When a route's outgoing dependency trips its breaker, the raised
 [`CircuitOpenError`](../reference.md) should become a clean
 `503 Service Unavailable` with a `Retry-After` header — the same behaviour
-the [FastAPI extra](fastapi.md) ships as code. For other frameworks the
-handler is a few lines; no extra needed.
+the [FastAPI](fastapi.md) and [Litestar](litestar.md) extras ship as code.
+For other frameworks the handler is a few lines; no extra needed.
 
 ## Flask
 
