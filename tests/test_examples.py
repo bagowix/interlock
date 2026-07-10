@@ -42,6 +42,18 @@ def _run(script: str) -> str:
             ],
         ),
         (
+            'pipeline.py',
+            [
+                'fallback served instead of CallTimeoutError',
+                '[listener] inventory: state CLOSED -> OPEN',
+                'call rejected — circuit is open',
+                'fallback served instead of CircuitOpenError',
+                'in ~0.0s',  # the open circuit serves the cache without burning the timeout
+                '[listener] inventory: state HALF_OPEN -> CLOSED',
+                'final state: CLOSED',
+            ],
+        ),
+        (
             'two_clients.py',
             [
                 '[listener] recommendations: state CLOSED -> OPEN',

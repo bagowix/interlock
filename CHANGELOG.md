@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `examples/pipeline.py`: a third runnable demo — timeout + breaker +
+  fallback composed around a dependency that hangs instead of erroring;
+  deterministic output, walked through on the [demo page](docs/demo.md).
+
 ## [2.0.0] - 2026-07-10
 
 The resilience-pipeline milestone: interlock grows from one pattern into a
