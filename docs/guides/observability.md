@@ -13,6 +13,9 @@ class EventListener(Protocol):
     def on_reset(self, *, name: str) -> None: ...
     def on_storage_degraded(self, *, name: str, error: BaseException) -> None: ...
     def on_storage_recovered(self, *, name: str) -> None: ...
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None: ...
+    def on_bulkhead_rejected(self, *, name: str) -> None: ...
+    def on_fallback(self, *, name: str, error: BaseException) -> None: ...
 ```
 
 Listeners are called **outside** the breaker's lock, after the protected call
@@ -20,8 +23,9 @@ returns, so a slow listener never serialises throughput. Implementations must
 not raise back into the core.
 
 The two storage hooks fire only for breakers coordinated through a shared
-[storage](../integrations/redis.md), and the engine dispatches them only if
-present — a listener without them keeps working.
+[storage](../integrations/redis.md); the three pipeline hooks fire from
+[pipeline strategies](pipeline.md) given a `listener=`. All optional hooks
+are dispatched only if present — a listener without them keeps working.
 
 Attach one per breaker, or share one across a `Registry`:
 

@@ -118,3 +118,19 @@ form. To align which statuses trip the breaker, pass
 - **Nested retry layers.** urllib3's `max_retries`, your service mesh and
   tenacity each multiply attempts. Budget them together — one deliberate
   retry layer beats three accidental ones.
+
+## Declarative composition
+
+Everything on this page stays valid with the v2 [resilience
+pipeline](pipeline.md) — `RetryStrategy` packages the same predicates and
+wait strategies as a layer, so the manual recipe becomes::
+
+```python
+pipeline = (
+    Pipeline.builder()
+    .retry(attempts=4)          # retry outside — the recommended order
+    .circuit_breaker(breaker)
+    .timeout(2.0)
+    .build()
+)
+```

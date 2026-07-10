@@ -26,7 +26,8 @@ choice.
 | Event / state-change listeners | ✅ | ✅ | — | ✅ | ✅ |
 | Shared state across processes (Redis) | ✅ | ✅ | — | ✅ | ✅ |
 | Globally budgeted recovery probes | ✅ | — | — | — | — |
-| Fallback function | planned | — | ✅ | — | — |
+| Fallback function | ✅ | — | ✅ | — | — |
+| Composable resilience pipeline (retry × breaker × bulkhead × timeout × fallback) | ✅ | — | — | — | — |
 | Fully typed API (`py.typed`) | ✅ | — | — | — | ✅ |
 | Signature-preserving decorator (`ParamSpec`) | ✅ | — | — | — | — |
 | HTTP client integrations (httpx2 / aiohttp / requests) | ✅ | — | — | — | — |
@@ -38,8 +39,8 @@ choice.
 | Python | ≥ 3.11 | ≥ 3.9 | ≥ 3.8 | ≥ 3.6 | ≥ 3.9 |
 
 <sub>Compared against pybreaker 1.4.1, circuitbreaker 2.1.3, aiobreaker 1.2.0
-and purgatory 3.0.1, as documented in July 2026. "planned" items are on the
-interlock-cb roadmap. Something out of date or unfair? Please
+and purgatory 3.0.1, as documented in July 2026. Something out of date or
+unfair? Please
 [open a PR](https://github.com/bagowix/interlock/pulls).</sub>
 
 ## The four established libraries, honestly
@@ -88,8 +89,8 @@ a consecutive-failure threshold with a TTL on the open state.
   maps rejections to `503 + Retry-After`
   ([integrations overview](integrations/index.md)).
 
-The honest trade-off: interlock-cb requires Python ≥ 3.11, has no built-in
-fallback yet, and has not had years in production. Reach for an established
+The honest trade-off: interlock-cb requires Python ≥ 3.11 and has not had
+years in production. Reach for an established
 library if that maturity matters more than the feature gap; choose
 interlock-cb when you want rate-based windows, slow-call detection,
 coordinated state and a fully typed API.

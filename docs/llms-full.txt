@@ -211,6 +211,7 @@ failures over a 4-call window, stay open 1 second, close after 2 good probes.
         def charge(self, amount: int) -> str:
             if not self.healthy:
                 raise GatewayError('503 from gateway')
+
             return f'charged ${amount}'
 
 
@@ -798,6 +799,9 @@ class EventListener(Protocol):
     def on_reset(self, *, name: str) -> None: ...
     def on_storage_degraded(self, *, name: str, error: BaseException) -> None: ...
     def on_storage_recovered(self, *, name: str) -> None: ...
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None: ...
+    def on_bulkhead_rejected(self, *, name: str) -> None: ...
+    def on_fallback(self, *, name: str, error: BaseException) -> None: ...
 ```
 
 Listeners are called **outside** the breaker's lock, after the protected call
@@ -805,8 +809,9 @@ returns, so a slow listener never serialises throughput. Implementations must
 not raise back into the core.
 
 The two storage hooks fire only for breakers coordinated through a shared
-[storage](../integrations/redis.md), and the engine dispatches them only if
-present — a listener without them keeps working.
+[storage](../integrations/redis.md); the three pipeline hooks fire from
+[pipeline strategies](pipeline.md) given a `listener=`. All optional hooks
+are dispatched only if present — a listener without them keeps working.
 
 Attach one per breaker, or share one across a `Registry`:
 
@@ -1081,6 +1086,265 @@ form. To align which statuses trip the breaker, pass
 - **Nested retry layers.** urllib3's `max_retries`, your service mesh and
   tenacity each multiply attempts. Budget them together — one deliberate
   retry layer beats three accidental ones.
+
+## Declarative composition
+
+Everything on this page stays valid with the v2 [resilience
+pipeline](pipeline.md) — `RetryStrategy` packages the same predicates and
+wait strategies as a layer, so the manual recipe becomes::
+
+```python
+pipeline = (
+    Pipeline.builder()
+    .retry(attempts=4)          # retry outside — the recommended order
+    .circuit_breaker(breaker)
+    .timeout(2.0)
+    .build()
+)
+```
+
+---
+
+<!-- source: docs/guides/pipeline.md -->
+
+# Resilience pipeline
+
+v2.0 turns interlock's primitives into composable **strategies**: timeout,
+bulkhead, circuit breaker, retry and fallback applied around one call in an
+explicit order, mirroring [Polly's](https://www.pollydocs.org/pipelines)
+`ResiliencePipeline` semantics.
+
+The pipeline is an additive layer — the standalone
+[`CircuitBreaker`](../getting-started.md) remains a first-class primitive, and
+existing v1 code keeps working unchanged. Reach for a pipeline when one
+concern is not enough.
+
+## At a glance
+
+```python
+from interlock import CircuitBreaker, CircuitOpenError, Pipeline
+
+breaker = CircuitBreaker(name='recommendations')
+
+pipeline = (
+    Pipeline.builder()
+    .fallback(lambda exc: [], on=(CircuitOpenError,))  # outermost
+    .retry(attempts=4)                                 # requires interlock-cb[tenacity]
+    .circuit_breaker(breaker)
+    .bulkhead(8)
+    .timeout(2.0)                                      # innermost
+    .build()
+)
+
+
+@pipeline
+async def fetch_picks(user: str) -> list[str]:
+    return await client.get_picks(user)
+```
+
+One pipeline serves sync and async callables alike: the decorator and
+`pipeline.call(fn, ...)` detect the callable's nature and dispatch, exactly
+like `CircuitBreaker.call`. The decorator preserves the wrapped signature for
+type checkers.
+
+## Order is explicit — first is outermost
+
+Strategies apply in declaration order: the first strategy sees everything the
+inner layers produce. `Pipeline(A, B)` means `A(B(call))`. There is no hidden
+"correct" order in the code; the recommended one is a documented default:
+
+| Layer (outer → inner) | Why here |
+|---|---|
+| `fallback(...)` | Substitutes a value for whatever the inner stack gave up on — including rejections raised by the strategies themselves |
+| `retry(...)` | Each attempt below is a complete guarded call: the breaker sees honest per-attempt statistics and stops the retry loop the moment the circuit opens |
+| `circuit_breaker(...)` | Counts timeouts and failures of every attempt; open circuit rejects before the bulkhead slot or a connection is touched |
+| `bulkhead(...)` | Inside retry — otherwise every backoff-and-retry cycle would multiply slot occupancy |
+| `timeout(...)` | Innermost: bounds a single attempt, so one hung attempt cannot eat the whole retry budget |
+
+Deviating is legitimate — e.g. a breaker *outside* retry counts one
+aggregated outcome per operation instead of one per attempt (see
+[Retries and circuit breakers](retries.md) for that trade-off) — but do it
+deliberately.
+
+## The strategies
+
+### `CircuitBreakerStrategy`
+
+Wraps a standalone [`CircuitBreaker`](../reference.md) without touching it:
+the window, events, manual controls and the breaker's own listener behave
+exactly as in direct use, and the same instance can still be called directly.
+An open circuit raises `CircuitOpenError` before any inner layer runs.
+
+```python
+from interlock import CircuitBreakerStrategy, Pipeline
+
+pipeline = Pipeline(CircuitBreakerStrategy(breaker))
+```
+
+### `TimeoutStrategy`
+
+Bounds every attempt using the v1 primitives: `asyncio.timeout` on the async
+path (the attempt is cancelled), `sync_timeout` on the sync path — which
+inherits its [worker-thread limitation](timeout.md): the caller gets
+`CallTimeoutError` on time, but Python cannot kill the overrunning thread.
+
+### `BulkheadStrategy`
+
+Caps how many calls run through the layer concurrently. With no free slot the
+call fails immediately (`max_wait=0`, the default) or waits up to `max_wait`
+seconds, then raises `BulkheadFullError`:
+
+```python
+from interlock import BulkheadStrategy, Pipeline
+
+pipeline = Pipeline(BulkheadStrategy(8, max_wait=0.5))
+```
+
+`BulkheadFullError` is deliberately not `CircuitOpenError`: a full bulkhead
+means *this process* is saturated, not that the dependency is unhealthy — the
+right reaction is shedding load, not backing off. Sync calls share a
+`threading.Semaphore`, async calls an `asyncio.Semaphore`; one configuration,
+two independent pools.
+
+### `FallbackStrategy`
+
+Substitutes an explicit value for selected failures — nothing silent:
+
+```python
+from interlock import CircuitOpenError, FallbackStrategy, Pipeline
+
+cached: list[str] = []
+strategy = FallbackStrategy(lambda exc: cached, on=(CircuitOpenError,))
+```
+
+- The substitution happens **only** for exception types named in `on`;
+  anything else propagates.
+- The `fallback` callable receives the exception it stands in for.
+- `on` accepts `Exception` subclasses exclusively — cancellation and
+  `KeyboardInterrupt` always propagate.
+- The strategy's own result type is the honest union `T | F`, not `Any`. At
+  the pipeline level the substitute is expected to be shaped like the call's
+  result (the same contract as Polly and resilience4j).
+- A fallback never masks shadow-mode statistics: a `metrics_only` breaker
+  below it keeps recording every failure.
+
+### `RetryStrategy` (the `tenacity` extra)
+
+interlock ships no retry engine; the strategy delegates all policy to
+[tenacity](https://tenacity.readthedocs.io/) and packages the
+[retry × breaker glue](../integrations/tenacity.md) for the pipeline:
+
+```python
+from interlock.integrations.tenacity import RetryStrategy
+
+strategy = RetryStrategy(attempts=4)  # fail-fast: never retries CircuitOpenError
+```
+
+Attempts are always capped, the original exception is re-raised when the
+budget runs out, and the default predicate stops retrying the moment the
+circuit opens. For the *patient* mode (wait exactly until the breaker's next
+probe) pass `wait=wait_probe(...)` — see the
+[tenacity integration](../integrations/tenacity.md). The builder step
+`.retry(...)` imports the extra lazily, so the pipeline core stays
+zero-dependency.
+
+## Two usage forms, not three
+
+A pipeline works as a decorator and as `pipeline.call(fn, *args, **kwargs)` —
+the same signature-preserving contracts as the breaker's. There is
+deliberately **no context manager**: a `with` block cannot be re-run, so a
+retry layer inside it is semantically impossible. This is the same honesty as
+the v1 breaker's context manager not supporting result-based classification —
+rather than a form that silently ignores half the strategies, the form does
+not exist.
+
+## Migrating from v1 (nothing breaks)
+
+The v1 API is untouched — migration is wrapping, not rewriting:
+
+```python
+# v1: the breaker guards the call directly
+result = breaker.call(fetch_orders, user_id)
+
+# v2: the same breaker, now composed with a timeout
+pipeline = Pipeline(CircuitBreakerStrategy(breaker), TimeoutStrategy(2.0))
+result = pipeline.call(fetch_orders, user_id)
+```
+
+The manual composition recipe from the
+[retries guide](retries.md) — `Retrying` wrapped around `breaker.call` —
+keeps working and remains the most flexible form; the pipeline is that recipe
+made declarative.
+
+## Observability
+
+`RetryStrategy`, `BulkheadStrategy` and `FallbackStrategy` (and their builder
+steps) accept `name=` and `listener=`. Three optional
+[`EventListener`](observability.md) hooks make the pipeline's decisions
+visible — `on_retry(name, attempt, delay)`, `on_bulkhead_rejected(name)` and
+`on_fallback(name, error)`:
+
+```python
+from interlock import LoggingEventListener, Pipeline
+
+events = LoggingEventListener()
+
+pipeline = (
+    Pipeline.builder()
+    .fallback(lambda exc: [], on=(CircuitOpenError,), name='recs', listener=events)
+    .circuit_breaker(breaker)  # the breaker keeps its own listener
+    .bulkhead(8, name='recs', listener=events)
+    .timeout(2.0)
+    .build()
+)
+```
+
+The hooks are dispatched via safe `getattr` — listeners written before v2.0
+keep working unchanged. `LoggingEventListener` logs retries at INFO and
+bulkhead rejections / fallbacks at WARNING; `OTelEventListener` counts all
+three in the `interlock.pipeline.events` counter.
+
+## Custom strategies
+
+Any object with `execute` / `execute_async` is a strategy — the `Strategy`
+protocol is structural:
+
+```python
+import time
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
+T = TypeVar('T')
+
+
+class Measuring:
+    """Times every layer below it."""
+
+    def execute(self, call: Callable[[], T]) -> T:
+        start = time.perf_counter()
+        try:
+            return call()
+        finally:
+            print(f'took {time.perf_counter() - start:.3f}s')
+
+    async def execute_async(self, call: Callable[[], Awaitable[T]]) -> T:
+        start = time.perf_counter()
+        try:
+            return await call()
+        finally:
+            print(f'took {time.perf_counter() - start:.3f}s')
+
+
+pipeline = Pipeline.builder().add(Measuring()).timeout(2.0).build()
+```
+
+The contract, in full:
+
+- Run the zero-argument next layer, return its result, let exceptions
+  propagate. Never swallow `BaseException` — cancellation must cross every
+  layer untouched.
+- `execute_async` always receives a real coroutine function, so
+  detect-dispatching primitives (like `breaker.call`) treat it as async.
 
 ---
 
@@ -1499,6 +1763,30 @@ down longer than any job should wait.
 `wait_probe(..., jitter=0.5)` widens the random extra wait (seconds) added on
 top of `retry_after`; when the rejection carries no estimate (for example
 after `force_open()`), the fallback strategy decides.
+
+## `RetryStrategy` — the pipeline layer
+
+The same policies package into a [pipeline](../guides/pipeline.md) strategy:
+
+```python
+from interlock import Pipeline
+from interlock.integrations.tenacity import RetryStrategy
+
+pipeline = (
+    Pipeline.builder()
+    .retry(attempts=4)              # this step builds a RetryStrategy
+    .circuit_breaker(breaker)
+    .timeout(2.0)
+    .build()
+)
+```
+
+Attempts are always capped and the original exception is re-raised when the
+budget runs out — no `RetryError` wrapping. The default predicate is
+`retry_unless_open()` (fail fast on an open circuit); pass
+`wait=wait_probe(...)` and a predicate that includes `CircuitOpenError` for
+the patient mode. `name=` and `listener=` make every retry visible through
+the `on_retry` hook ([observability](../guides/observability.md)).
 
 ## Everything else is plain tenacity
 
@@ -2023,7 +2311,8 @@ choice.
 | Event / state-change listeners | ✅ | ✅ | — | ✅ | ✅ |
 | Shared state across processes (Redis) | ✅ | ✅ | — | ✅ | ✅ |
 | Globally budgeted recovery probes | ✅ | — | — | — | — |
-| Fallback function | planned | — | ✅ | — | — |
+| Fallback function | ✅ | — | ✅ | — | — |
+| Composable resilience pipeline (retry × breaker × bulkhead × timeout × fallback) | ✅ | — | — | — | — |
 | Fully typed API (`py.typed`) | ✅ | — | — | — | ✅ |
 | Signature-preserving decorator (`ParamSpec`) | ✅ | — | — | — | — |
 | HTTP client integrations (httpx2 / aiohttp / requests) | ✅ | — | — | — | — |
@@ -2035,8 +2324,8 @@ choice.
 | Python | ≥ 3.11 | ≥ 3.9 | ≥ 3.8 | ≥ 3.6 | ≥ 3.9 |
 
 <sub>Compared against pybreaker 1.4.1, circuitbreaker 2.1.3, aiobreaker 1.2.0
-and purgatory 3.0.1, as documented in July 2026. "planned" items are on the
-interlock-cb roadmap. Something out of date or unfair? Please
+and purgatory 3.0.1, as documented in July 2026. Something out of date or
+unfair? Please
 [open a PR](https://github.com/bagowix/interlock/pulls).</sub>
 
 ## The four established libraries, honestly
@@ -2085,8 +2374,8 @@ a consecutive-failure threshold with a TTL on the open state.
   maps rejections to `503 + Retry-After`
   ([integrations overview](integrations/index.md)).
 
-The honest trade-off: interlock-cb requires Python ≥ 3.11, has no built-in
-fallback yet, and has not had years in production. Reach for an established
+The honest trade-off: interlock-cb requires Python ≥ 3.11 and has not had
+years in production. Reach for an established
 library if that maturity matters more than the feature gap; choose
 interlock-cb when you want rate-based windows, slow-call detection,
 coordinated state and a fully typed API.
@@ -2158,6 +2447,9 @@ Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
   raised on rejection; attributes `breaker_name`, `retry_after`, `last_failure`.
 - **`CallTimeoutError(timeout)`** — raised by `timeout` and `sync_timeout`;
   attribute `timeout`.
+- **`BulkheadFullError(max_concurrent, *, max_wait=0.0)`** — raised by a
+  pipeline bulkhead when no concurrency slot frees up in time; attributes
+  `max_concurrent`, `max_wait`.
 - **`InterlockDeprecationWarning`** — subclasses `UserWarning`, visible by
   default.
 
@@ -2176,6 +2468,31 @@ callable in a daemon worker thread and raises `CallTimeoutError` if it overruns
 `seconds`; the worker keeps running after a timeout (Python cannot kill a
 thread). See [Timeout](guides/timeout.md).
 
+## Pipeline
+
+Compose strategies around one call, outermost first — see the
+[pipeline guide](guides/pipeline.md):
+
+- **`Pipeline(*strategies)`** — the executor; works as a signature-preserving
+  decorator and as `pipeline.call(fn, *args, **kwargs)` (detect-dispatching,
+  like the breaker's). No context manager by design.
+- **`Pipeline.builder()` / `PipelineBuilder`** — step-by-step assembly:
+  `.fallback(...)`, `.retry(...)` (lazy `tenacity` extra),
+  `.circuit_breaker(breaker)`, `.bulkhead(...)`, `.timeout(seconds)`,
+  `.add(custom)`, `.build()`.
+- **`Strategy`** — the structural protocol: `execute(call)` /
+  `execute_async(call)`; `execute_async` always receives a real coroutine
+  function.
+- **`CircuitBreakerStrategy(breaker)`** — wraps a standalone breaker unchanged.
+- **`TimeoutStrategy(seconds)`** — bounds every attempt via the v1 primitives.
+- **`BulkheadStrategy(max_concurrent, *, max_wait=0.0, name='bulkhead',
+  listener=None)`** — concurrency cap; raises `BulkheadFullError`.
+- **`FallbackStrategy(fallback, *, on=(Exception,), name='fallback',
+  listener=None)`** — explicit substitution for selected failures; result
+  typed `T | F`.
+- **`RetryStrategy(...)`** — lives in `interlock.integrations.tenacity` (see
+  below).
+
 ## Protocols (extension points)
 
 Implement any of these to swap a core behaviour:
@@ -2192,8 +2509,9 @@ Implement any of these to swap a core behaviour:
   [Failure classification](guides/failure-classification.md).
 - **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`,
   plus `on_storage_degraded` / `on_storage_recovered` for coordinated breakers
-  (dispatched only if present, so pre-1.2 listeners keep working). See
-  [Observability](guides/observability.md).
+  and `on_retry` / `on_bulkhead_rejected` / `on_fallback` for pipeline
+  strategies (all optional hooks are dispatched only if present, so older
+  listeners keep working). See [Observability](guides/observability.md).
 
 ## Shared-state types
 
@@ -2256,6 +2574,11 @@ Extra `interlock-cb[tenacity]`, module `interlock.integrations.tenacity`:
 - **`wait_probe(fallback, *, jitter=0.1)`** — tenacity wait strategy: sleeps
   `CircuitOpenError.retry_after` (+ up to `jitter` seconds) after a
   rejection, delegates to `fallback` otherwise.
+- **`RetryStrategy(*, attempts=3, retry=None, wait=None, sleep=None,
+  async_sleep=None, before_sleep=None, name='retry', listener=None)`** — a
+  bounded retry layer for the pipeline: policy delegated to tenacity,
+  attempts always capped, the original exception re-raised when the budget
+  runs out, `CircuitOpenError` not retried by default.
 
 See the [tenacity integration](integrations/tenacity.md) and the
 [retries guide](guides/retries.md).

@@ -61,6 +61,9 @@ Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
   raised on rejection; attributes `breaker_name`, `retry_after`, `last_failure`.
 - **`CallTimeoutError(timeout)`** — raised by `timeout` and `sync_timeout`;
   attribute `timeout`.
+- **`BulkheadFullError(max_concurrent, *, max_wait=0.0)`** — raised by a
+  pipeline bulkhead when no concurrency slot frees up in time; attributes
+  `max_concurrent`, `max_wait`.
 - **`InterlockDeprecationWarning`** — subclasses `UserWarning`, visible by
   default.
 
@@ -79,6 +82,31 @@ callable in a daemon worker thread and raises `CallTimeoutError` if it overruns
 `seconds`; the worker keeps running after a timeout (Python cannot kill a
 thread). See [Timeout](guides/timeout.md).
 
+## Pipeline
+
+Compose strategies around one call, outermost first — see the
+[pipeline guide](guides/pipeline.md):
+
+- **`Pipeline(*strategies)`** — the executor; works as a signature-preserving
+  decorator and as `pipeline.call(fn, *args, **kwargs)` (detect-dispatching,
+  like the breaker's). No context manager by design.
+- **`Pipeline.builder()` / `PipelineBuilder`** — step-by-step assembly:
+  `.fallback(...)`, `.retry(...)` (lazy `tenacity` extra),
+  `.circuit_breaker(breaker)`, `.bulkhead(...)`, `.timeout(seconds)`,
+  `.add(custom)`, `.build()`.
+- **`Strategy`** — the structural protocol: `execute(call)` /
+  `execute_async(call)`; `execute_async` always receives a real coroutine
+  function.
+- **`CircuitBreakerStrategy(breaker)`** — wraps a standalone breaker unchanged.
+- **`TimeoutStrategy(seconds)`** — bounds every attempt via the v1 primitives.
+- **`BulkheadStrategy(max_concurrent, *, max_wait=0.0, name='bulkhead',
+  listener=None)`** — concurrency cap; raises `BulkheadFullError`.
+- **`FallbackStrategy(fallback, *, on=(Exception,), name='fallback',
+  listener=None)`** — explicit substitution for selected failures; result
+  typed `T | F`.
+- **`RetryStrategy(...)`** — lives in `interlock.integrations.tenacity` (see
+  below).
+
 ## Protocols (extension points)
 
 Implement any of these to swap a core behaviour:
@@ -95,8 +123,9 @@ Implement any of these to swap a core behaviour:
   [Failure classification](guides/failure-classification.md).
 - **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`,
   plus `on_storage_degraded` / `on_storage_recovered` for coordinated breakers
-  (dispatched only if present, so pre-1.2 listeners keep working). See
-  [Observability](guides/observability.md).
+  and `on_retry` / `on_bulkhead_rejected` / `on_fallback` for pipeline
+  strategies (all optional hooks are dispatched only if present, so older
+  listeners keep working). See [Observability](guides/observability.md).
 
 ## Shared-state types
 
@@ -159,6 +188,11 @@ Extra `interlock-cb[tenacity]`, module `interlock.integrations.tenacity`:
 - **`wait_probe(fallback, *, jitter=0.1)`** — tenacity wait strategy: sleeps
   `CircuitOpenError.retry_after` (+ up to `jitter` seconds) after a
   rejection, delegates to `fallback` otherwise.
+- **`RetryStrategy(*, attempts=3, retry=None, wait=None, sleep=None,
+  async_sleep=None, before_sleep=None, name='retry', listener=None)`** — a
+  bounded retry layer for the pipeline: policy delegated to tenacity,
+  attempts always capped, the original exception re-raised when the budget
+  runs out, `CircuitOpenError` not retried by default.
 
 See the [tenacity integration](integrations/tenacity.md) and the
 [retries guide](guides/retries.md).

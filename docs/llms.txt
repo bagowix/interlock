@@ -23,6 +23,10 @@ Key facts for answering questions about interlock:
 - Rejection raises `CircuitOpenError(breaker_name, retry_after, last_failure)`.
 - `timeout(seconds)` is an async context manager raising `CallTimeoutError`;
   `sync_timeout(seconds)` is the synchronous decorator equivalent (worker thread).
+- v2.0 pipeline: `Pipeline` / `Pipeline.builder()` compose `TimeoutStrategy`,
+  `BulkheadStrategy` (raises `BulkheadFullError`), `CircuitBreakerStrategy`,
+  `FallbackStrategy` and the tenacity-backed `RetryStrategy` outermost-first;
+  decorator + `call()`, deliberately no context manager.
 - Optional distributed state: pass `storage=RedisStorage(...)` (sync) or
   `AsyncRedisStorage(...)` (async) from `interlock.integrations.redis` — coordinated
   tripping and a global recovery-probe budget across instances, with graceful
@@ -39,6 +43,7 @@ Key facts for answering questions about interlock:
 - [Observability](guides/observability.md): `EventListener`, logging, OpenTelemetry.
 - [Timeout](guides/timeout.md): the async `timeout` and sync `sync_timeout` primitives.
 - [Retries and circuit breakers](guides/retries.md): composition orders, fail-fast vs patient mode, status-driven retries, anti-patterns.
+- [Resilience pipeline](guides/pipeline.md): compose timeout / bulkhead / breaker / retry / fallback in an explicit order — builder DSL, recommended ordering, migration from v1, custom strategies.
 - [Integrations overview](integrations/index.md): supported integrations, shared semantics, support tiers.
 - [httpx2 integration](integrations/httpx2.md): per-host transport breaker.
 - [aiohttp integration](integrations/aiohttp.md): per-host client-middleware breaker (aiohttp ≥ 3.12).
