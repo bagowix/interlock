@@ -36,7 +36,8 @@ Key facts for answering questions about interlock:
 ## Docs
 
 - [Getting started](getting-started.md): install and the three usage forms.
-- [Runnable demo](demo.md): two deterministic scripts (`examples/`) with the expected output explained line by line.
+- [Runnable demo](demo.md): three deterministic scripts (`examples/`) with the expected output explained line by line.
+- [Comparison](comparison.md): interlock-cb vs pybreaker, circuitbreaker, aiobreaker and purgatory — feature table and honest trade-offs.
 - [Configuration](guides/configuration.md): every `Config` field, windows.
 - [States & manual control](guides/states.md): lifecycle and overrides.
 - [Failure classification](guides/failure-classification.md): custom classifiers.
@@ -45,15 +46,14 @@ Key facts for answering questions about interlock:
 - [Retries and circuit breakers](guides/retries.md): composition orders, fail-fast vs patient mode, status-driven retries, anti-patterns.
 - [Resilience pipeline](guides/pipeline.md): compose timeout / bulkhead / breaker / retry / fallback in an explicit order — builder DSL, recommended ordering, migration from v1, custom strategies.
 - [Integrations overview](integrations/index.md): supported integrations, shared semantics, support tiers.
+- [FastAPI integration](integrations/fastapi.md): Depends-injected breaker, 503 + Retry-After.
 - [httpx2 integration](integrations/httpx2.md): per-host transport breaker.
 - [aiohttp integration](integrations/aiohttp.md): per-host client-middleware breaker (aiohttp ≥ 3.12).
 - [requests integration](integrations/requests.md): per-host adapter breaker via `session.mount(...)`.
-- [tenacity integration](integrations/tenacity.md): `retry_unless_open` and `wait_probe` retry × breaker glue.
-- [FastAPI integration](integrations/fastapi.md): Depends-injected breaker, 503 + Retry-After.
-- [Redis integration](integrations/redis.md): shared distributed state, coordinated tripping, degradation semantics.
 - [LLM SDKs recipe](integrations/llm.md): guard OpenAI / Anthropic calls — breaker + slow-call detection + bounded retries.
+- [tenacity integration](integrations/tenacity.md): `retry_unless_open` and `wait_probe` retry × breaker glue.
+- [Redis integration](integrations/redis.md): shared distributed state, coordinated tripping, degradation semantics.
 - [Flask / Django recipe](integrations/frameworks.md): map `CircuitOpenError` to 503 + Retry-After.
-- [Comparison](comparison.md): interlock-cb vs pybreaker, circuitbreaker, aiobreaker and purgatory — feature table and honest trade-offs.
 - [API reference](reference.md): the full public surface.
 
 ## Optional

@@ -131,5 +131,5 @@ breaker.snapshot()       # WindowSnapshot: total_calls, failed_calls, slow_calls
 - [States & manual control](guides/states.md)
 - [Failure classification](guides/failure-classification.md)
 - [Observability](guides/observability.md)
-- [Integrations](integrations/index.md) — httpx2, aiohttp, requests, tenacity, FastAPI, Redis
+- [Integrations](integrations/index.md) — FastAPI, httpx2, aiohttp, requests, tenacity, Redis
 - [Resilience pipeline](guides/pipeline.md) — compose timeout, bulkhead, retry and fallback around the breaker

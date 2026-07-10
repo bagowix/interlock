@@ -8,13 +8,13 @@ per named dependency) with no decorators in call sites.
 
 | Integration | Extra | What you get |
 |---|---|---|
+| [FastAPI](fastapi.md) | `interlock-cb[fastapi]` | `Depends`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler |
 | [httpx2](httpx2.md) | `interlock-cb[httpx2]` | `CircuitBreakerTransport` / `AsyncCircuitBreakerTransport` — per-host breaker at the transport level |
 | [aiohttp](aiohttp.md) | `interlock-cb[aiohttp]` | `CircuitBreakerMiddleware` — per-host breaker as a client middleware (aiohttp ≥ 3.12) |
 | [requests](requests.md) | `interlock-cb[requests]` | `CircuitBreakerAdapter` — per-host breaker mounted on a `Session` |
-| [tenacity](tenacity.md) | `interlock-cb[tenacity]` | Retry × breaker glue: stop retrying when the circuit opens, or wait exactly until the next probe |
-| [FastAPI](fastapi.md) | `interlock-cb[fastapi]` | `Depends`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler |
-| [Redis](redis.md) | `interlock-cb[redis]` | Shared breaker state across processes with graceful degradation |
 | [LLM SDKs](llm.md) | — (recipe) | Guard OpenAI / Anthropic SDK calls with a breaker + bounded retries |
+| [tenacity](tenacity.md) | `interlock-cb[tenacity]` | Retry × breaker glue: stop retrying when the circuit opens, or wait exactly until the next probe |
+| [Redis](redis.md) | `interlock-cb[redis]` | Shared breaker state across processes with graceful degradation |
 | [Flask / Django](frameworks.md) | — (recipe) | Map `CircuitOpenError` to `503 + Retry-After` in other web frameworks |
 
 ## How integrations are built
