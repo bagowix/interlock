@@ -9,6 +9,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default for every job; the coverage job overrides it with
+# the write scopes py-cov-action needs.
+permissions:
+  contents: read
+
 jobs:
   quality:
     runs-on: ubuntu-latest
