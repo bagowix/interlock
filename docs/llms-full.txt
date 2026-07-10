@@ -148,7 +148,7 @@ breaker.snapshot()       # WindowSnapshot: total_calls, failed_calls, slow_calls
 - [States & manual control](guides/states.md)
 - [Failure classification](guides/failure-classification.md)
 - [Observability](guides/observability.md)
-- [Integrations](integrations/index.md) — httpx2, aiohttp, requests, tenacity, FastAPI, Redis
+- [Integrations](integrations/index.md) — FastAPI, httpx2, aiohttp, requests, tenacity, Redis
 - [Resilience pipeline](guides/pipeline.md) — compose timeout, bulkhead, retry and fallback around the breaker
 
 ---
@@ -706,6 +706,107 @@ In real code you usually don't have to: the [integrations](integrations/index.md
 apply the same per-dependency pattern to httpx2, aiohttp, requests and
 FastAPI transparently, and the [resilience pipeline](guides/pipeline.md)
 composes the breaker with timeout, bulkhead, retry and fallback declaratively.
+
+---
+
+<!-- source: docs/comparison.md -->
+
+# Comparison
+
+Picking a circuit breaker is mostly about which failure model, runtime and
+coordination story you need. This page compares interlock-cb with the
+established Python circuit breakers — honestly. interlock-cb is the youngest
+of the five (first released in 2026); [pybreaker](https://github.com/danielfm/pybreaker),
+[circuitbreaker](https://github.com/fabfuel/circuitbreaker),
+[aiobreaker](https://github.com/arlyon/aiobreaker) and
+[purgatory](https://github.com/mardiros/purgatory) have carried production
+traffic for years, and for many projects one of them is exactly the right
+choice.
+
+## Feature table
+
+| Feature | interlock-cb | pybreaker | circuitbreaker | aiobreaker | purgatory |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Core states (closed / open / half-open) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Choose which exceptions count as failures | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Zero-dependency core | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `async` / `await` (asyncio) | ✅ | Tornado | ✅ | ✅ | ✅ |
+| Sync and async in **one** breaker class | ✅ | — | ✅ | ✅ | separate factories |
+| Trip condition | failure **rate** over a window | consecutive count | consecutive count | consecutive count | consecutive count |
+| Time-based sliding window | ✅ | — | — | — | — |
+| Slow-call detection | ✅ | — | — | — | — |
+| Result-based failure classification | ✅ | — | — | — | — |
+| Event / state-change listeners | ✅ | ✅ | — | ✅ | ✅ |
+| Shared state across processes (Redis) | ✅ | ✅ | — | ✅ | ✅ |
+| Globally budgeted recovery probes | ✅ | — | — | — | — |
+| Fallback function | ✅ | — | ✅ | — | — |
+| Composable resilience pipeline (retry × breaker × bulkhead × timeout × fallback) | ✅ | — | — | — | — |
+| Fully typed API (`py.typed`) | ✅ | — | — | — | ✅ |
+| Signature-preserving decorator (`ParamSpec`) | ✅ | — | — | — | — |
+| HTTP client integrations (httpx2 / aiohttp / requests) | ✅ | — | — | — | — |
+| Retry composition helpers (tenacity) | ✅ | — | — | — | — |
+| OpenTelemetry metrics | ✅ | — | — | — | — |
+| Operator overrides (force-open / disable / shadow mode) | ✅ | — | — | — | — |
+| Years of production use | new | ✅ | ✅ | ✅ | ✅ |
+| Latest release (as of July 2026) | 1.3.0 · 2026 | 1.4.1 · 2025 | 2.1.3 | 1.2.0 · 2021 | 3.0.1 · 2024 |
+| Python | ≥ 3.11 | ≥ 3.9 | ≥ 3.8 | ≥ 3.6 | ≥ 3.9 |
+
+<sub>Compared against pybreaker 1.4.1, circuitbreaker 2.1.3, aiobreaker 1.2.0
+and purgatory 3.0.1, as documented in July 2026. Something out of date or
+unfair? Please
+[open a PR](https://github.com/bagowix/interlock/pulls).</sub>
+
+## The four established libraries, honestly
+
+**pybreaker** is the original Python circuit breaker and the most proven one:
+a small, stable sync breaker with listeners and optional Redis-backed state,
+maintained for well over a decade. Its async support targets Tornado, not
+asyncio, and it trips on a consecutive-failure count rather than a failure
+rate. If you run a synchronous stack and want the most battle-tested option,
+start here.
+
+**circuitbreaker** has the smallest API of the five: one `@circuit` decorator
+that also handles async functions, plus the only built-in **fallback
+function** in this table. There are no listeners, no shared state and no rate
+window — which is precisely its appeal when you need a guard on a handful of
+call sites and nothing else.
+
+**aiobreaker** is pybreaker ported to native asyncio, with the same
+listener and Redis-storage features. Its last release was in 2021; for new
+projects, prefer an actively maintained alternative.
+
+**purgatory** brings a fully typed sync + async breaker with Redis storage
+and event hooks. Sync and async live in separate factory classes
+(`SyncCircuitBreakerFactory` / `AsyncCircuitBreakerFactory`), and tripping is
+a consecutive-failure threshold with a TTL on the open state.
+
+## Where interlock-cb differs
+
+- **Rate over a window, not a streak.** A consecutive-failure counter resets
+  on any single success, so a dependency failing 90% of requests under load
+  can keep a breaker closed indefinitely. interlock trips on the failure
+  *rate* across a count- or time-based sliding window
+  ([configuration](guides/configuration.md)).
+- **Slow calls are failures too.** A dependency that answers in 30 s can be
+  worse than one that errors fast. `slow_call_duration_threshold` +
+  `slow_call_rate_threshold` trip the breaker on latency degradation alone.
+- **One class, both runtimes.** The same `CircuitBreaker` instance guards sync
+  and async callables — decorator, context manager, or `call()` — and the
+  decorator preserves the wrapped signature for type checkers.
+- **Coordination built for fleets.** With the Redis storage, tripping is
+  atomic across racing instances and half-open probes are budgeted globally,
+  with graceful degradation to local state when Redis is down
+  ([Redis integration](integrations/redis.md)).
+- **Meets your stack where it is.** Per-host breakers ship for httpx2,
+  aiohttp and requests; tenacity glue composes retries correctly; FastAPI
+  maps rejections to `503 + Retry-After`
+  ([integrations overview](integrations/index.md)).
+
+The honest trade-off: interlock-cb requires Python ≥ 3.11 and has not had
+years in production. Reach for an established
+library if that maturity matters more than the feature gap; choose
+interlock-cb when you want rate-based windows, slow-call detection,
+coordinated state and a fully typed API.
 
 ---
 
@@ -1538,13 +1639,13 @@ per named dependency) with no decorators in call sites.
 
 | Integration | Extra | What you get |
 |---|---|---|
+| [FastAPI](fastapi.md) | `interlock-cb[fastapi]` | `Depends`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler |
 | [httpx2](httpx2.md) | `interlock-cb[httpx2]` | `CircuitBreakerTransport` / `AsyncCircuitBreakerTransport` — per-host breaker at the transport level |
 | [aiohttp](aiohttp.md) | `interlock-cb[aiohttp]` | `CircuitBreakerMiddleware` — per-host breaker as a client middleware (aiohttp ≥ 3.12) |
 | [requests](requests.md) | `interlock-cb[requests]` | `CircuitBreakerAdapter` — per-host breaker mounted on a `Session` |
-| [tenacity](tenacity.md) | `interlock-cb[tenacity]` | Retry × breaker glue: stop retrying when the circuit opens, or wait exactly until the next probe |
-| [FastAPI](fastapi.md) | `interlock-cb[fastapi]` | `Depends`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler |
-| [Redis](redis.md) | `interlock-cb[redis]` | Shared breaker state across processes with graceful degradation |
 | [LLM SDKs](llm.md) | — (recipe) | Guard OpenAI / Anthropic SDK calls with a breaker + bounded retries |
+| [tenacity](tenacity.md) | `interlock-cb[tenacity]` | Retry × breaker glue: stop retrying when the circuit opens, or wait exactly until the next probe |
+| [Redis](redis.md) | `interlock-cb[redis]` | Shared breaker state across processes with graceful degradation |
 | [Flask / Django](frameworks.md) | — (recipe) | Map `CircuitOpenError` to `503 + Retry-After` in other web frameworks |
 
 ## How integrations are built
@@ -1584,6 +1685,124 @@ Every integration follows the same rules, so learning one means knowing all:
 Missing an integration — gRPC, SQLAlchemy, Kafka, Celery?
 [Open an issue](https://github.com/bagowix/interlock/issues): the next wave
 is prioritised by demand.
+
+---
+
+<!-- source: docs/integrations/fastapi.md -->
+
+# FastAPI
+
+The `interlock-cb[fastapi]` extra protects a route's outgoing dependency with a
+shared `Registry` and turns a tripped breaker into a clean
+`503 Service Unavailable` response with a `Retry-After` header.
+
+=== "uv"
+
+    ```bash
+    uv add 'interlock-cb[fastapi]'
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install 'interlock-cb[fastapi]'
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add 'interlock-cb[fastapi]'
+    ```
+
+## Usage
+
+Install the exception handler once, then inject a per-name breaker into any route
+with `Depends`:
+
+```python
+from typing import Annotated
+
+from fastapi import Depends, FastAPI
+from interlock import CircuitBreaker, Registry
+from interlock.integrations.fastapi import breaker_dependency, install_exception_handler
+
+app = FastAPI()
+registry = Registry()
+install_exception_handler(app)
+
+orders_db = breaker_dependency('orders-db', registry=registry)
+
+
+@app.get('/orders')
+async def orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
+    return await breaker.call(fetch_orders)
+```
+
+When `fetch_orders` fails often enough, the breaker opens. The next request is
+rejected with `CircuitOpenError` *before* `fetch_orders` runs, and the installed
+handler converts it into:
+
+```http
+HTTP/1.1 503 Service Unavailable
+Retry-After: 30
+Content-Type: application/json
+
+{"detail": "Circuit 'orders-db' is open"}
+```
+
+## How it works
+
+- **`breaker_dependency(name, *, registry)`** returns a FastAPI dependency that
+  yields the named breaker from the shared `Registry`. The breaker is created
+  lazily on first use and reused on every later request, so all requests to that
+  route share one breaker (and one view of the dependency's health).
+- **`install_exception_handler(app)`** registers a handler for
+  `CircuitOpenError`. It responds `503` and sets `Retry-After` to the breaker's
+  `retry_after` estimate, rounded up to whole seconds (per RFC 7231). The header
+  is omitted when there is no estimate (for example after `force_open()`).
+
+You protect the *outgoing* call (`breaker.call(...)`) rather than the route
+itself: only the dependency you wrap counts toward the breaker, and the breaker's
+own admission logic (probes, half-open) keeps working.
+
+## Sharing breakers across routes
+
+Reuse the same `name` (and the same `registry`) to share one breaker across
+several routes that all depend on the same downstream:
+
+```python
+orders_db = breaker_dependency('orders-db', registry=registry)
+
+
+@app.get('/orders')
+async def list_orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
+    return await breaker.call(fetch_orders)
+
+
+@app.get('/orders/{order_id}')
+async def get_order(
+    order_id: int, breaker: Annotated[CircuitBreaker, Depends(orders_db)]
+) -> dict:
+    return await breaker.call(fetch_order, order_id)
+```
+
+Pass `config`, `clock`, `classifier` or `listener` to the `Registry` to tune
+every breaker it creates, or override per name via `registry.get(name, config=...)`.
+
+## Custom responses
+
+For a different response shape, register your own handler instead of
+`install_exception_handler`:
+
+```python
+from fastapi import Request, Response
+from interlock import CircuitOpenError
+
+
+@app.exception_handler(CircuitOpenError)
+async def on_open(request: Request, exc: CircuitOpenError) -> Response:
+    ...
+```
 
 ---
 
@@ -1840,6 +2059,116 @@ retries combine with the [tenacity integration](tenacity.md) and read
 
 ---
 
+<!-- source: docs/integrations/llm.md -->
+
+# LLM SDKs (OpenAI, Anthropic) — recipe
+
+LLM APIs fail in exactly the ways circuit breakers exist for: rate limits
+(`429`), overloaded backends (`529`/`503`), long hangs. A breaker around your
+LLM calls stops a degraded provider from stalling every request thread, and
+bounded retries recover from blips without amplifying an outage.
+
+This is a **recipe** — no extra needed beyond `interlock-cb[tenacity]`; the
+SDKs raise typed exceptions, which is all the breaker needs.
+
+## Classify SDK errors
+
+Both SDKs raise `APIStatusError` subclasses carrying `status_code`, plus
+connection/timeout errors. Not every error should trip the circuit: an
+invalid request (`400`) or a missing model (`404`) is your bug, not the
+provider's outage.
+
+```python
+import anthropic
+
+
+class LLMFailureClassifier:
+    """Trip on provider-side trouble, not on caller mistakes."""
+
+    _FAILURE_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
+
+    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+        if exception is None:
+            return False
+        if isinstance(exception, anthropic.APIStatusError):
+            return exception.status_code in self._FAILURE_STATUSES
+        return isinstance(exception, (anthropic.APIConnectionError, anthropic.APITimeoutError))
+```
+
+For OpenAI, swap the exception types (`openai.APIStatusError`,
+`openai.APIConnectionError`, `openai.APITimeoutError`) — the shape is
+identical.
+
+## Guard the calls
+
+```python
+import anthropic
+from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential_jitter
+
+from interlock import CircuitBreaker, Config
+from interlock.integrations.tenacity import retry_unless_open
+
+client = anthropic.AsyncAnthropic()
+
+breaker = CircuitBreaker(
+    name='anthropic',
+    config=Config(slow_call_duration_threshold=30.0),
+    classifier=LLMFailureClassifier(),
+)
+
+
+@breaker
+async def complete(prompt: str) -> str:
+    message = await client.messages.create(
+        model='claude-sonnet-5',
+        max_tokens=1024,
+        messages=[{'role': 'user', 'content': prompt}],
+    )
+    return message.content[0].text
+
+
+retrying = AsyncRetrying(
+    retry=retry_unless_open(
+        anthropic.APIStatusError,
+        anthropic.APIConnectionError,
+        anthropic.APITimeoutError,
+    ),
+    wait=wait_exponential_jitter(initial=1.0, max=30.0),
+    stop=stop_after_attempt(4),
+    reraise=True,
+)
+
+answer = await retrying(complete, 'Summarise this document...')
+```
+
+What each layer contributes:
+
+- **Slow-call detection** (`slow_call_duration_threshold`) counts calls
+  slower than 30s as failures — a provider that still answers but takes a
+  minute per completion trips the breaker too. No other signal catches this.
+- **The breaker** stops sending after the failure rate crosses the threshold;
+  while open, callers get `CircuitOpenError` in microseconds instead of
+  hanging — fail over to a second provider or degrade gracefully.
+- **`retry_unless_open`** retries provider blips with jittered backoff but
+  stops the moment the circuit opens. The SDK's own retries overlap here —
+  either set `max_retries=0` on the client and let tenacity own retries, or
+  keep the SDK's and drop the tenacity layer; running both multiplies
+  attempts.
+
+## Multiple providers, one pattern
+
+Give each provider its own breaker name (`anthropic`, `openai`, ...) via a
+shared `Registry` and check `breaker.state` to route around an open provider.
+The [states guide](../guides/states.md) covers manual failover controls.
+
+!!! note "Transport-level alternative"
+    The SDKs are built on classic httpx, which does not take httpx2
+    transports; once they migrate to httpx2 you will be able to drop the
+    decorator entirely and pass a client wrapped with the
+    [httpx2 transport](httpx2.md) instead.
+
+---
+
 <!-- source: docs/integrations/tenacity.md -->
 
 # tenacity (retries)
@@ -1972,124 +2301,6 @@ the `on_retry` hook ([observability](../guides/observability.md)).
 compose as usual — the helpers are ordinary tenacity predicates and wait
 objects, so you can combine them with `|`, `retry_any`, `wait_chain` and
 friends.
-
----
-
-<!-- source: docs/integrations/fastapi.md -->
-
-# FastAPI
-
-The `interlock-cb[fastapi]` extra protects a route's outgoing dependency with a
-shared `Registry` and turns a tripped breaker into a clean
-`503 Service Unavailable` response with a `Retry-After` header.
-
-=== "uv"
-
-    ```bash
-    uv add 'interlock-cb[fastapi]'
-    ```
-
-=== "pip"
-
-    ```bash
-    pip install 'interlock-cb[fastapi]'
-    ```
-
-=== "poetry"
-
-    ```bash
-    poetry add 'interlock-cb[fastapi]'
-    ```
-
-## Usage
-
-Install the exception handler once, then inject a per-name breaker into any route
-with `Depends`:
-
-```python
-from typing import Annotated
-
-from fastapi import Depends, FastAPI
-from interlock import CircuitBreaker, Registry
-from interlock.integrations.fastapi import breaker_dependency, install_exception_handler
-
-app = FastAPI()
-registry = Registry()
-install_exception_handler(app)
-
-orders_db = breaker_dependency('orders-db', registry=registry)
-
-
-@app.get('/orders')
-async def orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
-    return await breaker.call(fetch_orders)
-```
-
-When `fetch_orders` fails often enough, the breaker opens. The next request is
-rejected with `CircuitOpenError` *before* `fetch_orders` runs, and the installed
-handler converts it into:
-
-```http
-HTTP/1.1 503 Service Unavailable
-Retry-After: 30
-Content-Type: application/json
-
-{"detail": "Circuit 'orders-db' is open"}
-```
-
-## How it works
-
-- **`breaker_dependency(name, *, registry)`** returns a FastAPI dependency that
-  yields the named breaker from the shared `Registry`. The breaker is created
-  lazily on first use and reused on every later request, so all requests to that
-  route share one breaker (and one view of the dependency's health).
-- **`install_exception_handler(app)`** registers a handler for
-  `CircuitOpenError`. It responds `503` and sets `Retry-After` to the breaker's
-  `retry_after` estimate, rounded up to whole seconds (per RFC 7231). The header
-  is omitted when there is no estimate (for example after `force_open()`).
-
-You protect the *outgoing* call (`breaker.call(...)`) rather than the route
-itself: only the dependency you wrap counts toward the breaker, and the breaker's
-own admission logic (probes, half-open) keeps working.
-
-## Sharing breakers across routes
-
-Reuse the same `name` (and the same `registry`) to share one breaker across
-several routes that all depend on the same downstream:
-
-```python
-orders_db = breaker_dependency('orders-db', registry=registry)
-
-
-@app.get('/orders')
-async def list_orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
-    return await breaker.call(fetch_orders)
-
-
-@app.get('/orders/{order_id}')
-async def get_order(
-    order_id: int, breaker: Annotated[CircuitBreaker, Depends(orders_db)]
-) -> dict:
-    return await breaker.call(fetch_order, order_id)
-```
-
-Pass `config`, `clock`, `classifier` or `listener` to the `Registry` to tune
-every breaker it creates, or override per name via `registry.get(name, config=...)`.
-
-## Custom responses
-
-For a different response shape, register your own handler instead of
-`install_exception_handler`:
-
-```python
-from fastapi import Request, Response
-from interlock import CircuitOpenError
-
-
-@app.exception_handler(CircuitOpenError)
-async def on_open(request: Request, exc: CircuitOpenError) -> Response:
-    ...
-```
 
 ---
 
@@ -2256,116 +2467,6 @@ server's.)
 
 ---
 
-<!-- source: docs/integrations/llm.md -->
-
-# LLM SDKs (OpenAI, Anthropic) — recipe
-
-LLM APIs fail in exactly the ways circuit breakers exist for: rate limits
-(`429`), overloaded backends (`529`/`503`), long hangs. A breaker around your
-LLM calls stops a degraded provider from stalling every request thread, and
-bounded retries recover from blips without amplifying an outage.
-
-This is a **recipe** — no extra needed beyond `interlock-cb[tenacity]`; the
-SDKs raise typed exceptions, which is all the breaker needs.
-
-## Classify SDK errors
-
-Both SDKs raise `APIStatusError` subclasses carrying `status_code`, plus
-connection/timeout errors. Not every error should trip the circuit: an
-invalid request (`400`) or a missing model (`404`) is your bug, not the
-provider's outage.
-
-```python
-import anthropic
-
-
-class LLMFailureClassifier:
-    """Trip on provider-side trouble, not on caller mistakes."""
-
-    _FAILURE_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
-
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
-        if exception is None:
-            return False
-        if isinstance(exception, anthropic.APIStatusError):
-            return exception.status_code in self._FAILURE_STATUSES
-        return isinstance(exception, (anthropic.APIConnectionError, anthropic.APITimeoutError))
-```
-
-For OpenAI, swap the exception types (`openai.APIStatusError`,
-`openai.APIConnectionError`, `openai.APITimeoutError`) — the shape is
-identical.
-
-## Guard the calls
-
-```python
-import anthropic
-from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential_jitter
-
-from interlock import CircuitBreaker, Config
-from interlock.integrations.tenacity import retry_unless_open
-
-client = anthropic.AsyncAnthropic()
-
-breaker = CircuitBreaker(
-    name='anthropic',
-    config=Config(slow_call_duration_threshold=30.0),
-    classifier=LLMFailureClassifier(),
-)
-
-
-@breaker
-async def complete(prompt: str) -> str:
-    message = await client.messages.create(
-        model='claude-sonnet-5',
-        max_tokens=1024,
-        messages=[{'role': 'user', 'content': prompt}],
-    )
-    return message.content[0].text
-
-
-retrying = AsyncRetrying(
-    retry=retry_unless_open(
-        anthropic.APIStatusError,
-        anthropic.APIConnectionError,
-        anthropic.APITimeoutError,
-    ),
-    wait=wait_exponential_jitter(initial=1.0, max=30.0),
-    stop=stop_after_attempt(4),
-    reraise=True,
-)
-
-answer = await retrying(complete, 'Summarise this document...')
-```
-
-What each layer contributes:
-
-- **Slow-call detection** (`slow_call_duration_threshold`) counts calls
-  slower than 30s as failures — a provider that still answers but takes a
-  minute per completion trips the breaker too. No other signal catches this.
-- **The breaker** stops sending after the failure rate crosses the threshold;
-  while open, callers get `CircuitOpenError` in microseconds instead of
-  hanging — fail over to a second provider or degrade gracefully.
-- **`retry_unless_open`** retries provider blips with jittered backoff but
-  stops the moment the circuit opens. The SDK's own retries overlap here —
-  either set `max_retries=0` on the client and let tenacity own retries, or
-  keep the SDK's and drop the tenacity layer; running both multiplies
-  attempts.
-
-## Multiple providers, one pattern
-
-Give each provider its own breaker name (`anthropic`, `openai`, ...) via a
-shared `Registry` and check `breaker.state` to route around an open provider.
-The [states guide](../guides/states.md) covers manual failover controls.
-
-!!! note "Transport-level alternative"
-    The SDKs are built on classic httpx, which does not take httpx2
-    transports; once they migrate to httpx2 you will be able to drop the
-    decorator entirely and pass a client wrapped with the
-    [httpx2 transport](httpx2.md) instead.
-
----
-
 <!-- source: docs/integrations/frameworks.md -->
 
 # Flask / Django — recipe
@@ -2456,107 +2557,6 @@ def charge(amount: int) -> str:
 `Retry-After` is rounded up to whole seconds (per RFC 7231) and omitted when
 the breaker cannot estimate the next probe (for example after
 `force_open()`).
-
----
-
-<!-- source: docs/comparison.md -->
-
-# Comparison
-
-Picking a circuit breaker is mostly about which failure model, runtime and
-coordination story you need. This page compares interlock-cb with the
-established Python circuit breakers — honestly. interlock-cb is the youngest
-of the five (first released in 2026); [pybreaker](https://github.com/danielfm/pybreaker),
-[circuitbreaker](https://github.com/fabfuel/circuitbreaker),
-[aiobreaker](https://github.com/arlyon/aiobreaker) and
-[purgatory](https://github.com/mardiros/purgatory) have carried production
-traffic for years, and for many projects one of them is exactly the right
-choice.
-
-## Feature table
-
-| Feature | interlock-cb | pybreaker | circuitbreaker | aiobreaker | purgatory |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Core states (closed / open / half-open) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Choose which exceptions count as failures | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Zero-dependency core | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `async` / `await` (asyncio) | ✅ | Tornado | ✅ | ✅ | ✅ |
-| Sync and async in **one** breaker class | ✅ | — | ✅ | ✅ | separate factories |
-| Trip condition | failure **rate** over a window | consecutive count | consecutive count | consecutive count | consecutive count |
-| Time-based sliding window | ✅ | — | — | — | — |
-| Slow-call detection | ✅ | — | — | — | — |
-| Result-based failure classification | ✅ | — | — | — | — |
-| Event / state-change listeners | ✅ | ✅ | — | ✅ | ✅ |
-| Shared state across processes (Redis) | ✅ | ✅ | — | ✅ | ✅ |
-| Globally budgeted recovery probes | ✅ | — | — | — | — |
-| Fallback function | ✅ | — | ✅ | — | — |
-| Composable resilience pipeline (retry × breaker × bulkhead × timeout × fallback) | ✅ | — | — | — | — |
-| Fully typed API (`py.typed`) | ✅ | — | — | — | ✅ |
-| Signature-preserving decorator (`ParamSpec`) | ✅ | — | — | — | — |
-| HTTP client integrations (httpx2 / aiohttp / requests) | ✅ | — | — | — | — |
-| Retry composition helpers (tenacity) | ✅ | — | — | — | — |
-| OpenTelemetry metrics | ✅ | — | — | — | — |
-| Operator overrides (force-open / disable / shadow mode) | ✅ | — | — | — | — |
-| Years of production use | new | ✅ | ✅ | ✅ | ✅ |
-| Latest release (as of July 2026) | 1.3.0 · 2026 | 1.4.1 · 2025 | 2.1.3 | 1.2.0 · 2021 | 3.0.1 · 2024 |
-| Python | ≥ 3.11 | ≥ 3.9 | ≥ 3.8 | ≥ 3.6 | ≥ 3.9 |
-
-<sub>Compared against pybreaker 1.4.1, circuitbreaker 2.1.3, aiobreaker 1.2.0
-and purgatory 3.0.1, as documented in July 2026. Something out of date or
-unfair? Please
-[open a PR](https://github.com/bagowix/interlock/pulls).</sub>
-
-## The four established libraries, honestly
-
-**pybreaker** is the original Python circuit breaker and the most proven one:
-a small, stable sync breaker with listeners and optional Redis-backed state,
-maintained for well over a decade. Its async support targets Tornado, not
-asyncio, and it trips on a consecutive-failure count rather than a failure
-rate. If you run a synchronous stack and want the most battle-tested option,
-start here.
-
-**circuitbreaker** has the smallest API of the five: one `@circuit` decorator
-that also handles async functions, plus the only built-in **fallback
-function** in this table. There are no listeners, no shared state and no rate
-window — which is precisely its appeal when you need a guard on a handful of
-call sites and nothing else.
-
-**aiobreaker** is pybreaker ported to native asyncio, with the same
-listener and Redis-storage features. Its last release was in 2021; for new
-projects, prefer an actively maintained alternative.
-
-**purgatory** brings a fully typed sync + async breaker with Redis storage
-and event hooks. Sync and async live in separate factory classes
-(`SyncCircuitBreakerFactory` / `AsyncCircuitBreakerFactory`), and tripping is
-a consecutive-failure threshold with a TTL on the open state.
-
-## Where interlock-cb differs
-
-- **Rate over a window, not a streak.** A consecutive-failure counter resets
-  on any single success, so a dependency failing 90% of requests under load
-  can keep a breaker closed indefinitely. interlock trips on the failure
-  *rate* across a count- or time-based sliding window
-  ([configuration](guides/configuration.md)).
-- **Slow calls are failures too.** A dependency that answers in 30 s can be
-  worse than one that errors fast. `slow_call_duration_threshold` +
-  `slow_call_rate_threshold` trip the breaker on latency degradation alone.
-- **One class, both runtimes.** The same `CircuitBreaker` instance guards sync
-  and async callables — decorator, context manager, or `call()` — and the
-  decorator preserves the wrapped signature for type checkers.
-- **Coordination built for fleets.** With the Redis storage, tripping is
-  atomic across racing instances and half-open probes are budgeted globally,
-  with graceful degradation to local state when Redis is down
-  ([Redis integration](integrations/redis.md)).
-- **Meets your stack where it is.** Per-host breakers ship for httpx2,
-  aiohttp and requests; tenacity glue composes retries correctly; FastAPI
-  maps rejections to `503 + Retry-After`
-  ([integrations overview](integrations/index.md)).
-
-The honest trade-off: interlock-cb requires Python ≥ 3.11 and has not had
-years in production. Reach for an established
-library if that maturity matters more than the feature gap; choose
-interlock-cb when you want rate-based windows, slow-call detection,
-coordinated state and a fully typed API.
 
 ---
 

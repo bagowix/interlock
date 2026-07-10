@@ -256,8 +256,8 @@ The sources live in [`docs/`](docs/):
 - [Timeout](docs/guides/timeout.md)
 - [Retries and circuit breakers](docs/guides/retries.md)
 - [Resilience pipeline](docs/guides/pipeline.md)
-- [Integrations overview](docs/integrations/index.md) — httpx2, aiohttp,
-  requests, tenacity, FastAPI, Redis, LLM SDKs, Flask/Django
+- [Integrations overview](docs/integrations/index.md) — FastAPI, httpx2,
+  aiohttp, requests, LLM SDKs, tenacity, Redis, Flask/Django
 - [Comparison](docs/comparison.md) — vs pybreaker, circuitbreaker, aiobreaker, purgatory
 - [API reference](docs/reference.md)
 

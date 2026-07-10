@@ -19,6 +19,7 @@ _DOCS = Path(__file__).resolve().parent.parent / 'docs'
 _PAGES = (
     'getting-started.md',
     'demo.md',
+    'comparison.md',
     'guides/configuration.md',
     'guides/states.md',
     'guides/failure-classification.md',
@@ -27,15 +28,14 @@ _PAGES = (
     'guides/retries.md',
     'guides/pipeline.md',
     'integrations/index.md',
+    'integrations/fastapi.md',
     'integrations/httpx2.md',
     'integrations/aiohttp.md',
     'integrations/requests.md',
-    'integrations/tenacity.md',
-    'integrations/fastapi.md',
-    'integrations/redis.md',
     'integrations/llm.md',
+    'integrations/tenacity.md',
+    'integrations/redis.md',
     'integrations/frameworks.md',
-    'comparison.md',
     'reference.md',
 )
 
