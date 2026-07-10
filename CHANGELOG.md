@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-10
+
+The resilience-pipeline milestone: interlock grows from one pattern into a
+composable resilience framework, while the breaker stays a breaker.
+
+**Backwards compatibility: there are no breaking changes.** The entire v1
+public API — `CircuitBreaker`, `Registry`, `Config`, the timeout primitives,
+every integration — is untouched; the whole v1 test suite passes unmodified.
+The major version marks the scope of what is added, not a migration burden.
+
 ### Added
 
 - **Resilience pipeline core** (`interlock.pipeline`): a `Strategy` protocol
@@ -58,7 +68,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   strategies); pipeline sections in the API reference, retries guide,
   observability guide, tenacity integration page, README and the comparison
   page (fallback is now shipped).
-
 - Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
   circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).
 - Runnable examples (`examples/`): `lifecycle.py` walks one breaker through
@@ -202,7 +211,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/bagowix/interlock/compare/v1.3.0...v2.0.0
 [1.3.0]: https://github.com/bagowix/interlock/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/bagowix/interlock/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bagowix/interlock/compare/v1.0.0...v1.1.0
