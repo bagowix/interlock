@@ -50,6 +50,10 @@ class OTelEventListener:
             'interlock.storage.events',
             description='Shared storage degradations and recoveries.',
         )
+        self._pipeline_events = meter.create_counter(
+            'interlock.pipeline.events',
+            description='Pipeline strategy decisions: retries, bulkhead rejections, fallbacks.',
+        )
 
     def on_state_change(self, *, name: str, old: State, new: State) -> None:
         """Count a state transition, labelled with the breaker and direction."""
@@ -76,3 +80,17 @@ class OTelEventListener:
     def on_storage_recovered(self, *, name: str) -> None:
         """Count a storage recovery, labelled with the breaker."""
         self._storage_events.add(1, {'breaker': name, 'event': 'recovered'})
+
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None:  # noqa: ARG002
+        """Count a retry, labelled with the strategy name (attempt/delay stay off the label)."""
+        self._pipeline_events.add(1, {'strategy': name, 'event': 'retry'})
+
+    def on_bulkhead_rejected(self, *, name: str) -> None:
+        """Count a bulkhead rejection, labelled with the strategy name."""
+        self._pipeline_events.add(1, {'strategy': name, 'event': 'bulkhead_rejected'})
+
+    def on_fallback(self, *, name: str, error: BaseException) -> None:
+        """Count a fallback substitution, labelled with the strategy and error type."""
+        self._pipeline_events.add(
+            1, {'strategy': name, 'event': 'fallback', 'error': type(error).__name__}
+        )

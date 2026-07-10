@@ -68,3 +68,33 @@ def test__on_storage_recovered__logs_info(caplog: pytest.LogCaptureFixture) -> N
         listener.on_storage_recovered(name='svc')
 
     assert 'recovered' in caplog.text
+
+
+def test__on_retry__logs_info(caplog: pytest.LogCaptureFixture) -> None:
+    listener = LoggingEventListener(logging.getLogger('interlock.test'))
+
+    with caplog.at_level(logging.INFO, logger='interlock.test'):
+        listener.on_retry(name='payments', attempt=2, delay=1.5)
+
+    assert 'payments' in caplog.text
+    assert 'attempt 2' in caplog.text
+
+
+def test__on_bulkhead_rejected__logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    listener = LoggingEventListener(logging.getLogger('interlock.test'))
+
+    with caplog.at_level(logging.WARNING, logger='interlock.test'):
+        listener.on_bulkhead_rejected(name='db-pool')
+
+    assert 'db-pool' in caplog.text
+    assert 'bulkhead' in caplog.text
+
+
+def test__on_fallback__logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    listener = LoggingEventListener(logging.getLogger('interlock.test'))
+
+    with caplog.at_level(logging.WARNING, logger='interlock.test'):
+        listener.on_fallback(name='recs', error=ValueError('down'))
+
+    assert 'recs' in caplog.text
+    assert 'fallback' in caplog.text

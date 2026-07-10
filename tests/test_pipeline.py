@@ -671,3 +671,151 @@ def test__public_surface__pipeline_names_are_exported_from_interlock() -> None:
     ):
         assert hasattr(interlock, name)
         assert name in interlock.__all__
+
+
+class RecordingPipelineListener:
+    """Records only the v2.0 pipeline hooks (retry / bulkhead / fallback)."""
+
+    def __init__(self) -> None:
+        self.retries: list[tuple[str, int, float]] = []
+        self.bulkhead_rejections: list[str] = []
+        self.fallbacks: list[tuple[str, BaseException]] = []
+
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
+        self.retries.append((name, attempt, delay))
+
+    def on_bulkhead_rejected(self, *, name: str) -> None:
+        self.bulkhead_rejections.append(name)
+
+    def on_fallback(self, *, name: str, error: BaseException) -> None:
+        self.fallbacks.append((name, error))
+
+
+def test__bulkhead_strategy__rejection__notifies_the_listener() -> None:
+    events = RecordingPipelineListener()
+    pipeline = Pipeline(BulkheadStrategy(1, name='db-pool', listener=events))
+    inside = threading.Event()
+    release = threading.Event()
+
+    def hold() -> str:
+        inside.set()
+        release.wait(5)
+        return 'held'
+
+    worker = threading.Thread(target=pipeline.call, args=(hold,))
+    worker.start()
+    try:
+        assert inside.wait(5)
+        with pytest.raises(BulkheadFullError):
+            pipeline.call(lambda: 'rejected')
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+    assert events.bulkhead_rejections == ['db-pool']
+
+
+@pytest.mark.asyncio
+async def test__bulkhead_strategy__async_rejection__notifies_the_listener() -> None:
+    events = RecordingPipelineListener()
+    pipeline = Pipeline(BulkheadStrategy(1, name='db-pool', listener=events))
+    inside = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold() -> str:
+        inside.set()
+        await release.wait()
+        return 'held'
+
+    async def rejected() -> str:
+        return 'never'
+
+    task = asyncio.ensure_future(pipeline.call(hold))
+    await inside.wait()
+    with pytest.raises(BulkheadFullError):
+        await pipeline.call(rejected)
+    release.set()
+    await task
+
+    assert events.bulkhead_rejections == ['db-pool']
+
+
+def test__bulkhead_strategy__admitted_call__emits_no_event() -> None:
+    events = RecordingPipelineListener()
+    pipeline = Pipeline(BulkheadStrategy(1, listener=events))
+
+    assert pipeline.call(lambda: 'ok') == 'ok'
+    assert events.bulkhead_rejections == []
+
+
+def test__fallback_strategy__substitution__notifies_the_listener() -> None:
+    events = RecordingPipelineListener()
+    pipeline = Pipeline(
+        FallbackStrategy(lambda _exc: 'cached', on=(ValueError,), name='recs', listener=events)
+    )
+    boom = ValueError('down')
+
+    def failing() -> str:
+        raise boom
+
+    assert pipeline.call(failing) == 'cached'
+    assert events.fallbacks == [('recs', boom)]
+
+
+def test__fallback_strategy__non_matching_failure__emits_no_event() -> None:
+    events = RecordingPipelineListener()
+    pipeline = Pipeline(FallbackStrategy(lambda _exc: 'cached', on=(ValueError,), listener=events))
+
+    def failing() -> str:
+        raise KeyError('other')
+
+    with pytest.raises(KeyError):
+        pipeline.call(failing)
+    assert events.fallbacks == []
+
+
+def test__pipeline_observability__pre_v2_listener__keeps_working() -> None:
+    """A listener written before the pipeline hooks existed must not break strategies."""
+
+    class PreV2Listener:
+        def on_state_change(self, *, name: str, old: object, new: object) -> None: ...
+        def on_call(self, *, name: str, outcome: object, duration: float) -> None: ...
+        def on_rejected(self, *, name: str) -> None: ...
+        def on_reset(self, *, name: str) -> None: ...
+
+    listener = PreV2Listener()
+    pipeline = Pipeline(
+        FallbackStrategy(lambda _exc: 'cached', on=(BulkheadFullError,), listener=listener),
+        BulkheadStrategy(1, listener=listener),
+    )
+    inside = threading.Event()
+    release = threading.Event()
+
+    def hold() -> str:
+        inside.set()
+        release.wait(5)
+        return 'held'
+
+    worker = threading.Thread(target=pipeline.call, args=(hold,))
+    worker.start()
+    try:
+        assert inside.wait(5)
+        assert pipeline.call(lambda: 'rejected') == 'cached'  # no AttributeError anywhere
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+
+def test__pipeline_builder__steps_pass_name_and_listener_through() -> None:
+    events = RecordingPipelineListener()
+    pipeline = (
+        Pipeline.builder()
+        .fallback(lambda _exc: 'cached', on=(ValueError,), name='recs', listener=events)
+        .build()
+    )
+
+    def failing() -> str:
+        raise ValueError('down')
+
+    assert pipeline.call(failing) == 'cached'
+    assert [name for name, _ in events.fallbacks] == ['recs']

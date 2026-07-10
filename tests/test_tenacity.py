@@ -487,3 +487,74 @@ def test__pipeline_builder__retry_step__builds_a_working_retry_layer() -> None:
 
     assert pipeline.call(flaky) == 'ok'
     assert attempts == 3
+
+
+class RecordingRetryListener:
+    """Records only the v2.0 retry hook."""
+
+    def __init__(self) -> None:
+        self.retries: list[tuple[str, int, float]] = []
+
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
+        self.retries.append((name, attempt, delay))
+
+
+def test__retry_strategy__retries__notify_the_listener() -> None:
+    events = RecordingRetryListener()
+    attempts = 0
+
+    def flaky() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ValueError('transient')
+        return 'ok'
+
+    strategy = RetryStrategy(
+        attempts=3,
+        wait=wait_fixed(1.5),
+        sleep=_noop_sleep,
+        name='payments-retry',
+        listener=events,
+    )
+
+    assert Pipeline(strategy).call(flaky) == 'ok'
+    assert events.retries == [('payments-retry', 1, 1.5), ('payments-retry', 2, 1.5)]
+
+
+def test__retry_strategy__user_before_sleep__invoked_alongside_the_listener() -> None:
+    events = RecordingRetryListener()
+    observed: list[int] = []
+
+    def failing() -> None:
+        raise ValueError('down')
+
+    strategy = RetryStrategy(
+        attempts=2,
+        sleep=_noop_sleep,
+        listener=events,
+        before_sleep=lambda retry_state: observed.append(retry_state.attempt_number),
+    )
+
+    with pytest.raises(ValueError, match='down'):
+        Pipeline(strategy).call(failing)
+    assert observed == [1]
+    assert [attempt for _, attempt, _ in events.retries] == [1]
+
+
+def test__retry_strategy__pre_v2_listener__keeps_working() -> None:
+    class PreV2Listener:
+        def on_rejected(self, *, name: str) -> None: ...
+
+    attempts = 0
+
+    def flaky() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 2:
+            raise ValueError('transient')
+        return 'ok'
+
+    strategy = RetryStrategy(attempts=2, sleep=_noop_sleep, listener=PreV2Listener())
+
+    assert Pipeline(strategy).call(flaky) == 'ok'

@@ -68,6 +68,7 @@ except ImportError as exc:
     ) from exc
 
 from interlock.errors import CircuitOpenError
+from interlock.protocols import EventListener
 
 __all__ = ('RetryStrategy', 'retry_unless_open', 'wait_probe')
 
@@ -172,7 +173,16 @@ class RetryStrategy:
         ValueError: If ``attempts`` is not positive.
     """
 
-    __slots__ = ('_async_sleep', '_attempts', '_before_sleep', '_retry', '_sleep', '_wait')
+    __slots__ = (
+        '_async_sleep',
+        '_attempts',
+        '_before_sleep',
+        '_listener',
+        '_name',
+        '_retry',
+        '_sleep',
+        '_wait',
+    )
 
     def __init__(
         self,
@@ -183,6 +193,8 @@ class RetryStrategy:
         sleep: Callable[[int | float], None] | None = None,
         async_sleep: Callable[[float], Awaitable[None]] | None = None,
         before_sleep: Callable[[RetryCallState], None] | None = None,
+        name: str = 'retry',
+        listener: EventListener | None = None,
     ) -> None:
         if attempts < 1:
             raise ValueError(f'attempts must be >= 1, got {attempts!r}')
@@ -193,6 +205,19 @@ class RetryStrategy:
         self._sleep = sleep if sleep is not None else time.sleep
         self._async_sleep = async_sleep if async_sleep is not None else asyncio.sleep
         self._before_sleep = before_sleep
+        self._name = name
+        self._listener = listener
+
+    def _on_before_sleep(self, retry_state: RetryCallState) -> None:
+        """Emit ``on_retry`` (safe getattr — pre-2.0 listeners fine), then the user hook."""
+        if self._listener is not None:
+            next_action = retry_state.next_action
+            delay = next_action.sleep if next_action is not None else 0.0
+            method = getattr(self._listener, 'on_retry', None)
+            if callable(method):
+                method(name=self._name, attempt=retry_state.attempt_number, delay=delay)
+        if self._before_sleep is not None:
+            self._before_sleep(retry_state)
 
     def execute(self, call: Callable[[], T]) -> T:
         """Run the next layer with retries; re-raise the last error when capped."""
@@ -201,7 +226,7 @@ class RetryStrategy:
             retry=self._retry,
             wait=self._wait,
             sleep=self._sleep,
-            before_sleep=self._before_sleep,
+            before_sleep=self._on_before_sleep,
             reraise=True,
         )
         return controller(call)
@@ -213,7 +238,7 @@ class RetryStrategy:
             retry=self._retry,
             wait=self._wait,
             sleep=self._async_sleep,
-            before_sleep=self._before_sleep,
+            before_sleep=self._on_before_sleep,
             reraise=True,
         )
         return await controller(call)

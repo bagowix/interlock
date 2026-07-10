@@ -45,6 +45,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   strategies) is re-exported from `interlock`. There is deliberately no
   context manager: a `with` block cannot be re-run, so retry inside it is
   semantically impossible.
+- Pipeline observability: `EventListener` gains three optional hooks —
+  `on_retry(name, attempt, delay)`, `on_bulkhead_rejected(name)` and
+  `on_fallback(name, error)` — dispatched via safe `getattr` (the v1.2
+  pattern), so pre-2.0 listeners keep working unchanged. `RetryStrategy`,
+  `BulkheadStrategy` and `FallbackStrategy` (and the matching builder steps)
+  accept `name=` and `listener=`. `LoggingEventListener` logs retries at
+  INFO and bulkhead rejections / fallbacks at WARNING; `OTelEventListener`
+  counts all three in a new `interlock.pipeline.events` counter.
 
 - Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
   circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).

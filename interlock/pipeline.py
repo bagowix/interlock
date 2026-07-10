@@ -36,6 +36,7 @@ from interlock._detect import is_async_callable
 from interlock._typing import AsyncCallable, P, R, SyncCallable
 from interlock.breaker import CircuitBreaker
 from interlock.errors import BulkheadFullError
+from interlock.protocols import EventListener
 from interlock.timeout import sync_timeout, timeout
 
 if TYPE_CHECKING:
@@ -54,6 +55,15 @@ __all__ = (
 
 T = TypeVar('T')
 F_co = TypeVar('F_co', covariant=True)
+
+
+def _notify(listener: EventListener | None, hook: str, **kwargs: object) -> None:
+    """Dispatch a pipeline hook via ``getattr`` so pre-2.0 listeners keep working."""
+    if listener is None:
+        return
+    method = getattr(listener, hook, None)
+    if callable(method):
+        method(**kwargs)
 
 
 @runtime_checkable
@@ -262,9 +272,23 @@ class BulkheadStrategy:
         ValueError: If ``max_concurrent`` or ``max_wait`` is out of range.
     """
 
-    __slots__ = ('_async_semaphore', '_max_concurrent', '_max_wait', '_sync_semaphore')
+    __slots__ = (
+        '_async_semaphore',
+        '_listener',
+        '_max_concurrent',
+        '_max_wait',
+        '_name',
+        '_sync_semaphore',
+    )
 
-    def __init__(self, max_concurrent: int, *, max_wait: float = 0.0) -> None:
+    def __init__(
+        self,
+        max_concurrent: int,
+        *,
+        max_wait: float = 0.0,
+        name: str = 'bulkhead',
+        listener: EventListener | None = None,
+    ) -> None:
         if max_concurrent < 1:
             raise ValueError(f'max_concurrent must be >= 1, got {max_concurrent!r}')
         if max_wait < 0.0:
@@ -272,6 +296,8 @@ class BulkheadStrategy:
 
         self._max_concurrent = max_concurrent
         self._max_wait = max_wait
+        self._name = name
+        self._listener = listener
         self._sync_semaphore = threading.Semaphore(max_concurrent)
         self._async_semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -286,6 +312,7 @@ class BulkheadStrategy:
         else:
             acquired = self._sync_semaphore.acquire(blocking=False)
         if not acquired:
+            _notify(self._listener, 'on_bulkhead_rejected', name=self._name)
             raise BulkheadFullError(self._max_concurrent, max_wait=self._max_wait)
 
         try:
@@ -303,6 +330,7 @@ class BulkheadStrategy:
             async with asyncio.timeout(self._max_wait):
                 await self._async_semaphore.acquire()
         except TimeoutError as exc:
+            _notify(self._listener, 'on_bulkhead_rejected', name=self._name)
             raise BulkheadFullError(self._max_concurrent, max_wait=self._max_wait) from exc
 
         try:
@@ -340,13 +368,15 @@ class FallbackStrategy(Generic[F_co]):
         TypeError: If an ``on`` entry is not an ``Exception`` subclass.
     """
 
-    __slots__ = ('_fallback', '_on')
+    __slots__ = ('_fallback', '_listener', '_name', '_on')
 
     def __init__(
         self,
         fallback: Callable[[BaseException], F_co],
         *,
         on: tuple[type[Exception], ...] = (Exception,),
+        name: str = 'fallback',
+        listener: EventListener | None = None,
     ) -> None:
         if not on:
             raise ValueError('on must name at least one exception type')
@@ -358,12 +388,15 @@ class FallbackStrategy(Generic[F_co]):
 
         self._fallback = fallback
         self._on = on
+        self._name = name
+        self._listener = listener
 
     def execute(self, call: Callable[[], T]) -> T | F_co:
         """Run the next layer, substituting the fallback value on a match."""
         try:
             return call()
         except self._on as exc:
+            _notify(self._listener, 'on_fallback', name=self._name, error=exc)
             return self._fallback(exc)
 
     async def execute_async(self, call: Callable[[], Awaitable[T]]) -> T | F_co:
@@ -371,6 +404,7 @@ class FallbackStrategy(Generic[F_co]):
         try:
             return await call()
         except self._on as exc:
+            _notify(self._listener, 'on_fallback', name=self._name, error=exc)
             return self._fallback(exc)
 
 
@@ -410,9 +444,11 @@ class PipelineBuilder:
         fallback: Callable[[BaseException], object],
         *,
         on: tuple[type[Exception], ...] = (Exception,),
+        name: str = 'fallback',
+        listener: EventListener | None = None,
     ) -> Self:
         """Append a :class:`FallbackStrategy` substituting failures listed in ``on``."""
-        return self.add(FallbackStrategy(fallback, on=on))
+        return self.add(FallbackStrategy(fallback, on=on, name=name, listener=listener))
 
     def retry(
         self,
@@ -423,6 +459,8 @@ class PipelineBuilder:
         sleep: Callable[[int | float], None] | None = None,
         async_sleep: Callable[[float], Awaitable[None]] | None = None,
         before_sleep: 'Callable[[RetryCallState], None] | None' = None,
+        name: str = 'retry',
+        listener: EventListener | None = None,
     ) -> Self:
         """Append a ``RetryStrategy`` (requires the ``tenacity`` extra).
 
@@ -443,6 +481,8 @@ class PipelineBuilder:
                 sleep=sleep,
                 async_sleep=async_sleep,
                 before_sleep=before_sleep,
+                name=name,
+                listener=listener,
             )
         )
 
@@ -450,9 +490,18 @@ class PipelineBuilder:
         """Append a :class:`CircuitBreakerStrategy` around an existing breaker."""
         return self.add(CircuitBreakerStrategy(breaker))
 
-    def bulkhead(self, max_concurrent: int, *, max_wait: float = 0.0) -> Self:
+    def bulkhead(
+        self,
+        max_concurrent: int,
+        *,
+        max_wait: float = 0.0,
+        name: str = 'bulkhead',
+        listener: EventListener | None = None,
+    ) -> Self:
         """Append a :class:`BulkheadStrategy` capping concurrency."""
-        return self.add(BulkheadStrategy(max_concurrent, max_wait=max_wait))
+        return self.add(
+            BulkheadStrategy(max_concurrent, max_wait=max_wait, name=name, listener=listener)
+        )
 
     def timeout(self, seconds: float) -> Self:
         """Append a :class:`TimeoutStrategy` bounding every attempt."""

@@ -202,3 +202,21 @@ class EventListener(Protocol):
     def on_storage_recovered(self, *, name: str) -> None:
         """Called when the shared storage backend becomes reachable again."""
         ...
+
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
+        """Called by a pipeline retry layer before it sleeps between attempts.
+
+        ``attempt`` is the number of the attempt that just failed; ``delay``
+        is the upcoming backoff in seconds. Like the storage hooks, the three
+        pipeline hooks are dispatched via safe ``getattr`` — listeners written
+        before v2.0 keep working unchanged.
+        """
+        ...
+
+    def on_bulkhead_rejected(self, *, name: str) -> None:
+        """Called when a pipeline bulkhead rejects a call (no free slot)."""
+        ...
+
+    def on_fallback(self, *, name: str, error: BaseException) -> None:
+        """Called when a pipeline fallback substitutes a value for ``error``."""
+        ...
