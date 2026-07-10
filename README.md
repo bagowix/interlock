@@ -20,6 +20,7 @@
 | interlock/integrations/aiohttp.py      |       28 |        0 |        4 |        0 |     100% |           |
 | interlock/integrations/fastapi.py      |       23 |        0 |        2 |        0 |     100% |           |
 | interlock/integrations/httpx2.py       |       38 |        0 |        2 |        0 |     100% |           |
+| interlock/integrations/litestar.py     |       19 |        0 |        2 |        0 |     100% |           |
 | interlock/integrations/otel.py         |       32 |        0 |        0 |        0 |     100% |           |
 | interlock/integrations/redis.py        |       93 |        0 |        8 |        0 |     100% |           |
 | interlock/integrations/requests.py     |       31 |        0 |        4 |        0 |     100% |           |
@@ -34,7 +35,7 @@
 | interlock/timeout.py                   |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py                   |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py                    |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                              | **1474** |    **0** |  **244** |    **0** | **100%** |           |
+| **TOTAL**                              | **1493** |    **0** |  **246** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
