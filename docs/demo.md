@@ -1,6 +1,6 @@
 # Runnable demo
 
-Two self-contained scripts in [`examples/`](https://github.com/bagowix/interlock/tree/main/examples)
+Three self-contained scripts in [`examples/`](https://github.com/bagowix/interlock/tree/main/examples)
 show a breaker doing its job — standard library plus `interlock-cb` only, no
 network, no services to stand up. The output is deterministic: what you see
 below is exactly what you get, so set a breakpoint anywhere and step through.
@@ -10,6 +10,7 @@ pip install interlock-cb          # or: uv add interlock-cb
 
 python examples/lifecycle.py      # one breaker through its full state cycle
 python examples/two_clients.py    # two clients, one outage, no collateral damage
+python examples/pipeline.py       # timeout + breaker + fallback around a hanging service
 ```
 
 Both scripts print through an `EventListener` — every line tagged
@@ -142,6 +143,57 @@ send the circuit straight back to `OPEN`; give the two breakers different
 configs via `registry.get(name, config=...)`; replace the hand-rolled
 fallback with a [tenacity retry](integrations/tenacity.md) that waits
 exactly `retry_after`.
+
+## `pipeline.py` — composition against a quiet death
+
+The nastiest failure mode gets the [v2 pipeline](guides/pipeline.md)
+treatment: the inventory service never raises — it *hangs*. On its own that
+trips nothing and starves every caller. Three composed strategies turn it
+into a non-event: a timeout makes hangs classifiable, the breaker counts
+them, a fallback keeps serving.
+
+??? example "pipeline.py — full source"
+
+    ```python
+    --8<-- "examples/pipeline.py"
+    ```
+
+The interesting part of the output:
+
+```text
+phase 2 — the service starts hanging; timeouts become failures
+  [listener] inventory: fallback served instead of CallTimeoutError
+request 3: ['widget (cached)', 'gadget (cached)'] in ~0.2s
+  [listener] inventory: state CLOSED -> OPEN
+  [listener] inventory: fallback served instead of CallTimeoutError
+request 4: ['widget (cached)', 'gadget (cached)'] in ~0.2s
+
+phase 3 — circuit OPEN: no timeout is burned, the cache is instant
+  [listener] inventory: call rejected — circuit is open
+  [listener] inventory: fallback served instead of CircuitOpenError
+request 5: ['widget (cached)', 'gadget (cached)'] in ~0.0s
+```
+
+Watch the latency column. Requests 3–4 each pay the full 0.2 s timeout —
+that is the *detection* cost while the window fills. Request 4 tips the
+failure rate to 50% and the circuit opens; from request 5 on the rejection
+is immediate and the cached snapshot costs ~0.0 s. The user never saw an
+error: every response during the outage came from the fallback, and the
+listener logged each substitution.
+
+```text
+phase 4 — the service recovers; probes close the circuit
+  [listener] inventory: state OPEN -> HALF_OPEN
+request 6: ['widget', 'gadget'] in ~0.0s
+  [listener] inventory: state HALF_OPEN -> CLOSED
+request 7: ['widget', 'gadget'] in ~0.0s
+```
+
+**Things to try:** raise `wait_duration_in_open` and watch how long the
+cache serves; put a `.retry(...)` step between the fallback and the breaker
+(needs `interlock-cb[tenacity]`) and see attempts in the listener via
+`on_retry`; drop the `.timeout(...)` step and watch the outage become
+invisible again — no strategy ever fires.
 
 ## Where to go next
 
