@@ -148,4 +148,5 @@ exactly `retry_after`.
 These demos hand-roll their guarded clients so you can debug the mechanics.
 In real code you usually don't have to: the [integrations](integrations/index.md)
 apply the same per-dependency pattern to httpx2, aiohttp, requests and
-FastAPI transparently.
+FastAPI transparently, and the [resilience pipeline](guides/pipeline.md)
+composes the breaker with timeout, bulkhead, retry and fallback declaratively.

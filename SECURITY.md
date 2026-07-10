@@ -7,8 +7,8 @@ minor of the current major.
 
 | Version | Supported |
 | ------- | --------- |
-| 1.x     | ✅        |
-| < 1.0   | ❌        |
+| 2.x     | ✅        |
+| < 2.0   | ❌ (2.0 has no breaking changes — upgrading is a version bump) |
 
 ## Reporting a vulnerability
 
