@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "interlock-cb"
 dynamic = ["version"]
-description = "A modern circuit breaker for Python: sync + async, sliding-window rate, slow-call detection, type-safe API."
+description = "A modern circuit breaker for Python: sync + async in one class, sliding-window rate, slow-call detection, a Polly-style resilience pipeline, type-safe API."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -13,9 +13,10 @@ license-files = ["LICENSE"]
 authors = [
     { name = "bagowix", email = "galushko355@gmail.com" },
 ]
-keywords = ["circuit-breaker", "resilience", "fault-tolerance", "async", "asyncio"]
+keywords = ["circuit-breaker", "resilience", "fault-tolerance", "async", "asyncio", "retry", "bulkhead", "resilience-pipeline"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
+    "Framework :: AsyncIO",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
