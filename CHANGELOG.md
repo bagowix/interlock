@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-07-11
+
 ### Added
 
 - **Litestar integration** via the `litestar` extra
@@ -17,6 +19,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `examples/pipeline.py`: a third runnable demo — timeout + breaker +
   fallback composed around a dependency that hangs instead of erroring;
   deterministic output, walked through on the [demo page](docs/demo.md).
+
+### Changed
+
+- PyPI metadata now mentions the resilience pipeline (package description,
+  keywords, `Framework :: AsyncIO` classifier).
+- Docs navigation restructured: Comparison moved to the top-level block, the
+  API reference got its own *Reference* section (both used to render as
+  children of *Integrations*), and integration pages are ordered by demand —
+  FastAPI and Litestar first.
+- Security policy updated for the 2.x line.
 
 ## [2.0.0] - 2026-07-10
 
@@ -223,7 +235,8 @@ The major version marks the scope of what is added, not a migration burden.
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/bagowix/interlock/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/bagowix/interlock/compare/v1.3.0...v2.0.0
 [1.3.0]: https://github.com/bagowix/interlock/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/bagowix/interlock/compare/v1.1.0...v1.2.0
