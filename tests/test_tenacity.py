@@ -471,3 +471,19 @@ def test__module__imported_without_tenacity__raises_a_helpful_error(
     finally:
         monkeypatch.undo()
         importlib.reload(module)
+
+
+def test__pipeline_builder__retry_step__builds_a_working_retry_layer() -> None:
+    attempts = 0
+
+    def flaky() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ValueError('transient')
+        return 'ok'
+
+    pipeline = Pipeline.builder().retry(attempts=3, sleep=_noop_sleep).build()
+
+    assert pipeline.call(flaky) == 'ok'
+    assert attempts == 3

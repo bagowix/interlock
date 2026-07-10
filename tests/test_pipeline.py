@@ -1,12 +1,14 @@
 """Pipeline core: the Strategy protocol, the executor and the v1 adapters (D1-D3)."""
 
 import asyncio
+import inspect
 import threading
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 import pytest
 
+import interlock
 from conftest import FakeClock
 from interlock import BulkheadFullError, CallTimeoutError, CircuitBreaker, CircuitOpenError, Config
 from interlock._detect import is_async_callable
@@ -549,3 +551,123 @@ def test__fallback_strategy__metrics_only_breaker__shadow_stats_not_masked(
     snapshot = breaker.snapshot()
     assert snapshot.total_calls == 3
     assert snapshot.failed_calls == 3  # every masked failure is still recorded
+
+
+def test__pipeline_decorator__sync__preserves_name_and_applies_strategies() -> None:
+    log: list[str] = []
+    pipeline = Pipeline(Recorder('outer', log))
+
+    @pipeline
+    def combine(a: int, *, b: str) -> str:
+        return f'{a}-{b}'
+
+    assert combine(1, b='x') == '1-x'
+    assert combine.__name__ == 'combine'
+    assert log == ['outer:enter', 'outer:exit']
+
+
+@pytest.mark.asyncio
+async def test__pipeline_decorator__async__preserves_nature_and_applies_strategies() -> None:
+    log: list[str] = []
+    pipeline = Pipeline(Recorder('outer', log))
+
+    @pipeline
+    async def double(value: int) -> int:
+        return value * 2
+
+    assert inspect.iscoroutinefunction(double)
+    assert await double(21) == 42
+    assert log == ['outer:enter', 'outer:exit']
+
+
+def test__pipeline_decorator__breaker_inside__trips(fake_clock: FakeClock) -> None:
+    breaker = CircuitBreaker(name='dep', config=TRIP_FAST, clock=fake_clock)
+
+    @Pipeline(CircuitBreakerStrategy(breaker))
+    def failing() -> None:
+        raise ValueError('down')
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match='down'):
+            failing()
+    with pytest.raises(CircuitOpenError):
+        failing()
+
+
+def test__pipeline_builder__empty__builds_a_passthrough() -> None:
+    assert Pipeline.builder().build().call(lambda: 42) == 42
+
+
+def test__pipeline_builder__declaration_order__is_application_order() -> None:
+    log: list[str] = []
+    pipeline = Pipeline.builder().add(Recorder('outer', log)).add(Recorder('inner', log)).build()
+
+    assert pipeline.call(lambda: 'ok') == 'ok'
+    assert log == ['outer:enter', 'inner:enter', 'inner:exit', 'outer:exit']
+
+
+def test__pipeline_builder__fallback_over_breaker__substitutes_rejections(
+    fake_clock: FakeClock,
+) -> None:
+    breaker = CircuitBreaker(name='dep', config=TRIP_FAST, clock=fake_clock)
+    pipeline = (
+        Pipeline.builder()
+        .fallback(lambda _exc: 'cached', on=(CircuitOpenError,))
+        .circuit_breaker(breaker)
+        .build()
+    )
+
+    def failing() -> str:
+        raise ValueError('down')
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match='down'):
+            pipeline.call(failing)
+    assert pipeline.call(failing) == 'cached'
+
+
+@pytest.mark.asyncio
+async def test__pipeline_builder__timeout_step__bounds_the_call() -> None:
+    pipeline = Pipeline.builder().timeout(0.01).build()
+
+    async def stuck() -> None:
+        await asyncio.sleep(5)
+
+    with pytest.raises(CallTimeoutError):
+        await pipeline.call(stuck)
+
+
+@pytest.mark.asyncio
+async def test__pipeline_builder__bulkhead_step__caps_concurrency() -> None:
+    pipeline = Pipeline.builder().bulkhead(1).build()
+    inside = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold() -> str:
+        inside.set()
+        await release.wait()
+        return 'held'
+
+    async def rejected() -> str:
+        return 'never'
+
+    task = asyncio.ensure_future(pipeline.call(hold))
+    await inside.wait()
+    with pytest.raises(BulkheadFullError):
+        await pipeline.call(rejected)
+    release.set()
+    assert await task == 'held'
+
+
+def test__public_surface__pipeline_names_are_exported_from_interlock() -> None:
+    for name in (
+        'BulkheadStrategy',
+        'CircuitBreakerStrategy',
+        'FallbackStrategy',
+        'Pipeline',
+        'PipelineBuilder',
+        'Strategy',
+        'TimeoutStrategy',
+    ):
+        assert hasattr(interlock, name)
+        assert name in interlock.__all__

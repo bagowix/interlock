@@ -120,6 +120,9 @@ ban-relative-imports = "all"
 "interlock/integrations/tenacity.py" = [
   "PLR0913", # RetryStrategy takes keyword-only tenacity policy collaborators
 ]
+"interlock/pipeline.py" = [
+  "PLR0913", # PipelineBuilder.retry mirrors RetryStrategy's keyword-only collaborators
+]
 "tests/**/*.py" = [
   "S101",    # asserts are the point of tests
   "PLR2004", # magic values are fine in tests

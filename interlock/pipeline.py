@@ -18,9 +18,19 @@ on the callable's nature, the same contract as ``CircuitBreaker.call``.
 """
 
 import asyncio
+import functools
 import threading
 from collections.abc import Awaitable, Callable
-from typing import Generic, Protocol, TypeVar, cast, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Generic,
+    Protocol,
+    Self,
+    TypeVar,
+    cast,
+    overload,
+    runtime_checkable,
+)
 
 from interlock._detect import is_async_callable
 from interlock._typing import AsyncCallable, P, R, SyncCallable
@@ -28,11 +38,16 @@ from interlock.breaker import CircuitBreaker
 from interlock.errors import BulkheadFullError
 from interlock.timeout import sync_timeout, timeout
 
+if TYPE_CHECKING:
+    from tenacity import RetryCallState, retry_base
+    from tenacity.wait import wait_base
+
 __all__ = (
     'BulkheadStrategy',
     'CircuitBreakerStrategy',
     'FallbackStrategy',
     'Pipeline',
+    'PipelineBuilder',
     'Strategy',
     'TimeoutStrategy',
 )
@@ -71,12 +86,53 @@ class Pipeline:
     from the pipeline's perspective; anything stateful (a breaker's window, a
     semaphore) lives inside the strategy, so one pipeline instance is safe to
     reuse across calls and threads exactly as much as its strategies are.
+
+    Two of the breaker's three usage forms apply: the decorator (``@pipeline``,
+    signature-preserving) and ``pipeline.call(fn, ...)``. There is deliberately
+    no context manager — a ``with`` block cannot be re-run, so retry inside it
+    is semantically impossible (the same honesty as result-based
+    classification being unavailable to the breaker's context manager in v1).
     """
 
     __slots__ = ('_strategies',)
 
     def __init__(self, *strategies: 'Strategy | FallbackStrategy[object]') -> None:
         self._strategies = strategies
+
+    @classmethod
+    def builder(cls) -> 'PipelineBuilder':
+        """Start a step-by-step builder: ``Pipeline.builder().timeout(2.0).build()``."""
+        return PipelineBuilder()
+
+    @overload
+    def __call__(self, fn: AsyncCallable[P, R]) -> AsyncCallable[P, R]: ...
+
+    @overload
+    def __call__(self, fn: SyncCallable[P, R]) -> SyncCallable[P, R]: ...
+
+    # mypy cannot reconcile this union implementation with the ParamSpec
+    # overloads above (a known limitation of overloaded decorators); pyright
+    # accepts it, and the overloads are what callers see.
+    def __call__(  # type: ignore[misc]
+        self, fn: AsyncCallable[P, R] | SyncCallable[P, R]
+    ) -> AsyncCallable[P, R] | SyncCallable[P, R]:
+        """Decorate ``fn``, preserving its signature and sync/async nature."""
+        if is_async_callable(fn):
+            async_fn = cast('AsyncCallable[P, R]', fn)
+
+            @functools.wraps(async_fn)
+            async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+                return await self._run_async(async_fn, *args, **kwargs)
+
+            return async_wrapper
+
+        sync_fn = cast('SyncCallable[P, R]', fn)
+
+        @functools.wraps(sync_fn)
+        def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            return self._run_sync(sync_fn, *args, **kwargs)
+
+        return sync_wrapper
 
     def call(
         self,
@@ -316,3 +372,92 @@ class FallbackStrategy(Generic[F_co]):
             return await call()
         except self._on as exc:
             return self._fallback(exc)
+
+
+class PipelineBuilder:
+    """Assemble a :class:`Pipeline` step by step, outermost strategy first.
+
+    Each step appends one strategy; ``build()`` freezes the sequence into a
+    ``Pipeline``. The named steps cover the shipped strategies — ``add()``
+    accepts any custom ``Strategy``. A builder is single-use plumbing, not a
+    shared object: configure it in one place and ``build()``.
+
+    The recommended order for the full stack::
+
+        pipeline = (
+            Pipeline.builder()
+            .fallback(lambda exc: CACHED, on=(CircuitOpenError,))
+            .retry(attempts=4)          # requires interlock-cb[tenacity]
+            .circuit_breaker(breaker)
+            .bulkhead(8)
+            .timeout(2.0)
+            .build()
+        )
+    """
+
+    __slots__ = ('_strategies',)
+
+    def __init__(self) -> None:
+        self._strategies: list[Strategy | FallbackStrategy[object]] = []
+
+    def add(self, strategy: 'Strategy | FallbackStrategy[object]') -> Self:
+        """Append any strategy as the next (inner) layer."""
+        self._strategies.append(strategy)
+        return self
+
+    def fallback(
+        self,
+        fallback: Callable[[BaseException], object],
+        *,
+        on: tuple[type[Exception], ...] = (Exception,),
+    ) -> Self:
+        """Append a :class:`FallbackStrategy` substituting failures listed in ``on``."""
+        return self.add(FallbackStrategy(fallback, on=on))
+
+    def retry(
+        self,
+        *,
+        attempts: int = 3,
+        retry: 'retry_base | None' = None,
+        wait: 'wait_base | None' = None,
+        sleep: Callable[[int | float], None] | None = None,
+        async_sleep: Callable[[float], Awaitable[None]] | None = None,
+        before_sleep: 'Callable[[RetryCallState], None] | None' = None,
+    ) -> Self:
+        """Append a ``RetryStrategy`` (requires the ``tenacity`` extra).
+
+        Arguments mirror ``interlock.integrations.tenacity.RetryStrategy``.
+
+        Raises:
+            ImportError: If tenacity is not installed, with a hint at the extra.
+        """
+        # Lazy: keeps the pipeline core zero-dependency; the integrations
+        # module raises a helpful error when tenacity is missing.
+        from interlock.integrations.tenacity import RetryStrategy  # noqa: PLC0415
+
+        return self.add(
+            RetryStrategy(
+                attempts=attempts,
+                retry=retry,
+                wait=wait,
+                sleep=sleep,
+                async_sleep=async_sleep,
+                before_sleep=before_sleep,
+            )
+        )
+
+    def circuit_breaker(self, breaker: CircuitBreaker) -> Self:
+        """Append a :class:`CircuitBreakerStrategy` around an existing breaker."""
+        return self.add(CircuitBreakerStrategy(breaker))
+
+    def bulkhead(self, max_concurrent: int, *, max_wait: float = 0.0) -> Self:
+        """Append a :class:`BulkheadStrategy` capping concurrency."""
+        return self.add(BulkheadStrategy(max_concurrent, max_wait=max_wait))
+
+    def timeout(self, seconds: float) -> Self:
+        """Append a :class:`TimeoutStrategy` bounding every attempt."""
+        return self.add(TimeoutStrategy(seconds))
+
+    def build(self) -> Pipeline:
+        """Freeze the collected strategies into a :class:`Pipeline`."""
+        return Pipeline(*self._strategies)
