@@ -64,9 +64,12 @@ CI runs both.
 ## Proposing larger changes
 
 For anything beyond a small fix, open an issue first so we can agree on the
-approach before you invest time. interlock is deliberately scoped (see the
-roadmap in `planning/PLAN.md`); features outside the v1 core may be a better fit
-for a later milestone.
+approach before you invest time. interlock is deliberately scoped: a circuit
+breaker core, the composable
+[resilience pipeline](https://bagowix.github.io/interlock/guides/pipeline/)
+and thin [integrations](https://bagowix.github.io/interlock/integrations/) on
+native extension points, prioritised by demand. Retry stays delegated to
+tenacity; caching and own backoff engines are out of scope.
 
 ## Code of conduct
 

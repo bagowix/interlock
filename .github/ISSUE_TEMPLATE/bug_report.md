@@ -18,10 +18,11 @@ What you expected instead.
 ```
 
 **Environment**
-- interlock version:
+- interlock-cb version:
 - Python version:
 - OS:
-- Extras in use (otel / httpx2):
+- Extras in use (fastapi / litestar / httpx2 / aiohttp / requests / tenacity / redis / otel):
+- Using the pipeline (`interlock.pipeline`)? Which strategies?
 
 **Additional context**
 Anything else that helps — config used, traceback, etc.
