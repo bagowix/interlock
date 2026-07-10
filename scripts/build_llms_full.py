@@ -25,6 +25,7 @@ _PAGES = (
     'guides/observability.md',
     'guides/timeout.md',
     'guides/retries.md',
+    'guides/pipeline.md',
     'integrations/index.md',
     'integrations/httpx2.md',
     'integrations/aiohttp.md',

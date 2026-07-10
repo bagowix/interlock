@@ -98,6 +98,30 @@ down longer than any job should wait.
 top of `retry_after`; when the rejection carries no estimate (for example
 after `force_open()`), the fallback strategy decides.
 
+## `RetryStrategy` — the pipeline layer
+
+The same policies package into a [pipeline](../guides/pipeline.md) strategy:
+
+```python
+from interlock import Pipeline
+from interlock.integrations.tenacity import RetryStrategy
+
+pipeline = (
+    Pipeline.builder()
+    .retry(attempts=4)              # this step builds a RetryStrategy
+    .circuit_breaker(breaker)
+    .timeout(2.0)
+    .build()
+)
+```
+
+Attempts are always capped and the original exception is re-raised when the
+budget runs out — no `RetryError` wrapping. The default predicate is
+`retry_unless_open()` (fail fast on an open circuit); pass
+`wait=wait_probe(...)` and a predicate that includes `CircuitOpenError` for
+the patient mode. `name=` and `listener=` make every retry visible through
+the `on_retry` hook ([observability](../guides/observability.md)).
+
 ## Everything else is plain tenacity
 
 `Retrying`, `AsyncRetrying`, the `@retry` decorator, stop and wait strategies

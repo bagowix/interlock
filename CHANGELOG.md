@@ -53,6 +53,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   accept `name=` and `listener=`. `LoggingEventListener` logs retries at
   INFO and bulkhead rejections / fallbacks at WARNING; `OTelEventListener`
   counts all three in a new `interlock.pipeline.events` counter.
+- New docs: a [resilience pipeline guide](docs/guides/pipeline.md) (strategies,
+  recommended ordering with rationale, builder DSL, migration from v1, custom
+  strategies); pipeline sections in the API reference, retries guide,
+  observability guide, tenacity integration page, README and the comparison
+  page (fallback is now shipped).
 
 - Docs: a [comparison page](docs/comparison.md) — interlock-cb vs pybreaker,
   circuitbreaker, aiobreaker and purgatory (feature table, honest trade-offs).

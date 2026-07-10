@@ -26,6 +26,9 @@ integrations at the transport level.
 - **Zero-dependency core.** Standard library only; everything external lives in
   optional extras (`httpx2`, `aiohttp`, `requests`, `tenacity`, `fastapi`,
   `redis`, `otel`).
+- **Composable pipeline (v2).** Timeout, bulkhead, breaker, retry and fallback
+  as strategies applied in an explicit order — Polly-style, with the
+  standalone breaker untouched.
 
 ## How it compares
 
@@ -42,7 +45,8 @@ library is strong in different places:
 | `async` / `await` (asyncio) | ✅ | Tornado | ✅ |
 | Event / state-change listeners | ✅ | ✅ | — |
 | Shared state across processes (Redis) | ✅ | ✅ | — |
-| Fallback function | planned | — | ✅ |
+| Fallback function | ✅ | — | ✅ |
+| Composable resilience pipeline | ✅ | — | — |
 | Years of production use | new | ✅ | ✅ |
 | Failure-**rate** sliding window | ✅ | — | — |
 | Time-based window | ✅ | — | — |
@@ -53,8 +57,7 @@ library is strong in different places:
 | OpenTelemetry metrics | ✅ | — | — |
 
 <sub>Compared against pybreaker 1.x and circuitbreaker 2.1 as documented in mid-2026.
-pybreaker's async support is Tornado-based, not asyncio. "planned" items are on
-the interlock-cb roadmap (fallback). Both established
+pybreaker's async support is Tornado-based, not asyncio. Both established
 libraries trip on a consecutive-failure count rather than a rate window.
 Something out of date? Please open a PR.</sub>
 
@@ -139,6 +142,37 @@ Want to watch a breaker trip and recover? Run the
 [examples](examples/) — deterministic output, no network, every transition
 narrated ([walkthrough](docs/demo.md)).
 
+## Resilience pipeline
+
+When one concern is not enough, compose strategies around a call in an
+explicit order (first = outermost) — the breaker stays a first-class
+standalone primitive:
+
+```python
+from interlock import CircuitBreaker, CircuitOpenError, Pipeline
+
+breaker = CircuitBreaker(name='recommendations')
+
+pipeline = (
+    Pipeline.builder()
+    .fallback(lambda exc: [], on=(CircuitOpenError,))
+    .retry(attempts=4)          # requires interlock-cb[tenacity]
+    .circuit_breaker(breaker)
+    .bulkhead(8)
+    .timeout(2.0)
+    .build()
+)
+
+
+@pipeline
+async def fetch_picks(user: str) -> list[str]:
+    return await client.get_picks(user)
+```
+
+Retries never hammer an open circuit, one hung attempt cannot eat the retry
+budget, and every decision is observable — see the
+[pipeline guide](docs/guides/pipeline.md).
+
 ## httpx2 integration
 
 Apply a breaker **per host** transparently, with no decorators in call sites:
@@ -221,6 +255,7 @@ The sources live in [`docs/`](docs/):
 - [Observability](docs/guides/observability.md)
 - [Timeout](docs/guides/timeout.md)
 - [Retries and circuit breakers](docs/guides/retries.md)
+- [Resilience pipeline](docs/guides/pipeline.md)
 - [Integrations overview](docs/integrations/index.md) — httpx2, aiohttp,
   requests, tenacity, FastAPI, Redis, LLM SDKs, Flask/Django
 - [Comparison](docs/comparison.md) — vs pybreaker, circuitbreaker, aiobreaker, purgatory
