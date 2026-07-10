@@ -84,3 +84,36 @@ def test__on_storage_recovered__counts_event() -> None:
     instruments['interlock.storage.events'].add.assert_called_once_with(
         1, {'breaker': 'svc', 'event': 'recovered'}
     )
+
+
+def test__on_retry__counts_a_pipeline_event() -> None:
+    meter, instruments = _meter_with_named_instruments()
+    listener = OTelEventListener(meter=meter)
+
+    listener.on_retry(name='payments-retry', attempt=2, delay=1.5)
+
+    instruments['interlock.pipeline.events'].add.assert_called_once_with(
+        1, {'strategy': 'payments-retry', 'event': 'retry'}
+    )
+
+
+def test__on_bulkhead_rejected__counts_a_pipeline_event() -> None:
+    meter, instruments = _meter_with_named_instruments()
+    listener = OTelEventListener(meter=meter)
+
+    listener.on_bulkhead_rejected(name='db-pool')
+
+    instruments['interlock.pipeline.events'].add.assert_called_once_with(
+        1, {'strategy': 'db-pool', 'event': 'bulkhead_rejected'}
+    )
+
+
+def test__on_fallback__counts_a_pipeline_event_with_the_error_type() -> None:
+    meter, instruments = _meter_with_named_instruments()
+    listener = OTelEventListener(meter=meter)
+
+    listener.on_fallback(name='recs', error=ValueError('down'))
+
+    instruments['interlock.pipeline.events'].add.assert_called_once_with(
+        1, {'strategy': 'recs', 'event': 'fallback', 'error': 'ValueError'}
+    )

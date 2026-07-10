@@ -44,3 +44,15 @@ class LoggingEventListener:
     def on_storage_recovered(self, *, name: str) -> None:
         """Log a storage recovery at INFO."""
         self._log.info('circuit %r: shared storage recovered', name)
+
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
+        """Log an upcoming retry at INFO (bounded by the attempt cap)."""
+        self._log.info('retry %r: attempt %d failed, retrying in %.3fs', name, attempt, delay)
+
+    def on_bulkhead_rejected(self, *, name: str) -> None:
+        """Log a bulkhead rejection at WARNING (load is being shed)."""
+        self._log.warning('bulkhead %r: call rejected (no free slot)', name)
+
+    def on_fallback(self, *, name: str, error: BaseException) -> None:
+        """Log a fallback substitution at WARNING (degraded but serving)."""
+        self._log.warning('fallback %r: substituted for %s', name, type(error).__name__)
