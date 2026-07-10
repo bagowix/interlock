@@ -9,6 +9,7 @@ per named dependency) with no decorators in call sites.
 | Integration | Extra | What you get |
 |---|---|---|
 | [FastAPI](fastapi.md) | `interlock-cb[fastapi]` | `Depends`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler |
+| [Litestar](litestar.md) | `interlock-cb[litestar]` | `Provide`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler (Litestar ≥ 2.23) |
 | [httpx2](httpx2.md) | `interlock-cb[httpx2]` | `CircuitBreakerTransport` / `AsyncCircuitBreakerTransport` — per-host breaker at the transport level |
 | [aiohttp](aiohttp.md) | `interlock-cb[aiohttp]` | `CircuitBreakerMiddleware` — per-host breaker as a client middleware (aiohttp ≥ 3.12) |
 | [requests](requests.md) | `interlock-cb[requests]` | `CircuitBreakerAdapter` — per-host breaker mounted on a `Session` |

@@ -29,6 +29,7 @@ _PAGES = (
     'guides/pipeline.md',
     'integrations/index.md',
     'integrations/fastapi.md',
+    'integrations/litestar.md',
     'integrations/httpx2.md',
     'integrations/aiohttp.md',
     'integrations/requests.md',

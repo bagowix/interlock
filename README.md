@@ -25,7 +25,7 @@ integrations at the transport level.
   pyright in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
   optional extras (`httpx2`, `aiohttp`, `requests`, `tenacity`, `fastapi`,
-  `redis`, `otel`).
+  `litestar`, `redis`, `otel`).
 - **Composable pipeline (v2).** Timeout, bulkhead, breaker, retry and fallback
   as strategies applied in an explicit order — Polly-style, with the
   standalone breaker untouched.
@@ -79,13 +79,14 @@ uv add interlock-cb          # or: pip install interlock-cb
 Optional extras:
 
 ```bash
-uv add 'interlock-cb[otel]'     # OpenTelemetry metrics listener
+uv add 'interlock-cb[fastapi]'  # FastAPI dependency + 503 Retry-After handler
+uv add 'interlock-cb[litestar]' # Litestar dependency + 503 Retry-After handler
 uv add 'interlock-cb[httpx2]'   # per-host httpx2 transport
 uv add 'interlock-cb[aiohttp]'  # per-host aiohttp client middleware
 uv add 'interlock-cb[requests]' # per-host requests session adapter
 uv add 'interlock-cb[tenacity]' # retry × breaker composition helpers
-uv add 'interlock-cb[fastapi]'  # FastAPI dependency + 503 Retry-After handler
 uv add 'interlock-cb[redis]'    # shared breaker state across processes
+uv add 'interlock-cb[otel]'     # OpenTelemetry metrics listener
 ```
 
 ## Quickstart
@@ -256,8 +257,8 @@ The sources live in [`docs/`](docs/):
 - [Timeout](docs/guides/timeout.md)
 - [Retries and circuit breakers](docs/guides/retries.md)
 - [Resilience pipeline](docs/guides/pipeline.md)
-- [Integrations overview](docs/integrations/index.md) — FastAPI, httpx2,
-  aiohttp, requests, LLM SDKs, tenacity, Redis, Flask/Django
+- [Integrations overview](docs/integrations/index.md) — FastAPI, Litestar,
+  httpx2, aiohttp, requests, LLM SDKs, tenacity, Redis, Flask/Django
 - [Comparison](docs/comparison.md) — vs pybreaker, circuitbreaker, aiobreaker, purgatory
 - [API reference](docs/reference.md)
 

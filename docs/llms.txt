@@ -47,6 +47,7 @@ Key facts for answering questions about interlock:
 - [Resilience pipeline](guides/pipeline.md): compose timeout / bulkhead / breaker / retry / fallback in an explicit order — builder DSL, recommended ordering, migration from v1, custom strategies.
 - [Integrations overview](integrations/index.md): supported integrations, shared semantics, support tiers.
 - [FastAPI integration](integrations/fastapi.md): Depends-injected breaker, 503 + Retry-After.
+- [Litestar integration](integrations/litestar.md): Provide-injected breaker, 503 + Retry-After (Litestar ≥ 2.23).
 - [httpx2 integration](integrations/httpx2.md): per-host transport breaker.
 - [aiohttp integration](integrations/aiohttp.md): per-host client-middleware breaker (aiohttp ≥ 3.12).
 - [requests integration](integrations/requests.md): per-host adapter breaker via `session.mount(...)`.
@@ -59,5 +60,5 @@ Key facts for answering questions about interlock:
 ## Optional
 
 - [Full documentation](llms-full.txt): every page above inlined into one file.
-- Extras: `interlock-cb[otel]` (OpenTelemetry metrics), `interlock-cb[httpx2]` (transport), `interlock-cb[aiohttp]` (client middleware), `interlock-cb[requests]` (session adapter), `interlock-cb[tenacity]` (retry glue), `interlock-cb[fastapi]` (FastAPI 503 mapping), `interlock-cb[redis]` (shared distributed state).
+- Extras: `interlock-cb[fastapi]` (FastAPI 503 mapping), `interlock-cb[litestar]` (Litestar 503 mapping), `interlock-cb[httpx2]` (transport), `interlock-cb[aiohttp]` (client middleware), `interlock-cb[requests]` (session adapter), `interlock-cb[tenacity]` (retry glue), `interlock-cb[redis]` (shared distributed state), `interlock-cb[otel]` (OpenTelemetry metrics).
 - Source and changelog: see the repository `CHANGELOG.md`.

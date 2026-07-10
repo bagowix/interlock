@@ -23,7 +23,7 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
   below the usual 3.12 default: a foundational library values reach.
 - **Zero-dependency core** — stdlib only. A fault-tolerance tool must not depend on someone
   else's reliability. Everything external goes through optional extras
-  (`interlock-cb[httpx2]`, `[aiohttp]`, `[requests]`, `[tenacity]`, `[fastapi]`, `[redis]`, `[otel]`).
+  (`interlock-cb[httpx2]`, `[aiohttp]`, `[requests]`, `[tenacity]`, `[fastapi]`, `[litestar]`, `[redis]`, `[otel]`).
 - **Pydantic ≥ 2.0 — extras only, NEVER in the core.** The core config is a frozen dataclass with
   eager validation. Pydantic is acceptable only where it is optional.
 - **uv** — package manager.
