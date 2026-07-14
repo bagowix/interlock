@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Overlapping `with breaker:` / `async with breaker:` blocks on one breaker
+  instance no longer mix up each other's timing. The guarded-block bookkeeping
+  used a single instance-level stack, so when blocks from different threads or
+  interleaved asyncio tasks exited out of LIFO order, each exit settled with
+  the *other* block's start time and admission — corrupting durations (and so
+  slow-call classification) and probe attribution. The stack now lives in a
+  `ContextVar`: every thread and every asyncio task keeps its own, and nested
+  blocks on one breaker keep working. The decorator and `call()` surfaces were
+  never affected.
 - A ``HALF_OPEN`` probe interrupted by a ``BaseException`` — an
   ``asyncio.CancelledError`` (client disconnect, task cancellation, a timeout
   composed *outside* the breaker), ``KeyboardInterrupt``, or any other
