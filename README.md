@@ -13,7 +13,7 @@
 | interlock/\_state\_machine.py          |      124 |        0 |       32 |        0 |     100% |           |
 | interlock/\_typing.py                  |        9 |        0 |        0 |        0 |     100% |           |
 | interlock/\_windows.py                 |       61 |        0 |       10 |        0 |     100% |           |
-| interlock/breaker.py                   |       62 |        0 |        2 |        0 |     100% |           |
+| interlock/breaker.py                   |       69 |        0 |        2 |        0 |     100% |           |
 | interlock/config.py                    |       32 |        0 |       16 |        0 |     100% |           |
 | interlock/errors.py                    |       29 |        0 |        4 |        0 |     100% |           |
 | interlock/integrations/\_\_init\_\_.py |        0 |        0 |        0 |        0 |     100% |           |
@@ -35,7 +35,7 @@
 | interlock/timeout.py                   |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py                   |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py                    |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                              | **1510** |    **0** |  **250** |    **0** | **100%** |           |
+| **TOTAL**                              | **1517** |    **0** |  **250** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
