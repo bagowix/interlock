@@ -78,6 +78,15 @@ class HttpStatusClassifier:
         return cast('Response', result).status_code in self._failure_statuses
 
 
+def _host(request: Request) -> str:
+    """The host keying the request's breaker; empty hosts are rejected eagerly."""
+    host = request.url.host
+    if not host:
+        raise ValueError(f'Request URL has no host to key a breaker on: {request.url!s}')
+
+    return host
+
+
 def _build_registry(
     config: Config | None,
     clock: Clock | None,
@@ -121,8 +130,9 @@ class CircuitBreakerTransport(BaseTransport):
 
         Raises:
             CircuitOpenError: If the host's breaker is open.
+            ValueError: If the request URL carries no host to key a breaker on.
         """
-        breaker = self._registry.get(request.url.host)
+        breaker = self._registry.get(_host(request))
         guarded = breaker(self._transport.handle_request)
         return guarded(request)
 
@@ -160,8 +170,9 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
 
         Raises:
             CircuitOpenError: If the host's breaker is open.
+            ValueError: If the request URL carries no host to key a breaker on.
         """
-        breaker = self._registry.get(request.url.host)
+        breaker = self._registry.get(_host(request))
         guarded = breaker(self._transport.handle_async_request)
         return await guarded(request)
 

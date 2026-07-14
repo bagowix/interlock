@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The httpx transports now reject a request whose URL carries no host with an
+  eager `ValueError`, matching the aiohttp and requests integrations.
+  Previously such a request silently created (and shared) a breaker keyed on
+  the empty string.
 - Overlapping `with breaker:` / `async with breaker:` blocks on one breaker
   instance no longer mix up each other's timing. The guarded-block bookkeeping
   used a single instance-level stack, so when blocks from different threads or

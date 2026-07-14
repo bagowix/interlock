@@ -176,3 +176,26 @@ def test__http_status_classifier__custom_statuses__override_default_set() -> Non
     assert classifier.is_failure(result=Response(404), exception=None)
     assert classifier.is_failure(result=Response(408), exception=None)
     assert not classifier.is_failure(result=Response(500), exception=None)
+
+
+def test__sync_transport__url_without_host__raises_value_error(fake_clock: FakeClock) -> None:
+    stub = _SyncStub(lambda _request: Response(200))
+    transport = CircuitBreakerTransport(stub, clock=fake_clock)
+
+    with pytest.raises(ValueError, match='no host'):
+        transport.handle_request(_request('/relative/path'))
+
+    assert stub.calls == 0
+
+
+@pytest.mark.asyncio
+async def test__async_transport__url_without_host__raises_value_error(
+    fake_clock: FakeClock,
+) -> None:
+    stub = _AsyncStub(lambda _request: Response(200))
+    transport = AsyncCircuitBreakerTransport(stub, clock=fake_clock)
+
+    with pytest.raises(ValueError, match='no host'):
+        await transport.handle_async_request(_request('/relative/path'))
+
+    assert stub.calls == 0
