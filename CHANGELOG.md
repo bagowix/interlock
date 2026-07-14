@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A ``HALF_OPEN`` probe interrupted by a ``BaseException`` — an
+  ``asyncio.CancelledError`` (client disconnect, task cancellation, a timeout
+  composed *outside* the breaker), ``KeyboardInterrupt``, or any other
+  non-``Exception`` — now returns its probe slot instead of leaking it.
+  Previously each such interruption permanently shrank the ``HALF_OPEN``
+  budget; once every slot had leaked the breaker wedged in ``HALF_OPEN``,
+  rejecting all traffic until a manual ``reset()``. The interruption is still
+  never recorded as an outcome (the v1 invariant stands: cancellation says
+  nothing about the dependency). In coordinated (storage-backed) mode an
+  interrupted *leased* probe is not returned to the shared budget — the
+  storage protocol has no un-lease operation — and the backend TTL bounds
+  that leak.
+
 ## [2.1.1] - 2026-07-14
 
 ### Fixed

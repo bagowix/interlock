@@ -805,3 +805,28 @@ async def test__async__lease_failure_falls_back_to_local_admission(
     assert await breaker.call(_async_ok) == 'ok'  # lease failed -> local CLOSED admits
 
     assert len(listener.degraded) == 1
+
+
+def test__interrupted_leased_probe__not_returned_to_shared_budget(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    a = _breaker(config, fake_clock, storage)
+    _trip(a)
+    _coordinator(a).wait_idle()
+    fake_clock.advance(WAIT)
+    _coordinator(a).poll_once()
+
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        a.call(interrupted)  # leased probe 1 of 2, interrupted mid-flight
+    _coordinator(a).wait_idle()
+
+    # The storage protocol has no un-lease operation: the slot stays consumed
+    # (the backend TTL bounds the leak) and no outcome is recorded for it.
+    shared = storage.read(NAME)
+    assert shared is not None
+    assert shared.state is State.HALF_OPEN
+    assert shared.probes_remaining == 1
+    assert shared.probes_completed == 0

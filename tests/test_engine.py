@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from conftest import FakeClock
@@ -241,3 +243,73 @@ def test__reset__clears_last_failure(engine: Engine) -> None:
         engine.call_sync(lambda: 1)
 
     assert exc_info.value.last_failure is None
+
+
+def test__call_sync__base_exception_in_half_open__releases_the_probe_slot(
+    engine: Engine, fake_clock: FakeClock
+) -> None:
+    _trip_to_open(engine)
+    fake_clock.advance(5.0)
+
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        engine.call_sync(interrupted)
+
+    # Both probe slots must be available again and the interrupted call must
+    # not count toward the round: two clean probes close the breaker.
+    assert engine.call_sync(lambda: 'ok') == 'ok'
+    assert engine.call_sync(lambda: 'ok') == 'ok'
+    assert engine.state is State.CLOSED
+
+
+@pytest.mark.asyncio
+async def test__call_async__cancelled_probe__releases_the_probe_slot(
+    engine: Engine, fake_clock: FakeClock
+) -> None:
+    _trip_to_open(engine)
+    fake_clock.advance(5.0)
+
+    probe_running = asyncio.Event()
+
+    async def hanging_probe() -> None:
+        probe_running.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(engine.call_async(hanging_probe))
+    await probe_running.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    async def ok() -> str:
+        return 'ok'
+
+    assert await engine.call_async(ok) == 'ok'
+    assert await engine.call_async(ok) == 'ok'
+    assert engine.state is State.CLOSED
+
+
+def test__exit_block__base_exception_in_half_open__releases_the_probe_slot(
+    engine: Engine, fake_clock: FakeClock
+) -> None:
+    _trip_to_open(engine)
+    fake_clock.advance(5.0)
+    start, admission = engine.enter_block()  # admitted as a probe
+
+    engine.exit_block(start=start, admission=admission, exception=KeyboardInterrupt())
+
+    assert engine.call_sync(lambda: 'ok') == 'ok'
+    assert engine.call_sync(lambda: 'ok') == 'ok'
+    assert engine.state is State.CLOSED
+
+
+def test__call_sync__base_exception_in_closed__records_nothing(engine: Engine) -> None:
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        engine.call_sync(interrupted)
+
+    assert engine.snapshot().total_calls == 0

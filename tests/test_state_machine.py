@@ -403,3 +403,62 @@ def test__generation__bumped_by_overrides(config: Config, fake_clock: FakeClock)
     machine.record(Outcome.FAILURE, generation=stale_generation)
 
     assert machine.snapshot().total_calls == 0  # pre-override call not recorded into shadow window
+
+
+def test__release_probe__frees_the_slot_for_another_probe(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    assert machine.acquire() is True
+    assert machine.acquire() is False  # both slots in flight
+    generation = machine.generation
+
+    machine.release_probe(generation=generation)
+
+    assert machine.acquire() is True  # the freed slot is admitted again
+
+
+def test__release_probe__does_not_count_toward_the_probe_round(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    generation = machine.generation
+    machine.release_probe(generation=generation)
+
+    # permitted_calls_in_half_open=2: two real probes must still be required.
+    assert machine.acquire() is True
+    machine.record(Outcome.SUCCESS, generation=generation)
+    assert machine.state is State.HALF_OPEN  # round not finished by the released slot
+
+    assert machine.acquire() is True
+    machine.record(Outcome.SUCCESS, generation=generation)
+    assert machine.state is State.CLOSED
+
+
+def test__release_probe__stale_generation__ignored(config: Config, fake_clock: FakeClock) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    stale_generation = machine.generation
+    machine.reset()  # transition bumps the generation and resets probe accounting
+
+    machine.release_probe(generation=stale_generation)
+
+    assert machine.state is State.CLOSED
+    assert machine.acquire() is True
+
+
+def test__release_probe__outside_half_open__ignored(config: Config, fake_clock: FakeClock) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+
+    machine.release_probe(generation=machine.generation)
+
+    assert machine.state is State.CLOSED
+    assert machine.acquire() is True
