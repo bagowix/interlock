@@ -140,10 +140,10 @@ python_version = "3.11"
 strict = true
 warn_unreachable = true
 show_error_codes = true
-files = ["interlock"]
+files = ["interlock", "tests/typing_surface.py"]
 
 [tool.pyright]
-include = ["interlock"]
+include = ["interlock", "tests/typing_surface.py"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
 

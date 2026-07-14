@@ -144,7 +144,17 @@ class Pipeline:
 
         return sync_wrapper
 
+    @overload
     def call(
+        self, fn: AsyncCallable[P, R], /, *args: P.args, **kwargs: P.kwargs
+    ) -> Awaitable[R]: ...
+
+    @overload
+    def call(self, fn: SyncCallable[P, R], /, *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+    # Same mypy limitation as __call__ above: the union implementation cannot
+    # be reconciled with the ParamSpec overloads; pyright accepts it.
+    def call(  # type: ignore[misc]
         self,
         fn: AsyncCallable[P, R] | SyncCallable[P, R],
         /,

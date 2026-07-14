@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `CircuitBreaker.call()` and `Pipeline.call()` are now overloaded on the
+  callable's sync/async nature, so strict type checkers infer the exact result
+  type at the call site. Previously the plain `Awaitable[R] | R` return type
+  made `await breaker.call(async_fn)` an error under both mypy `--strict` and
+  pyright strict, and left sync results as a union needing a cast. Runtime
+  behaviour is unchanged. The user-facing typing surface is now locked by
+  static assertions (`tests/typing_surface.py`) checked by both type checkers
+  in CI.
+
 ## [2.1.0] - 2026-07-11
 
 ### Added
