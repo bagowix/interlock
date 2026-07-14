@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-07-14
+
 ### Fixed
 
 - `CircuitBreaker.call()` and `Pipeline.call()` are now overloaded on the
@@ -246,7 +248,8 @@ The major version marks the scope of what is added, not a migration burden.
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/bagowix/interlock/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/bagowix/interlock/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/bagowix/interlock/compare/v1.3.0...v2.0.0
 [1.3.0]: https://github.com/bagowix/interlock/compare/v1.2.0...v1.3.0
