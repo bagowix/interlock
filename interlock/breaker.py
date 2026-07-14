@@ -102,7 +102,17 @@ class CircuitBreaker:
         """Put the breaker in shadow mode: admit all traffic, record, never trip."""
         self._engine.metrics_only()
 
+    @overload
     def call(
+        self, fn: AsyncCallable[P, R], /, *args: P.args, **kwargs: P.kwargs
+    ) -> Awaitable[R]: ...
+
+    @overload
+    def call(self, fn: SyncCallable[P, R], /, *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+    # Same mypy limitation as __call__ below: the union implementation cannot
+    # be reconciled with the ParamSpec overloads; pyright accepts it.
+    def call(  # type: ignore[misc]
         self,
         fn: AsyncCallable[P, R] | SyncCallable[P, R],
         /,
