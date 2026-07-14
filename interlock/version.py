@@ -7,7 +7,7 @@ and read at build time by hatchling (see ``[tool.hatch.version]`` in
 
 __all__ = ('VERSION',)
 
-VERSION = '2.1.1'
+VERSION = '2.1.2'
 """The installed version of interlock.
 
 Guaranteed to comply with PEP 440 version specifiers.
