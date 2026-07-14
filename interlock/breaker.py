@@ -17,6 +17,7 @@ classification is unavailable there.
 
 import functools
 from collections.abc import Awaitable
+from contextvars import ContextVar
 from types import TracebackType
 from typing import Literal, Self, cast, overload
 
@@ -70,7 +71,12 @@ class CircuitBreaker:
             listener=listener,
             storage=storage,
         )
-        self._blocks: list[tuple[float, Admission]] = []
+        # Guarded-block bookkeeping lives in a ContextVar, not on the instance:
+        # each thread and each asyncio task sees its own stack, so overlapping
+        # `with` blocks on one breaker cannot pop each other's (start, admission).
+        self._blocks: ContextVar[tuple[tuple[float, Admission], ...]] = ContextVar(
+            f'interlock-blocks-{name}', default=()
+        )
 
     @property
     def name(self) -> str:
@@ -160,7 +166,8 @@ class CircuitBreaker:
         return sync_wrapper
 
     def __enter__(self) -> Self:
-        self._blocks.append(self._engine.enter_block())
+        entry = self._engine.enter_block()
+        self._blocks.set((*self._blocks.get(), entry))
         return self
 
     def __exit__(
@@ -169,12 +176,15 @@ class CircuitBreaker:
         exc: BaseException | None,
         _traceback: TracebackType | None,
     ) -> Literal[False]:
-        start, admission = self._blocks.pop()
+        stack = self._blocks.get()
+        start, admission = stack[-1]
+        self._blocks.set(stack[:-1])
         self._engine.exit_block(start=start, admission=admission, exception=exc)
         return False
 
     async def __aenter__(self) -> Self:
-        self._blocks.append(await self._engine.enter_block_async())
+        entry = await self._engine.enter_block_async()
+        self._blocks.set((*self._blocks.get(), entry))
         return self
 
     async def __aexit__(
@@ -183,6 +193,8 @@ class CircuitBreaker:
         exc: BaseException | None,
         _traceback: TracebackType | None,
     ) -> Literal[False]:
-        start, admission = self._blocks.pop()
+        stack = self._blocks.get()
+        start, admission = stack[-1]
+        self._blocks.set(stack[:-1])
         self._engine.exit_block(start=start, admission=admission, exception=exc)
         return False

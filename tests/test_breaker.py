@@ -1,8 +1,10 @@
+import asyncio
 import inspect
+import threading
 
 import pytest
 
-from conftest import FakeClock
+from conftest import FakeClock, RecordingListener
 from interlock import CircuitBreaker, CircuitOpenError, Config, State
 
 
@@ -176,3 +178,92 @@ async def test__async_context_manager__open_circuit__raises_on_enter(
     with pytest.raises(CircuitOpenError):
         async with breaker:
             pass
+
+
+@pytest.mark.asyncio
+async def test__async_context_manager__interleaved_tasks__durations_not_swapped(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    listener = RecordingListener()
+    breaker = CircuitBreaker(name='svc', config=config, clock=fake_clock, listener=listener)
+
+    a_in, a_go, b_in, b_go = (asyncio.Event() for _ in range(4))
+
+    async def task_a() -> None:
+        async with breaker:  # enters at t=0.0
+            a_in.set()
+            await a_go.wait()  # exits at t=0.7
+
+    async def task_b() -> None:
+        async with breaker:  # enters at t=0.5
+            b_in.set()
+            await b_go.wait()  # exits at t=1.0
+
+    ta = asyncio.create_task(task_a())
+    await a_in.wait()
+    fake_clock.advance(0.5)
+    tb = asyncio.create_task(task_b())
+    await b_in.wait()
+    fake_clock.advance(0.2)
+    a_go.set()
+    await ta  # A exits first, while B is still inside
+    fake_clock.advance(0.3)
+    b_go.set()
+    await tb
+
+    durations = [duration for _, duration in listener.calls]
+    assert durations == pytest.approx([0.7, 0.5])
+
+
+def test__context_manager__overlapping_threads__durations_not_swapped(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    listener = RecordingListener()
+    breaker = CircuitBreaker(name='svc', config=config, clock=fake_clock, listener=listener)
+
+    a_in, a_go, b_in, b_go = (threading.Event() for _ in range(4))
+
+    def worker_a() -> None:
+        with breaker:  # enters at t=0.0
+            a_in.set()
+            a_go.wait()  # exits at t=0.7
+
+    def worker_b() -> None:
+        with breaker:  # enters at t=0.5
+            b_in.set()
+            b_go.wait()  # exits at t=1.0
+
+    ta = threading.Thread(target=worker_a)
+    ta.start()
+    assert a_in.wait(5.0)
+    fake_clock.advance(0.5)
+    tb = threading.Thread(target=worker_b)
+    tb.start()
+    assert b_in.wait(5.0)
+    fake_clock.advance(0.2)
+    a_go.set()
+    ta.join(5.0)  # A exits first, while B is still inside
+    fake_clock.advance(0.3)
+    b_go.set()
+    tb.join(5.0)
+
+    durations = [duration for _, duration in listener.calls]
+    assert durations == pytest.approx([0.7, 0.5])
+
+
+def test__context_manager__nested_blocks__inner_settles_before_outer(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    listener = RecordingListener()
+    breaker = CircuitBreaker(name='svc', config=config, clock=fake_clock, listener=listener)
+
+    with breaker:  # outer enters at t=0.0
+        fake_clock.advance(0.3)
+        with breaker:  # inner enters at t=0.3
+            fake_clock.advance(0.1)
+        # inner exits at t=0.4 -> 0.1
+        fake_clock.advance(0.6)
+    # outer exits at t=1.0 -> 1.0
+
+    durations = [duration for _, duration in listener.calls]
+    assert durations == pytest.approx([0.1, 1.0])
