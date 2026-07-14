@@ -120,6 +120,24 @@ class StateMachine:
         elif self._state is State.METRICS_ONLY:
             self._window.record(outcome)
 
+    def release_probe(self, *, generation: int) -> None:
+        """Return an admitted probe's slot without recording an outcome.
+
+        The call layer invokes this when a call is interrupted by a
+        ``BaseException`` (cancellation, shutdown): the outcome must not count
+        — an interruption says nothing about the dependency — but the slot has
+        to come back, or every leaked probe would shrink the ``HALF_OPEN``
+        budget until the breaker wedged there for good. A stale ``generation``
+        or a non-``HALF_OPEN`` state means the admission was not a probe of
+        the current era (any transition already reset probe accounting), so
+        there is nothing to return.
+        """
+        if generation != self._generation or self._state is not State.HALF_OPEN:
+            return
+
+        self._probes_in_flight -= 1
+        self._probes_admitted -= 1
+
     def attempt_auto_transition(self) -> bool:
         """Proactively move ``OPEN`` → ``HALF_OPEN`` once the wait has elapsed.
 

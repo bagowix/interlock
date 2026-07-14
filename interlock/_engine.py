@@ -189,6 +189,9 @@ class Engine:
         except Exception as exc:
             self._settle(result=None, exception=exc, start=start, admission=admission)
             raise
+        except BaseException:
+            self._release(admission)
+            raise
         else:
             self._settle(result=result, exception=None, start=start, admission=admission)
             return result
@@ -207,6 +210,9 @@ class Engine:
             result = await fn(*args, **kwargs)
         except Exception as exc:
             self._settle(result=None, exception=exc, start=start, admission=admission)
+            raise
+        except BaseException:
+            self._release(admission)
             raise
         else:
             self._settle(result=result, exception=None, start=start, admission=admission)
@@ -241,7 +247,10 @@ class Engine:
     ) -> None:
         """Record a guarded block's outcome from its exception and duration."""
         if exception is not None and not isinstance(exception, Exception):
-            return  # mirror call(): cancellation/shutdown are not downstream failures
+            # Mirror call(): cancellation/shutdown are not downstream failures —
+            # but an interrupted probe must still return its slot.
+            self._release(admission)
+            return
         self._settle(result=None, exception=exception, start=start, admission=admission)
 
     def reset(self) -> None:
@@ -376,6 +385,21 @@ class Engine:
             )
 
         return Admission(generation=generation)
+
+    def _release(self, admission: Admission) -> None:
+        """Return an interrupted call's probe slot without recording an outcome.
+
+        A ``BaseException`` (cancellation, shutdown) says nothing about the
+        dependency, so nothing is recorded — but a leaked ``HALF_OPEN`` slot
+        would wedge the breaker there permanently. A coordinated (leased)
+        probe is not returned to the shared budget — the storage protocol has
+        no un-lease operation; the backend's TTL bounds that leak.
+        """
+        if admission.probe:
+            return
+
+        with self._lock:
+            self._machine.release_probe(generation=admission.generation)
 
     def _settle(
         self, *, result: object, exception: Exception | None, start: float, admission: Admission
