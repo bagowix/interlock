@@ -18,6 +18,7 @@ nav = [
 
 [project.theme]
 language = "en"
+custom_dir = "overrides"
 features = [
     "content.action.view",
     "content.code.annotate",
