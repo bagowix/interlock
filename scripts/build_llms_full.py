@@ -20,6 +20,7 @@ _PAGES = (
     'getting-started.md',
     'demo.md',
     'comparison.md',
+    'migration.md',
     'guides/configuration.md',
     'guides/states.md',
     'guides/failure-classification.md',
