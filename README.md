@@ -7,6 +7,8 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![llms.txt](https://img.shields.io/badge/-llms.txt-brightgreen)](docs/llms.txt)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-2f6f55.svg)](https://bagowix.github.io/interlock/)
+[![Context7](https://img.shields.io/badge/docs-Context7-1f6feb.svg)](https://context7.com/bagowix/interlock)
 
 A modern circuit breaker for Python — sync and async in a single class,
 sliding-window rate and slow-call detection, a type-safe API, and transparent
