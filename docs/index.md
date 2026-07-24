@@ -50,9 +50,11 @@ from interlock import CircuitBreaker, CircuitOpenError
 
 breaker = CircuitBreaker(name='payments')
 
+
 @breaker
 def charge(amount: int) -> str:
     return gateway.charge(amount)
+
 
 try:
     charge(100)

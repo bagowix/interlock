@@ -101,10 +101,12 @@ breaker = CircuitBreaker(
     config=Config(failure_rate_threshold=0.5, minimum_number_of_calls=20),
 )
 
+
 # 1. Decorator — preserves the signature and sync/async nature.
 @breaker
 def charge(amount: int) -> str:
     return gateway.charge(amount)
+
 
 # 2. breaker.call — the breaker runs the callable.
 result = breaker.call(gateway.charge, 100)
@@ -121,6 +123,7 @@ function, and the instance is also an async context manager:
 @breaker
 async def fetch(url: str) -> bytes:
     return await client.get(url)
+
 
 async with breaker:
     await client.get(url)
@@ -157,7 +160,7 @@ breaker = CircuitBreaker(name='recommendations')
 pipeline = (
     Pipeline.builder()
     .fallback(lambda exc: [], on=(CircuitOpenError,))
-    .retry(attempts=4)          # requires interlock-cb[tenacity]
+    .retry(attempts=4)  # requires interlock-cb[tenacity]
     .circuit_breaker(breaker)
     .bulkhead(8)
     .timeout(2.0)

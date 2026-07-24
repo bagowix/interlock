@@ -114,11 +114,11 @@ Both edges are observable through the listener:
 
 ```python
 class StorageWatch:
-    def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
-        ...  # alert: running on local state
+    def on_storage_degraded(
+        self, *, name: str, error: BaseException
+    ) -> None: ...  # alert: running on local state
 
-    def on_storage_recovered(self, *, name: str) -> None:
-        ...  # back to coordinated state
+    def on_storage_recovered(self, *, name: str) -> None: ...  # back to coordinated state
 ```
 
 `LoggingEventListener` logs degradation at `WARNING` and recovery at `INFO`;
@@ -135,9 +135,9 @@ storage-agnostic:
 RedisStorage(
     client,
     key_prefix='interlock:cb:',  # hash key namespace
-    state_ttl=300.0,             # key lifetime (s); refreshed on every write
-    poll_interval=1.0,           # cache refresh cadence (s)
-    retry_backoff=5.0,           # local-only time after a storage failure (s)
+    state_ttl=300.0,  # key lifetime (s); refreshed on every write
+    poll_interval=1.0,  # cache refresh cadence (s)
+    retry_backoff=5.0,  # local-only time after a storage failure (s)
 )
 ```
 

@@ -20,10 +20,10 @@ breaker = CircuitBreaker(name='recommendations')
 pipeline = (
     Pipeline.builder()
     .fallback(lambda exc: [], on=(CircuitOpenError,))  # outermost
-    .retry(attempts=4)                                 # requires interlock-cb[tenacity]
+    .retry(attempts=4)  # requires interlock-cb[tenacity]
     .circuit_breaker(breaker)
     .bulkhead(8)
-    .timeout(2.0)                                      # innermost
+    .timeout(2.0)  # innermost
     .build()
 )
 

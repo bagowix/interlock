@@ -78,6 +78,7 @@ ignore = [
   "FIX002",
   "D105",
   "D107",
+  "CPY001", # the project does not require copyright headers in source files
 ]
 
 [tool.ruff.lint.pydocstyle]

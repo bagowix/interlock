@@ -110,7 +110,7 @@ class CircuitBreakerAdapter(HTTPAdapter):
             listener=listener,
         )
 
-    def send(  # noqa: PLR0913 - mirrors HTTPAdapter.send, the native extension point
+    def send(  # noqa: PLR0913, PLR0917 - mirrors HTTPAdapter.send, the native extension point
         self,
         request: PreparedRequest,
         stream: bool = False,  # noqa: FBT001, FBT002 - mirrors HTTPAdapter.send

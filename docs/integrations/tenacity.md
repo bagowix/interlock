@@ -108,7 +108,7 @@ from interlock.integrations.tenacity import RetryStrategy
 
 pipeline = (
     Pipeline.builder()
-    .retry(attempts=4)              # this step builds a RetryStrategy
+    .retry(attempts=4)  # this step builds a RetryStrategy
     .circuit_breaker(breaker)
     .timeout(2.0)
     .build()

@@ -70,9 +70,11 @@ Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
 ## `timeout` / `sync_timeout`
 
 ```python
-async with timeout(seconds): ...   # async block
+async with timeout(seconds):
+    ...  # async block
 
-@sync_timeout(seconds)             # synchronous callable
+
+@sync_timeout(seconds)  # synchronous callable
 def work(): ...
 ```
 

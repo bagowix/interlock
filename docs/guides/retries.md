@@ -128,7 +128,7 @@ wait strategies as a layer, so the manual recipe becomes::
 ```python
 pipeline = (
     Pipeline.builder()
-    .retry(attempts=4)          # retry outside — the recommended order
+    .retry(attempts=4)  # retry outside — the recommended order
     .circuit_breaker(breaker)
     .timeout(2.0)
     .build()

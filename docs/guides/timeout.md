@@ -9,7 +9,7 @@ which a surrounding breaker records as a (slow) failure.
 from interlock import timeout
 
 async with timeout(2.0):
-    await client.get(url)        # raises CallTimeoutError after 2 seconds
+    await client.get(url)  # raises CallTimeoutError after 2 seconds
 ```
 
 ## Composing with a breaker
@@ -22,6 +22,7 @@ the `CallTimeoutError`:
 from interlock import CircuitBreaker, timeout
 
 breaker = CircuitBreaker(name='search')
+
 
 @breaker
 async def search(q: str) -> bytes:
@@ -46,6 +47,7 @@ rather than a block:
 from interlock import CircuitBreaker, sync_timeout
 
 breaker = CircuitBreaker(name='search')
+
 
 @breaker
 @sync_timeout(2.0)

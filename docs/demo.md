@@ -26,7 +26,7 @@ failures over a 4-call window, stay open 1 second, close after 2 good probes.
 ??? example "lifecycle.py — full source"
 
     ```python
-    --8<-- "examples/lifecycle.py"
+    --8 < --'examples/lifecycle.py'
     ```
 
 Running it prints:
@@ -100,7 +100,7 @@ keeps charging as if nothing happened.
 ??? example "two_clients.py — full source"
 
     ```python
-    --8<-- "examples/two_clients.py"
+    --8 < --'examples/two_clients.py'
     ```
 
 The interesting part of the output:
@@ -155,7 +155,7 @@ them, a fallback keeps serving.
 ??? example "pipeline.py — full source"
 
     ```python
-    --8<-- "examples/pipeline.py"
+    --8 < --'examples/pipeline.py'
     ```
 
 The interesting part of the output:

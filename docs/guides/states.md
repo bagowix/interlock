@@ -69,9 +69,9 @@ Three special states are set manually and stay until you `reset()`:
 | `breaker.reset()` | `CLOSED` | Return to closed with a fresh, empty window. |
 
 ```python
-breaker.metrics_only()   # observe in production without enforcing
+breaker.metrics_only()  # observe in production without enforcing
 # ... inspect breaker.snapshot() until thresholds look right ...
-breaker.reset()          # start enforcing with a clean window
+breaker.reset()  # start enforcing with a clean window
 ```
 
 ### `METRICS_ONLY` — safe rollout
