@@ -76,3 +76,5 @@ Redis; v1.3 added the integrations wave — aiohttp, requests and
 it all declaratively in the [resilience pipeline](guides/pipeline.md) —
 timeout, bulkhead, breaker, retry and fallback around the same standalone
 breaker.
+
+[Ask Context7](https://context7.com/bagowix/interlock?tab=chat){ .md-button }
