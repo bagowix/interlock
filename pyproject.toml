@@ -57,6 +57,10 @@ packages = ["interlock"]
 src = ["interlock", "tests"]
 line-length = 100
 target-version = "py311"
+# demo.md's python blocks are pymdownx.snippets includes (--8<-- "..."), not
+# real Python; ruff's Markdown code formatter parses the directive as an
+# expression and rewrites it, breaking the include. Leave that file alone.
+extend-exclude = ["docs/demo.md"]
 
 [tool.ruff.format]
 quote-style = "single"
