@@ -11,7 +11,7 @@ value is a success:
 ```python
 from interlock import CircuitBreaker
 
-breaker = CircuitBreaker(name='svc')   # DefaultFailureClassifier
+breaker = CircuitBreaker(name='svc')  # DefaultFailureClassifier
 ```
 
 This is right for code that signals errors by raising. It is *not* enough when
@@ -27,14 +27,16 @@ holds the return value.
 ```python
 from interlock import CircuitBreaker
 
+
 class StatusClassifier:
     def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
         if exception is not None:
             return True
         return getattr(result, 'status_code', 200) >= 500
 
+
 breaker = CircuitBreaker(name='api', classifier=StatusClassifier())
-result = breaker.call(client.get, url)   # a 503 response now counts as a failure
+result = breaker.call(client.get, url)  # a 503 response now counts as a failure
 ```
 
 Result-based classification needs the return value, so it works with the
@@ -50,7 +52,7 @@ Encode that by treating only the exceptions you care about as failures:
 class IgnoreNotFound:
     def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
         if isinstance(exception, NotFoundError):
-            return False          # expected, not a dependency problem
+            return False  # expected, not a dependency problem
         return exception is not None
 ```
 

@@ -88,9 +88,7 @@ async def list_orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) ->
 
 
 @app.get('/orders/{order_id}')
-async def get_order(
-    order_id: int, breaker: Annotated[CircuitBreaker, Depends(orders_db)]
-) -> dict:
+async def get_order(order_id: int, breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> dict:
     return await breaker.call(fetch_order, order_id)
 ```
 
@@ -108,6 +106,5 @@ from interlock import CircuitOpenError
 
 
 @app.exception_handler(CircuitOpenError)
-async def on_open(request: Request, exc: CircuitOpenError) -> Response:
-    ...
+async def on_open(request: Request, exc: CircuitOpenError) -> Response: ...
 ```

@@ -100,8 +100,7 @@ from litestar import Request, Response
 from interlock import CircuitOpenError
 
 
-def on_open(request: Request, exc: CircuitOpenError) -> Response[dict[str, str]]:
-    ...
+def on_open(request: Request, exc: CircuitOpenError) -> Response[dict[str, str]]: ...
 
 
 app = Litestar(..., exception_handlers={CircuitOpenError: on_open})

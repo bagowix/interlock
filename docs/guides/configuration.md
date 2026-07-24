@@ -68,7 +68,7 @@ from interlock import Config, Registry
 
 registry = Registry(config=Config(minimum_number_of_calls=20))
 
-payments = registry.get('payments')                       # shared default
+payments = registry.get('payments')  # shared default
 search = registry.get('search', config=Config(window_size=500))  # per-name override
 ```
 

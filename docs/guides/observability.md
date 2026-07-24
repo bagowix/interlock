@@ -31,7 +31,7 @@ Attach one per breaker, or share one across a `Registry`:
 
 ```python
 breaker = CircuitBreaker(name='payments', listener=my_listener)
-registry = Registry(listener=my_listener)   # every breaker reports here
+registry = Registry(listener=my_listener)  # every breaker reports here
 ```
 
 ## Logging (zero dependencies)

@@ -132,6 +132,7 @@ def get_state(name: str) -> State:
     except Exception:
         return State.CLOSED
 
+
 # good — fail fast, transparent error
 def get_state(name: str) -> State:
     if not name:

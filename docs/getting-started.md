@@ -97,6 +97,7 @@ function; the instance is also an async context manager:
 async def fetch(url: str) -> bytes:
     return await client.get(url)
 
+
 result = await breaker.call(client.get, url)
 
 async with breaker:
@@ -120,9 +121,9 @@ except CircuitOpenError as exc:
 ## Inspect state
 
 ```python
-breaker.state            # State.CLOSED / OPEN / HALF_OPEN / ...
-breaker.snapshot()       # WindowSnapshot: total_calls, failed_calls, slow_calls,
-                         # .failure_rate, .slow_call_rate
+breaker.state  # State.CLOSED / OPEN / HALF_OPEN / ...
+breaker.snapshot()  # WindowSnapshot: total_calls, failed_calls, slow_calls,
+# .failure_rate, .slow_call_rate
 ```
 
 ## Next steps
