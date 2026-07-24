@@ -114,6 +114,7 @@ function; the instance is also an async context manager:
 async def fetch(url: str) -> bytes:
     return await client.get(url)
 
+
 result = await breaker.call(client.get, url)
 
 async with breaker:
@@ -137,9 +138,9 @@ except CircuitOpenError as exc:
 ## Inspect state
 
 ```python
-breaker.state            # State.CLOSED / OPEN / HALF_OPEN / ...
-breaker.snapshot()       # WindowSnapshot: total_calls, failed_calls, slow_calls,
-                         # .failure_rate, .slow_call_rate
+breaker.state  # State.CLOSED / OPEN / HALF_OPEN / ...
+breaker.snapshot()  # WindowSnapshot: total_calls, failed_calls, slow_calls,
+# .failure_rate, .slow_call_rate
 ```
 
 ## Next steps
@@ -1283,7 +1284,7 @@ from interlock import Config, Registry
 
 registry = Registry(config=Config(minimum_number_of_calls=20))
 
-payments = registry.get('payments')                       # shared default
+payments = registry.get('payments')  # shared default
 search = registry.get('search', config=Config(window_size=500))  # per-name override
 ```
 
@@ -1366,9 +1367,9 @@ Three special states are set manually and stay until you `reset()`:
 | `breaker.reset()` | `CLOSED` | Return to closed with a fresh, empty window. |
 
 ```python
-breaker.metrics_only()   # observe in production without enforcing
+breaker.metrics_only()  # observe in production without enforcing
 # ... inspect breaker.snapshot() until thresholds look right ...
-breaker.reset()          # start enforcing with a clean window
+breaker.reset()  # start enforcing with a clean window
 ```
 
 ### `METRICS_ONLY` — safe rollout
@@ -1410,7 +1411,7 @@ value is a success:
 ```python
 from interlock import CircuitBreaker
 
-breaker = CircuitBreaker(name='svc')   # DefaultFailureClassifier
+breaker = CircuitBreaker(name='svc')  # DefaultFailureClassifier
 ```
 
 This is right for code that signals errors by raising. It is *not* enough when
@@ -1426,14 +1427,16 @@ holds the return value.
 ```python
 from interlock import CircuitBreaker
 
+
 class StatusClassifier:
     def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
         if exception is not None:
             return True
         return getattr(result, 'status_code', 200) >= 500
 
+
 breaker = CircuitBreaker(name='api', classifier=StatusClassifier())
-result = breaker.call(client.get, url)   # a 503 response now counts as a failure
+result = breaker.call(client.get, url)  # a 503 response now counts as a failure
 ```
 
 Result-based classification needs the return value, so it works with the
@@ -1449,7 +1452,7 @@ Encode that by treating only the exceptions you care about as failures:
 class IgnoreNotFound:
     def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
         if isinstance(exception, NotFoundError):
-            return False          # expected, not a dependency problem
+            return False  # expected, not a dependency problem
         return exception is not None
 ```
 
@@ -1497,7 +1500,7 @@ Attach one per breaker, or share one across a `Registry`:
 
 ```python
 breaker = CircuitBreaker(name='payments', listener=my_listener)
-registry = Registry(listener=my_listener)   # every breaker reports here
+registry = Registry(listener=my_listener)  # every breaker reports here
 ```
 
 ## Logging (zero dependencies)
@@ -1579,7 +1582,7 @@ which a surrounding breaker records as a (slow) failure.
 from interlock import timeout
 
 async with timeout(2.0):
-    await client.get(url)        # raises CallTimeoutError after 2 seconds
+    await client.get(url)  # raises CallTimeoutError after 2 seconds
 ```
 
 ## Composing with a breaker
@@ -1592,6 +1595,7 @@ the `CallTimeoutError`:
 from interlock import CircuitBreaker, timeout
 
 breaker = CircuitBreaker(name='search')
+
 
 @breaker
 async def search(q: str) -> bytes:
@@ -1616,6 +1620,7 @@ rather than a block:
 from interlock import CircuitBreaker, sync_timeout
 
 breaker = CircuitBreaker(name='search')
+
 
 @breaker
 @sync_timeout(2.0)
@@ -1776,7 +1781,7 @@ wait strategies as a layer, so the manual recipe becomes::
 ```python
 pipeline = (
     Pipeline.builder()
-    .retry(attempts=4)          # retry outside — the recommended order
+    .retry(attempts=4)  # retry outside — the recommended order
     .circuit_breaker(breaker)
     .timeout(2.0)
     .build()
@@ -1809,10 +1814,10 @@ breaker = CircuitBreaker(name='recommendations')
 pipeline = (
     Pipeline.builder()
     .fallback(lambda exc: [], on=(CircuitOpenError,))  # outermost
-    .retry(attempts=4)                                 # requires interlock-cb[tenacity]
+    .retry(attempts=4)  # requires interlock-cb[tenacity]
     .circuit_breaker(breaker)
     .bulkhead(8)
-    .timeout(2.0)                                      # innermost
+    .timeout(2.0)  # innermost
     .build()
 )
 
@@ -2182,9 +2187,7 @@ async def list_orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) ->
 
 
 @app.get('/orders/{order_id}')
-async def get_order(
-    order_id: int, breaker: Annotated[CircuitBreaker, Depends(orders_db)]
-) -> dict:
+async def get_order(order_id: int, breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> dict:
     return await breaker.call(fetch_order, order_id)
 ```
 
@@ -2202,8 +2205,7 @@ from interlock import CircuitOpenError
 
 
 @app.exception_handler(CircuitOpenError)
-async def on_open(request: Request, exc: CircuitOpenError) -> Response:
-    ...
+async def on_open(request: Request, exc: CircuitOpenError) -> Response: ...
 ```
 
 ---
@@ -2312,8 +2314,7 @@ from litestar import Request, Response
 from interlock import CircuitOpenError
 
 
-def on_open(request: Request, exc: CircuitOpenError) -> Response[dict[str, str]]:
-    ...
+def on_open(request: Request, exc: CircuitOpenError) -> Response[dict[str, str]]: ...
 
 
 app = Litestar(..., exception_handlers={CircuitOpenError: on_open})
@@ -2796,7 +2797,7 @@ from interlock.integrations.tenacity import RetryStrategy
 
 pipeline = (
     Pipeline.builder()
-    .retry(attempts=4)              # this step builds a RetryStrategy
+    .retry(attempts=4)  # this step builds a RetryStrategy
     .circuit_breaker(breaker)
     .timeout(2.0)
     .build()
@@ -2937,11 +2938,11 @@ Both edges are observable through the listener:
 
 ```python
 class StorageWatch:
-    def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
-        ...  # alert: running on local state
+    def on_storage_degraded(
+        self, *, name: str, error: BaseException
+    ) -> None: ...  # alert: running on local state
 
-    def on_storage_recovered(self, *, name: str) -> None:
-        ...  # back to coordinated state
+    def on_storage_recovered(self, *, name: str) -> None: ...  # back to coordinated state
 ```
 
 `LoggingEventListener` logs degradation at `WARNING` and recovery at `INFO`;
@@ -2958,9 +2959,9 @@ storage-agnostic:
 RedisStorage(
     client,
     key_prefix='interlock:cb:',  # hash key namespace
-    state_ttl=300.0,             # key lifetime (s); refreshed on every write
-    poll_interval=1.0,           # cache refresh cadence (s)
-    retry_backoff=5.0,           # local-only time after a storage failure (s)
+    state_ttl=300.0,  # key lifetime (s); refreshed on every write
+    poll_interval=1.0,  # cache refresh cadence (s)
+    retry_backoff=5.0,  # local-only time after a storage failure (s)
 )
 ```
 
@@ -3149,9 +3150,11 @@ Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
 ## `timeout` / `sync_timeout`
 
 ```python
-async with timeout(seconds): ...   # async block
+async with timeout(seconds):
+    ...  # async block
 
-@sync_timeout(seconds)             # synchronous callable
+
+@sync_timeout(seconds)  # synchronous callable
 def work(): ...
 ```
 
