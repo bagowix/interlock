@@ -37,8 +37,8 @@ _PERMIT_ALL = frozenset({State.CLOSED, State.DISABLED, State.METRICS_ONLY})
 class StateMachine:
     """Owns breaker state and drives transitions from recorded outcomes.
 
-    Not thread-safe on its own: the call layer serialises ``acquire`` and
-    ``record`` under a single lock. Time is read only through the injected
+    Not thread-safe on its own: the call layer serialises ``acquire``, ``record``,
+    and ``snapshot`` under a single lock. Time is read only through the injected
     ``Clock``.
     """
 

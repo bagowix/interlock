@@ -8,6 +8,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `CircuitBreaker.snapshot()` now reads the sliding window under the engine
+  lock, so concurrent call settlement cannot expose mixed counters from a
+  partially completed update. The count-based snapshot path remains O(1).
 - Local manual controls now take precedence over shared state for coordinated
   breakers. `force_open()` rejects locally, while `disable()` and
   `metrics_only()` admit locally without consuming a shared `HALF_OPEN` probe.

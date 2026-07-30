@@ -3095,7 +3095,8 @@ A named breaker for sync and async callables.
 - **Use as** a decorator (`@breaker`), a sync/async context manager
   (`with` / `async with`), or `breaker.call(fn, *args, **kwargs)`.
 - **Properties:** `name: str`, `state: State`.
-- **`snapshot() -> WindowSnapshot`** — current window aggregates.
+- **`snapshot() -> WindowSnapshot`** — current, self-consistent window aggregates;
+  concurrent call settlement cannot expose a partially updated window.
 - **Manual control:** `reset()`, `force_open()`, `disable()`, `metrics_only()`.
 - **`storage`** — optional shared backend (`Storage` or `AsyncStorage`) for
   coordinated state across instances; see the
