@@ -101,6 +101,15 @@ of a round, the deciding instance applies the same thresholds as the local
 state machine and writes the transition guarded by a version check, so a
 delayed decision can never overwrite a newer state.
 
+## Manual controls
+
+Manual controls are local to one process and take precedence over Redis while
+they are active. `force_open()` rejects every local call; `disable()` and
+`metrics_only()` admit local calls without consuming a Redis HALF_OPEN probe.
+`reset()` clears the local override and local metrics, but does not reset Redis
+for the fleet: the breaker immediately resumes its cached shared `OPEN` or
+`HALF_OPEN` state.
+
 ## Degradation: Redis down ≠ breaker down
 
 A storage error never reaches your calls. On the first failure the breaker

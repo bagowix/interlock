@@ -66,7 +66,7 @@ Three special states are set manually and stay until you `reset()`:
 | `breaker.force_open()` | `FORCED_OPEN` | Reject all traffic regardless of metrics. |
 | `breaker.disable()` | `DISABLED` | Admit all traffic, record nothing — the breaker is a no-op. |
 | `breaker.metrics_only()` | `METRICS_ONLY` | Admit all traffic, record metrics, but never trip. |
-| `breaker.reset()` | `CLOSED` | Return to closed with a fresh, empty window. |
+| `breaker.reset()` | `CLOSED` | Return to closed with a fresh, empty window. In coordinated mode, resume the cached shared state instead. |
 
 ```python
 breaker.metrics_only()  # observe in production without enforcing
@@ -89,6 +89,12 @@ admission everywhere, and the HALF_OPEN probe budget is shared globally.
 `breaker.state` then reports the effective state — the shared one when it
 governs admission, the local one otherwise (including while the storage is
 unreachable).
+
+Local operator overrides always take precedence over a healthy shared view:
+`force_open()` rejects locally, while `disable()` and `metrics_only()` admit
+locally without claiming a shared HALF_OPEN probe. `reset()` clears that local
+override and freshens local metrics; it does not change the cluster. The
+instance immediately resumes the cached shared `OPEN` or `HALF_OPEN` state.
 
 ## Observing transitions
 

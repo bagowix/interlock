@@ -42,6 +42,7 @@ _OUTCOME_BY_FLAGS = {
 
 # Shared states that override local admission (a shared CLOSED defers to local).
 _SHARED_AUTHORITATIVE = frozenset({State.OPEN, State.HALF_OPEN})
+_MANUAL_STATES = frozenset({State.FORCED_OPEN, State.DISABLED, State.METRICS_ONLY})
 
 
 class _NoopListener:
@@ -146,9 +147,9 @@ class Engine:
     def state(self) -> State:
         """The breaker's effective lifecycle state.
 
-        In coordinated mode a shared OPEN/HALF_OPEN overrides the local state
-        (it governs admission); otherwise — including while the storage is
-        degraded — the local state machine's state is reported.
+        A local manual override always governs admission. Otherwise, in
+        coordinated mode a shared OPEN/HALF_OPEN overrides the local state;
+        while storage is degraded the local state is reported.
         """
         with self._lock:
             return self._effective_state_locked()
@@ -254,7 +255,7 @@ class Engine:
         self._settle(result=None, exception=exception, start=start, admission=admission)
 
     def reset(self) -> None:
-        """Return to ``CLOSED`` with a fresh window, discarding past metrics."""
+        """Clear local control and metrics, then resume the shared state if present."""
         with self._lock:
             effective_before = self._effective_state_locked()
             before = self._machine.state
@@ -339,6 +340,8 @@ class Engine:
         admitted there, and local state must not overrule a coordinated trip.
         """
         with self._lock:
+            if self._machine.state in _MANUAL_STATES:
+                return None
             view = self._shared_view
             if view is None or self._storage_degraded:
                 return None
@@ -430,6 +433,9 @@ class Engine:
 
     def _effective_state_locked(self) -> State:
         """The state that governs admission; caller must hold ``self._lock``."""
+        if self._machine.state in _MANUAL_STATES:
+            return self._machine.state
+
         view = self._shared_view
         if view is not None and not self._storage_degraded and view.state in _SHARED_AUTHORITATIVE:
             return view.state

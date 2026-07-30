@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Local manual controls now take precedence over shared state for coordinated
+  breakers. `force_open()` rejects locally, while `disable()` and
+  `metrics_only()` admit locally without consuming a shared `HALF_OPEN` probe.
+  `reset()` clears only local control and metrics, then resumes the cached
+  shared state rather than resetting the cluster.
+
 ## [2.1.2] - 2026-07-14
 
 ### Fixed

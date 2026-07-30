@@ -9,6 +9,7 @@ ticks run via ``poll_once()``, and fire-and-forget writes are awaited with
 import asyncio
 import gc
 import weakref
+from typing import cast
 
 import pytest
 
@@ -23,6 +24,7 @@ from interlock._coordination import (
     _sync_lane_tick,
 )
 from interlock.errors import InterlockError
+from interlock.protocols import AsyncStorage, EventListener, Storage
 from interlock.shared import ProbeLease, SharedState
 
 NAME = 'svc'
@@ -112,11 +114,15 @@ class FlakyStorage:
 def _breaker(
     config: Config,
     fake_clock: FakeClock,
-    storage: object,
+    storage: Storage | AsyncStorage,
     listener: RecordingListener | None = None,
 ) -> CircuitBreaker:
     return CircuitBreaker(
-        name=NAME, config=config, clock=fake_clock, storage=storage, listener=listener
+        name=NAME,
+        config=config,
+        clock=fake_clock,
+        storage=storage,
+        listener=cast('EventListener | None', listener),
     )
 
 
@@ -189,6 +195,88 @@ def test__half_open__probe_budget_is_global(
         b.call(lambda: 'probe-c')  # budget exhausted across instances
 
 
+def _adopt_shared_state(
+    breaker: CircuitBreaker, storage: InMemoryStorage, fake_clock: FakeClock, state: State
+) -> None:
+    storage.trip_open(name=NAME, ttl=60.0)
+    coordinator = _coordinator(breaker)
+    coordinator.poll_once()
+    if state is State.HALF_OPEN:
+        fake_clock.advance(WAIT)
+        coordinator.poll_once()
+
+
+@pytest.mark.parametrize('shared_state', [State.OPEN, State.HALF_OPEN])
+@pytest.mark.parametrize(
+    'manual_control',
+    [
+        ('force_open', State.FORCED_OPEN, False),
+        ('disable', State.DISABLED, True),
+        ('metrics_only', State.METRICS_ONLY, True),
+    ],
+)
+def test__manual_control__shared_state__governs_local_admission_without_leasing_probe(
+    config: Config,
+    fake_clock: FakeClock,
+    storage: InMemoryStorage,
+    shared_state: State,
+    manual_control: tuple[str, State, bool],
+) -> None:
+    control, expected_state, admitted = manual_control
+    listener = RecordingListener()
+    breaker = _breaker(config, fake_clock, storage, listener)
+    _adopt_shared_state(breaker, storage, fake_clock, shared_state)
+    listener.state_changes.clear()
+
+    getattr(breaker, control)()
+
+    assert breaker.state is expected_state
+    assert listener.state_changes == [(shared_state, expected_state)]
+    if admitted:
+        assert breaker.call(lambda: 'local') == 'local'
+    else:
+        with pytest.raises(CircuitOpenError):
+            breaker.call(lambda: 'must not run')
+
+    shared = storage.read(NAME)
+    assert shared is not None
+    expected_remaining = (
+        config.permitted_calls_in_half_open if shared_state is State.HALF_OPEN else 0
+    )
+    assert shared.probes_remaining == expected_remaining
+
+
+@pytest.mark.parametrize('shared_state', [State.OPEN, State.HALF_OPEN])
+def test__reset__shared_state__resumes_shared_admission(
+    config: Config,
+    fake_clock: FakeClock,
+    storage: InMemoryStorage,
+    shared_state: State,
+) -> None:
+    listener = RecordingListener()
+    breaker = _breaker(config, fake_clock, storage, listener)
+    _adopt_shared_state(breaker, storage, fake_clock, shared_state)
+    breaker.force_open()
+    listener.state_changes.clear()
+
+    breaker.reset()
+
+    assert breaker.state is shared_state
+    assert listener.state_changes == [(State.FORCED_OPEN, shared_state)]
+    assert listener.resets == 1
+    if shared_state is State.OPEN:
+        with pytest.raises(CircuitOpenError):
+            breaker.call(lambda: 'must not run')
+        return
+
+    assert breaker.call(lambda: 'probe') == 'probe'
+    _coordinator(breaker).wait_idle()
+    shared = storage.read(NAME)
+    assert shared is not None
+    assert shared.probes_remaining == config.permitted_calls_in_half_open - 1
+    assert shared.probes_completed == 1
+
+
 def test__successful_probe_round__closes_all_instances(
     config: Config, fake_clock: FakeClock, storage: InMemoryStorage
 ) -> None:
@@ -251,9 +339,6 @@ def test__registry__passes_storage_through(
     assert shared.state is State.OPEN
 
 
-# --- T3.1/T3.2/T3.3: degradation, observability, recovery ---
-
-
 def test__storage_failure__degrades_to_local_state(
     config: Config, fake_clock: FakeClock, storage: InMemoryStorage
 ) -> None:
@@ -264,7 +349,8 @@ def test__storage_failure__degrades_to_local_state(
     _trip(tripper)
     _coordinator(tripper).wait_idle()
     _coordinator(follower).poll_once()
-    assert follower.state is State.OPEN  # shared OPEN adopted
+    state = follower.state
+    assert state is State.OPEN  # shared OPEN adopted
 
     flaky.fail = True
     fake_clock.advance(flaky.retry_backoff)
@@ -340,7 +426,7 @@ def test__recovery__emits_event_and_shared_becomes_authoritative(
     _coordinator(breaker).poll_once()
 
     assert listener.recovered == 1
-    assert breaker.state is State.OPEN  # shared OPEN authoritative again (T3.3)
+    assert breaker.state is State.OPEN
     with pytest.raises(CircuitOpenError):
         breaker.call(lambda: 'nope')
 
@@ -440,11 +526,13 @@ async def test__async__coordinated_trip_and_recovery(config: Config, fake_clock:
     shared = await astorage.read(NAME)
     assert shared is not None
     assert shared.state is State.OPEN
-    assert breaker.state is State.OPEN
+    state = breaker.state
+    assert state is State.OPEN
 
     fake_clock.advance(WAIT)
     await coordinator.poll_once()
-    assert breaker.state is State.HALF_OPEN
+    state = breaker.state
+    assert state is State.HALF_OPEN
 
     assert await breaker.call(ok) == 'ok'
     await coordinator.wait_idle()
@@ -474,6 +562,93 @@ async def test__async__lease_rejection_when_budget_exhausted(
     with pytest.raises(CircuitOpenError):
         async with breaker:
             pass
+
+
+async def _adopt_async_shared_state(
+    breaker: CircuitBreaker,
+    storage: AsyncInMemoryStorage,
+    fake_clock: FakeClock,
+    state: State,
+) -> None:
+    await storage.trip_open(name=NAME, ttl=60.0)
+    coordinator = _async_coordinator(breaker)
+    await coordinator.poll_once()
+    if state is State.HALF_OPEN:
+        fake_clock.advance(WAIT)
+        await coordinator.poll_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('shared_state', [State.OPEN, State.HALF_OPEN])
+@pytest.mark.parametrize(
+    'manual_control',
+    [
+        ('force_open', State.FORCED_OPEN, False),
+        ('disable', State.DISABLED, True),
+        ('metrics_only', State.METRICS_ONLY, True),
+    ],
+)
+async def test__async__manual_control__shared_state__governs_local_admission_without_leasing_probe(
+    config: Config,
+    fake_clock: FakeClock,
+    shared_state: State,
+    manual_control: tuple[str, State, bool],
+) -> None:
+    control, expected_state, admitted = manual_control
+    storage = AsyncInMemoryStorage(clock=fake_clock)
+    storage.poll_interval = 3600.0
+    listener = RecordingListener()
+    breaker = _breaker(config, fake_clock, storage, listener)
+    await _adopt_async_shared_state(breaker, storage, fake_clock, shared_state)
+    listener.state_changes.clear()
+
+    getattr(breaker, control)()
+
+    assert breaker.state is expected_state
+    assert listener.state_changes == [(shared_state, expected_state)]
+    if admitted:
+        assert await breaker.call(_async_ok) == 'ok'
+    else:
+        with pytest.raises(CircuitOpenError):
+            await breaker.call(_async_ok)
+
+    shared = await storage.read(NAME)
+    assert shared is not None
+    expected_remaining = (
+        config.permitted_calls_in_half_open if shared_state is State.HALF_OPEN else 0
+    )
+    assert shared.probes_remaining == expected_remaining
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('shared_state', [State.OPEN, State.HALF_OPEN])
+async def test__async__reset__shared_state__resumes_shared_admission(
+    config: Config, fake_clock: FakeClock, shared_state: State
+) -> None:
+    storage = AsyncInMemoryStorage(clock=fake_clock)
+    storage.poll_interval = 3600.0
+    listener = RecordingListener()
+    breaker = _breaker(config, fake_clock, storage, listener)
+    await _adopt_async_shared_state(breaker, storage, fake_clock, shared_state)
+    breaker.force_open()
+    listener.state_changes.clear()
+
+    breaker.reset()
+
+    assert breaker.state is shared_state
+    assert listener.state_changes == [(State.FORCED_OPEN, shared_state)]
+    assert listener.resets == 1
+    if shared_state is State.OPEN:
+        with pytest.raises(CircuitOpenError):
+            await breaker.call(_async_ok)
+        return
+
+    assert await breaker.call(_async_ok) == 'ok'
+    await _async_coordinator(breaker).wait_idle()
+    shared = await storage.read(NAME)
+    assert shared is not None
+    assert shared.probes_remaining == config.permitted_calls_in_half_open - 1
+    assert shared.probes_completed == 1
 
 
 class AsyncFlakyStorage:
