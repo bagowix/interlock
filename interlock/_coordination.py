@@ -12,12 +12,11 @@ is the plumbing between the two, built so the protected path stays fast:
   decision) are fire-and-forget: they run on a background *lane* (one daemon
   thread for a sync storage, one asyncio task for an async one) that doubles as
   the poller refreshing the cached view every ``poll_interval``.
-- Storage failures never reach the protected path (T3.1): any storage error
+- Storage failures never reach the protected path: any storage error
   flips the coordinator into degraded mode — the breaker runs on local state,
   writes are dropped, and the lane keeps retrying after ``retry_backoff``
   seconds. Degradation and recovery surface through the engine's listener
-  callbacks (T3.2); on recovery the shared view becomes authoritative again
-  (T3.3).
+  callbacks; on recovery the shared view becomes authoritative again.
 
 Tuning knobs are read from optional attributes on the storage object
 (``state_ttl``, ``poll_interval``, ``retry_backoff``) with conservative

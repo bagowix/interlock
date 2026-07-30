@@ -93,7 +93,7 @@ class CircuitBreaker:
         return self._engine.snapshot()
 
     def reset(self) -> None:
-        """Return the breaker to ``CLOSED`` with a fresh window."""
+        """Clear local control and metrics, then resume the shared state if present."""
         self._engine.reset()
 
     def force_open(self) -> None:

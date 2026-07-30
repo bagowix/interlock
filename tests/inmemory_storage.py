@@ -3,7 +3,8 @@
 Not shipped: a deterministic double that mirrors the atomic semantics the Redis
 backend will provide via Lua, so the contract suite (and later engine-coordination
 tests) run without a live server. Time comes from an injected ``Clock``; ``ttl``
-is accepted but inert (key expiry is a Redis concern, covered by T2.4).
+is accepted but inert (key expiry is a Redis concern covered by Redis integration
+tests).
 """
 
 import dataclasses

@@ -4,7 +4,7 @@ By default these run against in-process ``fakeredis`` (Lua-capable), so
 ``uv run pytest`` needs no server. Set ``INTERLOCK_TEST_REDIS_URL`` to exercise
 a real server (Redis or Valkey) instead — CI does this, and it is the
 authoritative check for atomicity. Tests marked ``requires_real_redis`` (the
-concurrency ones, T2.3) run only against a real server, whose single-threaded
+concurrency ones) run only against a real server, whose single-threaded
 execution fakeredis does not faithfully reproduce.
 
 Shared time is the server's ``TIME``: tests that depend on elapse use a tiny

@@ -1,8 +1,8 @@
 """Behavioural contract for the ``Storage`` / ``AsyncStorage`` protocols.
 
 These tests pin the semantics every storage backend must uphold, exercised here
-against the in-memory reference double. When ``RedisStorage`` lands (T2) the same
-expectations apply; the suite is the portable definition of "conforms".
+against the in-memory reference double. The suite is the portable definition of
+"conforms" for every backend.
 """
 
 import pytest
