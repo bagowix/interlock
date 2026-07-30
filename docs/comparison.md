@@ -35,7 +35,7 @@ choice.
 | OpenTelemetry metrics | ✅ | — | — | — | — |
 | Operator overrides (force-open / disable / shadow mode) | ✅ | — | — | — | — |
 | Years of production use | new | ✅ | ✅ | ✅ | ✅ |
-| Latest release (as of July 2026) | 1.3.0 · 2026 | 1.4.1 · 2025 | 2.1.3 | 1.2.0 · 2021 | 3.0.1 · 2024 |
+| Latest release (as of July 2026) | 2.1.3 · 2026 | 1.4.1 · 2025 | 2.1.3 | 1.2.0 · 2021 | 3.0.1 · 2024 |
 | Python | ≥ 3.11 | ≥ 3.9 | ≥ 3.8 | ≥ 3.6 | ≥ 3.9 |
 
 <sub>Compared against pybreaker 1.4.1, circuitbreaker 2.1.3, aiobreaker 1.2.0

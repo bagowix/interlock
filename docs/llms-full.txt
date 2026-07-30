@@ -750,7 +750,7 @@ choice.
 | OpenTelemetry metrics | ✅ | — | — | — | — |
 | Operator overrides (force-open / disable / shadow mode) | ✅ | — | — | — | — |
 | Years of production use | new | ✅ | ✅ | ✅ | ✅ |
-| Latest release (as of July 2026) | 1.3.0 · 2026 | 1.4.1 · 2025 | 2.1.3 | 1.2.0 · 2021 | 3.0.1 · 2024 |
+| Latest release (as of July 2026) | 2.1.3 · 2026 | 1.4.1 · 2025 | 2.1.3 | 1.2.0 · 2021 | 3.0.1 · 2024 |
 | Python | ≥ 3.11 | ≥ 3.9 | ≥ 3.8 | ≥ 3.6 | ≥ 3.9 |
 
 <sub>Compared against pybreaker 1.4.1, circuitbreaker 2.1.3, aiobreaker 1.2.0
@@ -1364,7 +1364,7 @@ Three special states are set manually and stay until you `reset()`:
 | `breaker.force_open()` | `FORCED_OPEN` | Reject all traffic regardless of metrics. |
 | `breaker.disable()` | `DISABLED` | Admit all traffic, record nothing — the breaker is a no-op. |
 | `breaker.metrics_only()` | `METRICS_ONLY` | Admit all traffic, record metrics, but never trip. |
-| `breaker.reset()` | `CLOSED` | Return to closed with a fresh, empty window. |
+| `breaker.reset()` | `CLOSED` | Return to closed with a fresh, empty window. In coordinated mode, resume the cached shared state instead. |
 
 ```python
 breaker.metrics_only()  # observe in production without enforcing
@@ -1387,6 +1387,12 @@ admission everywhere, and the HALF_OPEN probe budget is shared globally.
 `breaker.state` then reports the effective state — the shared one when it
 governs admission, the local one otherwise (including while the storage is
 unreachable).
+
+Local operator overrides always take precedence over a healthy shared view:
+`force_open()` rejects locally, while `disable()` and `metrics_only()` admit
+locally without claiming a shared HALF_OPEN probe. `reset()` clears that local
+override and freshens local metrics; it does not change the cluster. The
+instance immediately resumes the cached shared `OPEN` or `HALF_OPEN` state.
 
 ## Observing transitions
 
@@ -2924,6 +2930,15 @@ server's* clock, since instance clocks are not comparable. After the last probe
 of a round, the deciding instance applies the same thresholds as the local
 state machine and writes the transition guarded by a version check, so a
 delayed decision can never overwrite a newer state.
+
+## Manual controls
+
+Manual controls are local to one process and take precedence over Redis while
+they are active. `force_open()` rejects every local call; `disable()` and
+`metrics_only()` admit local calls without consuming a Redis HALF_OPEN probe.
+`reset()` clears the local override and local metrics, but does not reset Redis
+for the fleet: the breaker immediately resumes its cached shared `OPEN` or
+`HALF_OPEN` state.
 
 ## Degradation: Redis down ≠ breaker down
 
