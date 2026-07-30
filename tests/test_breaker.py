@@ -6,6 +6,47 @@ import pytest
 
 from conftest import FakeClock, RecordingListener
 from interlock import CircuitBreaker, CircuitOpenError, Config, State
+from interlock.outcome import Outcome
+from interlock.window import WindowSnapshot
+
+
+class _PausingWindow:
+    def __init__(self) -> None:
+        self.update_started = threading.Event()
+        self.allow_update = threading.Event()
+        self._total = 0
+        self._failed = 0
+        self._slow = 0
+
+    def record(self, outcome: Outcome) -> None:
+        self._total += 1
+        self.update_started.set()
+        if not self.allow_update.wait(5.0):
+            raise AssertionError('window update was not released')
+        self._failed += outcome.is_failure
+        self._slow += outcome.is_slow
+
+    def snapshot(self) -> WindowSnapshot:
+        return WindowSnapshot(
+            total_calls=self._total,
+            failed_calls=self._failed,
+            slow_calls=self._slow,
+        )
+
+
+class _ObservedLock:
+    def __init__(self) -> None:
+        self.contention_seen = threading.Event()
+        self._lock = threading.Lock()
+
+    def __enter__(self) -> None:
+        if self._lock.acquire(blocking=False):
+            return
+        self.contention_seen.set()
+        self._lock.acquire()
+
+    def __exit__(self, *_args: object) -> None:
+        self._lock.release()
 
 
 @pytest.fixture
@@ -111,6 +152,41 @@ def test__context_manager__success__records_call(breaker: CircuitBreaker) -> Non
     snapshot = breaker.snapshot()
     assert snapshot.total_calls == 1
     assert snapshot.failed_calls == 0
+
+
+def test__snapshot__concurrent_settlement__waits_for_complete_window_update(
+    breaker: CircuitBreaker, fake_clock: FakeClock
+) -> None:
+    window = _PausingWindow()
+    lock = _ObservedLock()
+    breaker._engine._machine._window = window
+    breaker._engine._lock = lock
+
+    def slow_call() -> None:
+        fake_clock.advance(2.0)
+
+    call_thread = threading.Thread(target=breaker.call, args=(slow_call,))
+    call_thread.start()
+    assert window.update_started.wait(5.0)
+
+    snapshots: list[WindowSnapshot] = []
+
+    def take_snapshot() -> None:
+        snapshots.append(breaker.snapshot())
+
+    snapshot_thread = threading.Thread(target=take_snapshot)
+    snapshot_thread.start()
+    try:
+        assert lock.contention_seen.wait(5.0)
+        assert snapshots == []
+    finally:
+        window.allow_update.set()
+        call_thread.join(5.0)
+        snapshot_thread.join(5.0)
+
+    assert not call_thread.is_alive()
+    assert not snapshot_thread.is_alive()
+    assert snapshots == [WindowSnapshot(total_calls=1, failed_calls=0, slow_calls=1)]
 
 
 def test__context_manager__failure__records_and_propagates(breaker: CircuitBreaker) -> None:

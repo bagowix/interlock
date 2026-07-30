@@ -1,10 +1,11 @@
 """The ``call()`` primitive: detect, dispatch, time, classify, record.
 
 This is the I/O-aware layer wrapping the I/O-free ``StateMachine``. It owns a
-single ``threading.Lock`` and holds it only around the two await-free critical
-sections — admitting a call (``acquire``) and recording its outcome
-(``record``). The protected callable runs *outside* the lock, so a slow
-downstream never serialises throughput and a re-entrant call cannot deadlock.
+single ``threading.Lock`` and holds it only around await-free state-machine
+access — admitting a call (``acquire``), recording its outcome (``record``),
+or reading its window (``snapshot``). The protected callable runs *outside*
+the lock, so a slow downstream never serialises throughput and a re-entrant
+call cannot deadlock.
 
 A single instance serves both sync and async callers: ``call`` detects the
 callable's nature via ``is_async_callable`` and dispatches to ``call_sync`` or
@@ -156,7 +157,8 @@ class Engine:
 
     def snapshot(self) -> WindowSnapshot:
         """An immutable view of the current window aggregates."""
-        return self._machine.snapshot()
+        with self._lock:
+            return self._machine.snapshot()
 
     def call(
         self,
