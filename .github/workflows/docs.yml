@@ -28,7 +28,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Build site
-        run: uv run zensical build
+        run: uv run zensical build --strict
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

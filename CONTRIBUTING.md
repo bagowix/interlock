@@ -24,6 +24,7 @@ uv run ruff check             # linting
 uv run mypy                   # type checking
 uv run pyright                # type checking (strict)
 uv run pytest --cov           # tests with coverage
+uv run zensical build --strict # docs, including broken links
 ```
 
 The pre-commit hooks run the fast subset automatically:
