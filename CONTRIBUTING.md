@@ -46,6 +46,23 @@ INTERLOCK_TEST_REDIS_URL=redis://localhost:6379/0 uv run pytest
 
 CI runs both.
 
+### Benchmarks
+
+`benchmarks/` holds the performance suite, measured by
+[CodSpeed](https://codspeed.io). It lives outside `testpaths`, so `uv run pytest`
+never collects it; run it explicitly. `-n 0` opts out of the xdist default —
+measurement needs a single process:
+
+```bash
+uv run pytest benchmarks -n 0                                   # smoke run
+codspeed run --mode simulation -- uv run pytest benchmarks --codspeed -n 0
+```
+
+Every pull request runs the same suite through
+`.github/workflows/codspeed.yml`, which reports the difference against `main`.
+Add a benchmark when you touch a hot path: the call paths, the state machine,
+the sliding windows or the pipeline.
+
 ## Expectations
 
 - **Tests first.** New behaviour and bug fixes come with tests; the suite keeps
