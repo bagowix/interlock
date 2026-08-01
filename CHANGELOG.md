@@ -52,6 +52,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`reset()` does). The weakref-based collection path stays as the safety net
   for abandoned breakers.
 
+- **pyrefly** joins mypy and pyright as a third strict type checker in CI and in
+  the pre-commit hooks. Three independent implementations of the same type
+  system disagree in the corners, and the corners are exactly where a
+  signature-preserving decorator lives; a check the other two miss should fail
+  before a release, not in a user's editor. The whole package is clean under its
+  `strict` preset. `missing-override-decorator` is the one error kind turned off:
+  `typing.override` is 3.12+ and the core carries no `typing_extensions`
+  dependency to backport it.
+
+### Changed
+
+- Coverage reporting moved to **Codecov**. `pytest --cov` writes
+  `coverage.xml` plus a JUnit report and CI uploads both, so a PR now shows the
+  per-file coverage diff and the failing tests themselves rather than a single
+  total. The 100% gate is unchanged and still enforced by pytest
+  (`fail_under` in `pyproject.toml`); the Codecov statuses mirror it. This
+  replaces `py-cov-action/python-coverage-comment-action` and the badge branch
+  it maintained — the CI job no longer needs `contents: write` or
+  `pull-requests: write`.
+
 ### Fixed
 
 - A coordinator lane that exited while an op was in flight left the work queue

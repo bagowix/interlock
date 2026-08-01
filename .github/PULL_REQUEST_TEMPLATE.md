@@ -6,7 +6,7 @@
 
 - [ ] Tests added or updated (suite stays at 100% coverage)
 - [ ] `uv run ruff format --check` and `uv run ruff check` pass
-- [ ] `uv run mypy` and `uv run pyright` pass
+- [ ] `uv run mypy`, `uv run pyright` and `uv run pyrefly check` pass
 - [ ] Docs updated (`docs/`) for user-facing changes
 - [ ] `CHANGELOG.md` `[Unreleased]` updated
 - [ ] Commits follow Conventional Commits

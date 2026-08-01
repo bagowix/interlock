@@ -161,6 +161,17 @@ include = ["interlock", "tests/typing_surface.py"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
 
+[tool.pyrefly]
+project-includes = ["interlock", "tests/typing_surface.py"]
+python-version = "3.11"
+preset = "strict"
+
+[tool.pyrefly.errors]
+# typing.override is 3.12+, and the core carries no typing_extensions
+# dependency to backport it — the integrations' transport overrides cannot be
+# decorated while 3.11 is supported.
+missing-override-decorator = false
+
 [tool.pymarkdown]
 plugins.MD013.enabled = false   # line-length limit disabled
 plugins.MD029.style = "ordered" # consistent ordered list numbering
@@ -229,4 +240,5 @@ dev = [
     "httpx>=0.28.1",
     "pytest-xdist>=3.8.0",
     "pytest-codspeed>=5.0.3",
+    "pyrefly>=1.2.0",
 ]

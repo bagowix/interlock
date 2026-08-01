@@ -24,6 +24,7 @@ uv run ruff format --check    # formatting
 uv run ruff check             # linting
 uv run mypy                   # type checking
 uv run pyright                # type checking (strict)
+uv run pyrefly check          # type checking (strict, third opinion)
 uv run pytest --cov           # tests with coverage
 ```
 

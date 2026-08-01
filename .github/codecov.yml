@@ -1,0 +1,16 @@
+# The 100% gate is enforced by pytest itself (`fail_under` in pyproject.toml).
+# These statuses mirror it inside the PR so the gap is visible per-file before
+# the job turns red.
+coverage:
+  status:
+    project:
+      default:
+        target: 100%
+        threshold: 0%
+    patch:
+      default:
+        target: 100%
+
+comment:
+  layout: condensed_header, diff, files
+  require_changes: true
