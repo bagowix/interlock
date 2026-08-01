@@ -92,6 +92,7 @@ class Engine:
         self._last_failure: BaseException | None = None
         self._timer: threading.Timer | None = None
         self._timer_lock = threading.Lock()
+        self._closed = False
         self._shared_view: SharedState | None = None
         self._storage_degraded = False
         self._sync_coordinator: SyncCoordinator | None = None
@@ -255,6 +256,69 @@ class Engine:
         """Override to ``METRICS_ONLY``: admit all traffic, record but never trip."""
         self._override(self._machine.metrics_only)
 
+    def close(self) -> None:
+        """Stop background work: cancel the auto-transition timer, stop the lane.
+
+        Teardown, not a state change — the circuit is left exactly as it is
+        (``reset`` is what closes it). The breaker keeps serving calls on local
+        state afterwards; shutdown is terminal, so the lane never restarts and
+        later shared writes are dropped. Idempotent.
+
+        Raises:
+            InterlockError: If the breaker is coordinated through an async
+                storage; use ``aclose`` there.
+        """
+        self._require_sync_runtime()
+        self._shutdown_timer()
+        if self._sync_coordinator is not None:
+            self._sync_coordinator.shutdown()
+            self._detach_shared_view()
+
+    async def aclose(self) -> None:
+        """Stop background work; the async mirror of ``close``.
+
+        Raises:
+            InterlockError: If the breaker is coordinated through a sync
+                storage; use ``close`` there.
+        """
+        self._require_async_runtime()
+        self._shutdown_timer()
+        if self._async_coordinator is not None:
+            await self._async_coordinator.shutdown()
+            self._detach_shared_view()
+
+    def _detach_shared_view(self) -> None:
+        """Drop the cached shared view once its lane is gone.
+
+        Called only after the lane has been joined, so no in-flight write can
+        re-adopt a view. Nothing refreshes the cache any more, so keeping it
+        would pin the breaker in whatever a peer last published — a shared OPEN
+        would never expire. Local state takes over, exactly as when degraded.
+        """
+        with self._lock:
+            effective_before = self._effective_state_locked()
+            machine_state = self._machine.state
+            self._shared_view = None
+            effective_after = self._effective_state_locked()
+
+        self._emit_transitions(machine_state, machine_state, effective_before, effective_after)
+
+    def _require_sync_runtime(self) -> None:
+        if self._async_coordinator is not None:
+            msg = (
+                f'circuit {self._name!r} is coordinated through an async storage; '
+                f'only its async API may be used'
+            )
+            raise InterlockError(msg)
+
+    def _require_async_runtime(self) -> None:
+        if self._sync_coordinator is not None:
+            msg = (
+                f'circuit {self._name!r} is coordinated through a sync storage; '
+                f'only its sync API may be used'
+            )
+            raise InterlockError(msg)
+
     def _override(self, mutate: Callable[[], None]) -> None:
         with self._lock:
             effective_before = self._effective_state_locked()
@@ -272,12 +336,7 @@ class Engine:
             CircuitOpenError: If the breaker rejects the call.
             InterlockError: If the breaker is coordinated through an async storage.
         """
-        if self._async_coordinator is not None:
-            msg = (
-                f'circuit {self._name!r} is coordinated through an async storage; '
-                f'only its async API may be used'
-            )
-            raise InterlockError(msg)
+        self._require_sync_runtime()
 
         coordinator = self._sync_coordinator
         if coordinator is not None:
@@ -292,12 +351,7 @@ class Engine:
 
     async def _admit_async(self) -> Admission:
         """Admit one asynchronous call; the async mirror of ``_admit``."""
-        if self._sync_coordinator is not None:
-            msg = (
-                f'circuit {self._name!r} is coordinated through a sync storage; '
-                f'only its sync API may be used'
-            )
-            raise InterlockError(msg)
+        self._require_async_runtime()
 
         coordinator = self._async_coordinator
         if coordinator is not None:
@@ -514,6 +568,8 @@ class Engine:
         timer = threading.Timer(self._config.wait_duration_in_open, self._fire_auto_transition)
         timer.daemon = True
         with self._timer_lock:
+            if self._closed:
+                return  # torn down: never arm a timer nobody is left to cancel
             self._cancel_timer_locked()
             self._timer = timer
 
@@ -521,6 +577,12 @@ class Engine:
 
     def _cancel_auto_transition(self) -> None:
         with self._timer_lock:
+            self._cancel_timer_locked()
+
+    def _shutdown_timer(self) -> None:
+        """Cancel the pending timer and refuse to arm another one."""
+        with self._timer_lock:
+            self._closed = True
             self._cancel_timer_locked()
 
     def _cancel_timer_locked(self) -> None:

@@ -6,8 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `CircuitBreaker.close()` / `aclose()` and `Registry.close_all()` /
+  `aclose_all()` — a deterministic way to release a breaker's background work.
+  Until now a coordinated breaker's lane (a daemon thread for a sync storage,
+  an asyncio task for an async one) and the `auto_transition` timer ended only
+  when the object was garbage collected, so a service could not flush queued
+  shared writes, could not know when its threads were gone, and an async lane
+  outliving `asyncio.run()` produced "task was destroyed but it is pending".
+  `close()` drains the queued writes in order, wakes the lane instead of
+  waiting out `poll_interval`, joins it, and cancels the timer without arming
+  another. It is idempotent, safe to call from any thread, and terminal: the
+  lane never restarts, and afterwards the breaker keeps protecting calls on
+  local state while shared writes are dropped — the same behaviour as a
+  degraded storage. The cached shared view is dropped with the lane, since
+  nothing would refresh it and a peer's `OPEN` would otherwise never expire.
+  This is teardown, not a state change: `close()` does not close the circuit
+  (`reset()` does). The weakref-based collection path stays as the safety net
+  for abandoned breakers.
+
 ### Fixed
 
+- A coordinator lane that exited while an op was in flight left the work queue
+  permanently unfinished: the op was dequeued before the weak reference was
+  resolved, so a lane stopping on a collected coordinator never called
+  `task_done()` and a join on that queue could never return. Both lanes now
+  release the dequeued op on the drop path.
 - An `EventListener` that raises can no longer damage the breaker it observes.
   Hooks were invoked directly at every call site, so a bug in a listener —
   a metrics exporter, a logging handler, a custom sink — could replace a
