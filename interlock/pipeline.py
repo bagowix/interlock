@@ -33,6 +33,7 @@ from typing import (
 )
 
 from interlock._detect import is_async_callable
+from interlock._notify import notify
 from interlock._typing import AsyncCallable, P, R, SyncCallable
 from interlock.breaker import CircuitBreaker
 from interlock.errors import BulkheadFullError
@@ -55,15 +56,6 @@ __all__ = (
 
 T = TypeVar('T')
 F_co = TypeVar('F_co', covariant=True)
-
-
-def _notify(listener: EventListener | None, hook: str, **kwargs: object) -> None:
-    """Dispatch a pipeline hook via ``getattr`` so pre-2.0 listeners keep working."""
-    if listener is None:
-        return
-    method = getattr(listener, hook, None)
-    if callable(method):
-        method(**kwargs)
 
 
 @runtime_checkable
@@ -322,7 +314,7 @@ class BulkheadStrategy:
         else:
             acquired = self._sync_semaphore.acquire(blocking=False)
         if not acquired:
-            _notify(self._listener, 'on_bulkhead_rejected', name=self._name)
+            notify(self._listener, 'on_bulkhead_rejected', name=self._name)
             raise BulkheadFullError(self._max_concurrent, max_wait=self._max_wait)
 
         try:
@@ -340,7 +332,7 @@ class BulkheadStrategy:
             async with asyncio.timeout(self._max_wait):
                 await self._async_semaphore.acquire()
         except TimeoutError as exc:
-            _notify(self._listener, 'on_bulkhead_rejected', name=self._name)
+            notify(self._listener, 'on_bulkhead_rejected', name=self._name)
             raise BulkheadFullError(self._max_concurrent, max_wait=self._max_wait) from exc
 
         try:
@@ -406,7 +398,7 @@ class FallbackStrategy(Generic[F_co]):
         try:
             return call()
         except self._on as exc:
-            _notify(self._listener, 'on_fallback', name=self._name, error=exc)
+            notify(self._listener, 'on_fallback', name=self._name, error=exc)
             return self._fallback(exc)
 
     async def execute_async(self, call: Callable[[], Awaitable[T]]) -> T | F_co:
@@ -414,7 +406,7 @@ class FallbackStrategy(Generic[F_co]):
         try:
             return await call()
         except self._on as exc:
-            _notify(self._listener, 'on_fallback', name=self._name, error=exc)
+            notify(self._listener, 'on_fallback', name=self._name, error=exc)
             return self._fallback(exc)
 
 

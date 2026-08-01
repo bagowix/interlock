@@ -19,13 +19,46 @@ class EventListener(Protocol):
 ```
 
 Listeners are called **outside** the breaker's lock, after the protected call
-returns, so a slow listener never serialises throughput. Implementations must
-not raise back into the core.
+returns, so a slow listener never serialises throughput.
 
 The two storage hooks fire only for breakers coordinated through a shared
 [storage](../integrations/redis.md); the three pipeline hooks fire from
-[pipeline strategies](pipeline.md) given a `listener=`. All optional hooks
-are dispatched only if present — a listener without them keeps working.
+[pipeline strategies](pipeline.md) given a `listener=`. Every hook is
+dispatched only if present — a listener that defines just the ones it cares
+about keeps working.
+
+## Listener failures are isolated
+
+Observability is optional; the protected call is not. A listener runs on the
+breaker's own paths, so a bug in one — a metrics exporter with a stale label,
+a logging handler with a full queue — would otherwise become a new failure
+source. interlock guarantees it cannot:
+
+- an `Exception` raised by a hook is logged to the `interlock` logger at
+  `ERROR` (with the traceback) and then ignored;
+- the protected call keeps its result, and a failing call keeps *its own*
+  exception — a listener never masks the dependency's error;
+- state transitions, probe accounting and the coordinated-mode background lane
+  continue unaffected;
+- a raising hook is never reported as storage degradation.
+
+`BaseException` is **not** caught: `KeyboardInterrupt` and
+`asyncio.CancelledError` propagate from a hook exactly as they do everywhere
+else in interlock.
+
+This covers `EventListener` hooks only. User-supplied *policy* callbacks are
+part of the call's behaviour rather than observations of it, and keep raising
+as before: a [`FailureClassifier`](failure-classification.md), a
+[fallback](pipeline.md) function, a tenacity `before_sleep` hook.
+
+To be notified when your own listener misbehaves, watch the `interlock`
+logger:
+
+```python
+import logging
+
+logging.getLogger('interlock').setLevel(logging.ERROR)
+```
 
 Attach one per breaker, or share one across a `Registry`:
 
@@ -81,9 +114,8 @@ It records five instruments on the `interlock` meter (or a meter you pass in):
 
 ## Custom listeners
 
-Any object with the four core methods satisfies the protocol — no base class to
-inherit (the two storage hooks are dispatched only if present). The core calls
-all four, so define each one, leaving the hooks you do not need as no-ops:
+Any object with the hooks you care about satisfies the protocol — no base class
+to inherit, and no need to stub out the rest:
 
 ```python
 class RejectionCounter:
@@ -92,8 +124,7 @@ class RejectionCounter:
 
     def on_rejected(self, *, name: str) -> None:
         self.rejected += 1
-
-    def on_state_change(self, *, name, old, new) -> None: ...
-    def on_call(self, *, name, outcome, duration) -> None: ...
-    def on_reset(self, *, name) -> None: ...
 ```
+
+Implement the full protocol when you want static checking to catch a typo in a
+hook name; a misspelled hook is simply never called, since dispatch is by name.

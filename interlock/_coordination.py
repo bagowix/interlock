@@ -57,7 +57,10 @@ class _CoordinatorBase:
 
     Everything here is I/O-free; subclasses supply the storage calls and the
     background lane. ``on_view`` / ``on_degraded`` / ``on_recovered`` are engine
-    callbacks — they must be fast and must not raise.
+    callbacks — they must be fast and must not raise. They notify the user's
+    listener, which is why every hook goes through ``_notify.notify``: a raising
+    listener would otherwise kill the lane (``poll_once`` calls back outside its
+    ``try``) or be misreported as a storage failure (inside ``execute_op``).
     """
 
     def __init__(

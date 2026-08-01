@@ -12,7 +12,7 @@ from tenacity import (
     stop_after_attempt,
     wait_fixed,
 )
-from tests.conftest import FakeClock
+from tests.conftest import ExplodingListener, FakeClock
 
 from interlock import CircuitBreaker, CircuitOpenError, Config, State
 from interlock.integrations.tenacity import RetryStrategy, retry_unless_open, wait_probe
@@ -540,6 +540,42 @@ def test__retry_strategy__user_before_sleep__invoked_alongside_the_listener() ->
         Pipeline(strategy).call(failing)
     assert observed == [1]
     assert [attempt for _, attempt, _ in events.retries] == [1]
+
+
+def test__retry_strategy__raising_listener__still_retries_and_returns() -> None:
+    events = ExplodingListener()
+    attempts = 0
+
+    def flaky() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 2:
+            raise ValueError('transient')
+        return 'ok'
+
+    strategy = RetryStrategy(attempts=2, sleep=_noop_sleep, listener=events)
+
+    assert Pipeline(strategy).call(flaky) == 'ok'
+    assert events.events == ['on_retry']
+
+
+def test__retry_strategy__raising_listener__user_before_sleep_still_runs() -> None:
+    events = ExplodingListener()
+    observed: list[int] = []
+
+    def failing() -> None:
+        raise ValueError('down')
+
+    strategy = RetryStrategy(
+        attempts=2,
+        sleep=_noop_sleep,
+        listener=events,
+        before_sleep=lambda retry_state: observed.append(retry_state.attempt_number),
+    )
+
+    with pytest.raises(ValueError, match='down'):
+        Pipeline(strategy).call(failing)
+    assert observed == [1]  # the listener failure must not skip the user's hook
 
 
 def test__retry_strategy__pre_v2_listener__keeps_working() -> None:
