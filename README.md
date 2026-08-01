@@ -9,7 +9,8 @@
 | interlock/\_clock.py                   |        5 |        0 |        0 |        0 |     100% |           |
 | interlock/\_coordination.py            |      223 |        0 |       46 |        0 |     100% |           |
 | interlock/\_detect.py                  |        9 |        0 |        4 |        0 |     100% |           |
-| interlock/\_engine.py                  |      275 |        0 |       64 |        0 |     100% |           |
+| interlock/\_engine.py                  |      274 |        0 |       70 |        0 |     100% |           |
+| interlock/\_notify.py                  |       15 |        0 |        4 |        0 |     100% |           |
 | interlock/\_state\_machine.py          |      124 |        0 |       32 |        0 |     100% |           |
 | interlock/\_typing.py                  |        9 |        0 |        0 |        0 |     100% |           |
 | interlock/\_windows.py                 |       61 |        0 |       10 |        0 |     100% |           |
@@ -24,10 +25,10 @@
 | interlock/integrations/otel.py         |       32 |        0 |        0 |        0 |     100% |           |
 | interlock/integrations/redis.py        |       93 |        0 |        8 |        0 |     100% |           |
 | interlock/integrations/requests.py     |       31 |        0 |        4 |        0 |     100% |           |
-| interlock/integrations/tenacity.py     |       60 |        0 |       14 |        0 |     100% |           |
+| interlock/integrations/tenacity.py     |       57 |        0 |       10 |        0 |     100% |           |
 | interlock/listeners.py                 |       25 |        0 |        0 |        0 |     100% |           |
 | interlock/outcome.py                   |       13 |        0 |        0 |        0 |     100% |           |
-| interlock/pipeline.py                  |      161 |        0 |       28 |        0 |     100% |           |
+| interlock/pipeline.py                  |      156 |        0 |       24 |        0 |     100% |           |
 | interlock/protocols.py                 |       43 |        0 |        0 |        0 |     100% |           |
 | interlock/registry.py                  |       22 |        0 |        2 |        0 |     100% |           |
 | interlock/shared.py                    |       11 |        0 |        0 |        0 |     100% |           |
@@ -35,7 +36,7 @@
 | interlock/timeout.py                   |       38 |        0 |        6 |        0 |     100% |           |
 | interlock/version.py                   |        3 |        0 |        0 |        0 |     100% |           |
 | interlock/window.py                    |       18 |        0 |        4 |        0 |     100% |           |
-| **TOTAL**                              | **1528** |    **0** |  **256** |    **0** | **100%** |           |
+| **TOTAL**                              | **1534** |    **0** |  **258** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
