@@ -18,6 +18,10 @@ A named breaker for sync and async callables.
 - **`snapshot() -> WindowSnapshot`** — current, self-consistent window aggregates;
   concurrent call settlement cannot expose a partially updated window.
 - **Manual control:** `reset()`, `force_open()`, `disable()`, `metrics_only()`.
+- **`close()` / `aclose()`** — release background resources: the coordinator
+  lane and the `auto_transition` timer. Teardown, not a state change: neither
+  closes the circuit (`reset()` does). Idempotent, and terminal — the lane never
+  restarts. See [Shutdown](integrations/redis.md#shutdown).
 - **`storage`** — optional shared backend (`Storage` or `AsyncStorage`) for
   coordinated state across instances; see the
   [Redis integration](integrations/redis.md). A coordinated breaker matches its
@@ -35,12 +39,17 @@ See [Configuration](guides/configuration.md) for every field. Raises
 ```python
 Registry(*, config=None, clock=None, classifier=None, listener=None, storage=None)
 registry.get(name, *, config=None) -> CircuitBreaker
+registry.close_all() / await registry.aclose_all()
 ```
 
 Creates and caches named breakers. The same name always returns the same
 instance; the per-call `config` override applies only at creation. A `storage`
 is handed to every breaker the registry creates; each coordinates under its own
 name.
+
+`close_all()` / `aclose_all()` close every breaker created so far. The cache is
+kept, so `get()` keeps returning the same, torn-down instances instead of
+silently starting a fresh lane after shutdown.
 
 ## Enums
 

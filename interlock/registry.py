@@ -72,3 +72,31 @@ class Registry:
                 self._breakers[name] = breaker
 
             return breaker
+
+    def close_all(self) -> None:
+        """Release the background resources of every breaker created so far.
+
+        Breakers stay cached — ``get`` keeps returning the same, now torn-down
+        instances rather than silently resurrecting a lane after shutdown.
+
+        Raises:
+            InterlockError: If the registry's storage is asynchronous; use
+                ``aclose_all`` there.
+        """
+        for breaker in self._snapshot():
+            breaker.close()
+
+    async def aclose_all(self) -> None:
+        """Release every breaker's background resources; the async mirror.
+
+        Raises:
+            InterlockError: If the registry's storage is synchronous; use
+                ``close_all`` there.
+        """
+        for breaker in self._snapshot():
+            await breaker.aclose()
+
+    def _snapshot(self) -> tuple[CircuitBreaker, ...]:
+        """The breakers created so far; taken under the lock, closed outside it."""
+        with self._lock:
+            return tuple(self._breakers.values())

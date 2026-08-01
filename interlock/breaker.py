@@ -96,6 +96,33 @@ class CircuitBreaker:
         """Clear local control and metrics, then resume the shared state if present."""
         self._engine.reset()
 
+    def close(self) -> None:
+        """Release background resources: the coordinator lane and any timer.
+
+        This is teardown, *not* a state change — it does not close the circuit
+        (``reset`` does). Call it once traffic has stopped: the breaker keeps
+        serving calls on local state afterwards, but shutdown is terminal, so
+        the lane never restarts and later shared writes are dropped. Idempotent,
+        and usable as ``with contextlib.closing(breaker):``.
+
+        Raises:
+            InterlockError: If the breaker is coordinated through an async
+                storage; use ``aclose`` there.
+        """
+        self._engine.close()
+
+    async def aclose(self) -> None:
+        """Release background resources; the async mirror of ``close``.
+
+        Awaiting the lane task here is what keeps it from outliving
+        ``asyncio.run`` as a pending task.
+
+        Raises:
+            InterlockError: If the breaker is coordinated through a sync
+                storage; use ``close`` there.
+        """
+        await self._engine.aclose()
+
     def force_open(self) -> None:
         """Force the breaker ``FORCED_OPEN``: reject all traffic until reset."""
         self._engine.force_open()
