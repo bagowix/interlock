@@ -9,8 +9,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Least-privilege default for every job; the coverage job overrides it with
-# the write scopes py-cov-action needs.
+# Least-privilege default for every job; nothing here writes to the repository —
+# the coverage comment and badge come from Codecov, not from a job.
 permissions:
   contents: read
 
@@ -60,6 +60,9 @@ jobs:
       - name: Pyright
         run: uv run pyright
 
+      - name: Pyrefly
+        run: uv run pyrefly check
+
       - name: Tests
         run: uv run pytest --cov
 
@@ -107,9 +110,6 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     env:
       INTERLOCK_TEST_REDIS_URL: redis://localhost:6379/0
     services:
@@ -134,9 +134,21 @@ jobs:
         run: uv sync --frozen
 
       - name: Run tests with coverage
-        run: uv run pytest --cov
+        run: >-
+          uv run pytest --cov --cov-report=xml
+          --junitxml=junit.xml -o junit_family=legacy
 
-      - name: Coverage badge and PR comment
-        uses: py-cov-action/python-coverage-comment-action@v3
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
         with:
-          GITHUB_TOKEN: ${{ github.token }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          fail_ci_if_error: true
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: junit.xml
+          fail_ci_if_error: true

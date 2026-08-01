@@ -1,7 +1,7 @@
 # interlock
 
 [![CI](https://github.com/bagowix/interlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bagowix/interlock/actions/workflows/ci.yml)
-[![Coverage](https://raw.githubusercontent.com/bagowix/interlock/python-coverage-comment-action-data/badge.svg)](https://github.com/bagowix/interlock/tree/python-coverage-comment-action-data)
+[![Coverage](https://codecov.io/gh/bagowix/interlock/branch/main/graph/badge.svg)](https://codecov.io/gh/bagowix/interlock)
 [![PyPI](https://img.shields.io/pypi/v/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![Downloads](https://img.shields.io/pypi/dm/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![Python versions](https://img.shields.io/pypi/pyversions/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
@@ -24,8 +24,8 @@ integrations at the transport level.
 - **Slow-call detection.** Treat calls slower than a threshold as failures —
   not available in any other Python circuit breaker.
 - **Type-safe.** `ParamSpec` + `TypeVar` decorators preserve the wrapped
-  signature *and* its sync/async nature; ships `py.typed`, passes mypy and
-  pyright in strict mode.
+  signature *and* its sync/async nature; ships `py.typed`, passes mypy,
+  pyright and pyrefly in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
   optional extras (`httpx2`, `aiohttp`, `requests`, `tenacity`, `fastapi`,
   `litestar`, `redis`, `otel`).

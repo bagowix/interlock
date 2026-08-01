@@ -30,7 +30,7 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
 - **hatchling** — build backend. The version is **static** in `interlock/version.py`
   (`[tool.hatch.version] path`), bumped manually on release and exposed as `interlock.__version__`.
 - **ruff** — formatting and linting.
-- **mypy + pyright** in strict mode — static analysis.
+- **mypy + pyright + pyrefly** in strict mode — static analysis.
 - **pytest** + `pytest-asyncio`, `pytest-cov`, `pytest-mock`, `pytest-sugar`, `faker`, `hypothesis`.
 - **Zensical** — documentation (plain-Markdown content, portable).
 
@@ -41,7 +41,7 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
 - Dependencies: `uv add <package>` / dev: `uv add --dev <package>`
 - Format: `uv run ruff format`
 - Lint: `uv run ruff check --fix`
-- Types: `uv run mypy` and `uv run pyright`
+- Types: `uv run mypy`, `uv run pyright` and `uv run pyrefly check`
 - Tests: `uv run pytest` / with coverage: `uv run pytest --cov`
 
 ruff is configured in `pyproject.toml` (`line-length = 100`, `target-version = "py311"`), not via
@@ -191,7 +191,8 @@ A change is not finished when the tests pass. Before opening a PR:
 - **`docs/`** — update the affected pages for any user-facing change, then regenerate the LLM
   mirror: `uv run python scripts/build_llms_full.py`. A new page also goes into `docs/llms.txt`
   under `## Docs` first. Commit the Markdown and `llms-full.txt` together.
-- **Coverage stays at 100%**; `ruff format`, `ruff check`, `mypy` and `pyright` all clean.
+- **Coverage stays at 100%**; `ruff format`, `ruff check`, `mypy`, `pyright` and `pyrefly` all
+  clean.
 - **Tests first.** A bug fix starts with a test that reproduces it; a feature starts with the
   behaviour it must exhibit.
 
