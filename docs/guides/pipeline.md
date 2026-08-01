@@ -190,10 +190,14 @@ pipeline = (
 )
 ```
 
-The hooks are dispatched via safe `getattr` — listeners written before v2.0
-keep working unchanged. `LoggingEventListener` logs retries at INFO and
-bulkhead rejections / fallbacks at WARNING; `OTelEventListener` counts all
-three in the `interlock.pipeline.events` counter.
+Strategy hooks go through the same dispatcher as the breaker's own: dispatched
+only if defined (listeners written before v2.0 keep working unchanged), and a
+hook that raises is logged and ignored rather than failing the call — see
+[listener failures are isolated](observability.md#listener-failures-are-isolated).
+A `fallback` function is *not* a hook: it shapes the result, so its errors
+propagate. `LoggingEventListener` logs retries at INFO and bulkhead rejections
+/ fallbacks at WARNING; `OTelEventListener` counts all three in the
+`interlock.pipeline.events` counter.
 
 ## Custom strategies
 

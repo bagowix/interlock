@@ -9,7 +9,7 @@ from typing import TypeVar
 import pytest
 
 import interlock
-from conftest import FakeClock
+from conftest import ExplodingListener, FakeClock
 from interlock import BulkheadFullError, CallTimeoutError, CircuitBreaker, CircuitOpenError, Config
 from interlock._detect import is_async_callable
 from interlock.pipeline import (
@@ -804,6 +804,55 @@ def test__pipeline_observability__pre_v2_listener__keeps_working() -> None:
     finally:
         release.set()
         worker.join(timeout=5)
+
+
+def test__bulkhead_strategy__raising_listener__still_rejects_the_call() -> None:
+    events = ExplodingListener()
+    pipeline = Pipeline(BulkheadStrategy(1, name='db-pool', listener=events))
+    inside = threading.Event()
+    release = threading.Event()
+
+    def hold() -> str:
+        inside.set()
+        release.wait(5)
+        return 'held'
+
+    worker = threading.Thread(target=pipeline.call, args=(hold,))
+    worker.start()
+    try:
+        assert inside.wait(5)
+        with pytest.raises(BulkheadFullError):
+            pipeline.call(lambda: 'rejected')  # not RuntimeError from the listener
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+    assert events.events == ['on_bulkhead_rejected']
+
+
+def test__fallback_strategy__raising_listener__still_substitutes_the_value() -> None:
+    events = ExplodingListener()
+    pipeline = Pipeline(
+        FallbackStrategy(lambda _exc: 'cached', on=(ValueError,), name='recs', listener=events)
+    )
+
+    def failing() -> str:
+        raise ValueError('down')
+
+    assert pipeline.call(failing) == 'cached'
+    assert events.events == ['on_fallback']
+
+
+@pytest.mark.asyncio
+async def test__fallback_strategy__async_raising_listener__still_substitutes_the_value() -> None:
+    events = ExplodingListener()
+    pipeline = Pipeline(FallbackStrategy(lambda _exc: 'cached', on=(ValueError,), listener=events))
+
+    async def failing() -> str:
+        raise ValueError('down')
+
+    assert await pipeline.call(failing) == 'cached'
+    assert events.events == ['on_fallback']
 
 
 def test__pipeline_builder__steps_pass_name_and_listener_through() -> None:

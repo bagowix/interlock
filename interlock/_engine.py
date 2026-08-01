@@ -22,6 +22,7 @@ from typing import cast
 from interlock._classify import DefaultFailureClassifier
 from interlock._coordination import AsyncCoordinator, SyncCoordinator
 from interlock._detect import is_async_callable
+from interlock._notify import notify
 from interlock._state_machine import StateMachine
 from interlock._typing import AsyncCallable, P, R, SyncCallable
 from interlock.config import Config
@@ -46,34 +47,6 @@ _SHARED_AUTHORITATIVE = frozenset({State.OPEN, State.HALF_OPEN})
 _MANUAL_STATES = frozenset({State.FORCED_OPEN, State.DISABLED, State.METRICS_ONLY})
 
 
-class _NoopListener:
-    """Null EventListener used when none is configured.
-
-    Lets the engine always call ``self._listener.<hook>(...)`` without a None
-    check; every hook is a no-op.
-    """
-
-    def on_state_change(self, *, name: str, old: State, new: State) -> None: ...
-    def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None: ...
-    def on_rejected(self, *, name: str) -> None: ...
-    def on_reset(self, *, name: str) -> None: ...
-    def on_storage_degraded(self, *, name: str, error: BaseException) -> None: ...
-    def on_storage_recovered(self, *, name: str) -> None: ...
-    def on_retry(self, *, name: str, attempt: int, delay: float) -> None: ...
-    def on_bulkhead_rejected(self, *, name: str) -> None: ...
-    def on_fallback(self, *, name: str, error: BaseException) -> None: ...
-
-
-_NOOP_LISTENER: EventListener = _NoopListener()
-
-
-def _notify_safely(listener: EventListener, hook: str, **kwargs: object) -> None:
-    """Dispatch a storage hook via ``getattr`` so pre-1.2 listeners keep working."""
-    method = getattr(listener, hook, None)
-    if callable(method):
-        method(**kwargs)
-
-
 @dataclass(frozen=True, slots=True)
 class Admission:
     """What ``_admit`` granted: the era it happened in, and probe provenance."""
@@ -91,7 +64,8 @@ class Engine:
         clock: Time source; injected for deterministic tests.
         classifier: Decides which outcomes count as failures. Defaults to
             ``DefaultFailureClassifier`` (any raised exception is a failure).
-        listener: Observability hooks. Defaults to a no-op listener.
+        listener: Observability hooks, dispatched through ``notify`` — a hook
+            that raises is logged and ignored. Defaults to none at all.
         storage: Optional shared backend for coordinated, distributed state.
             ``None`` (the default) keeps the breaker purely local. A coordinated
             breaker matches its storage's runtime: a sync ``Storage`` serves
@@ -112,7 +86,7 @@ class Engine:
         self._config = config
         self._clock = clock
         self._classifier = classifier if classifier is not None else DefaultFailureClassifier()
-        self._listener = listener if listener is not None else _NOOP_LISTENER
+        self._listener = listener
         self._machine = StateMachine(config=config, clock=clock)
         self._lock = threading.Lock()
         self._last_failure: BaseException | None = None
@@ -267,7 +241,7 @@ class Engine:
             self._last_failure = None
 
         self._emit_transitions(before, after, effective_before, effective_after)
-        self._listener.on_reset(name=self._name)
+        notify(self._listener, 'on_reset', name=self._name)
 
     def force_open(self) -> None:
         """Override to ``FORCED_OPEN``: reject all traffic until reset."""
@@ -351,7 +325,8 @@ class Engine:
             last_failure = self._last_failure
 
         if shared is State.OPEN:
-            self._listener.on_rejected(name=self._name)
+            if self._listener is not None:
+                notify(self._listener, 'on_rejected', name=self._name)
             raise CircuitOpenError(self._name, retry_after=None, last_failure=last_failure)
 
         return shared if shared is State.HALF_OPEN else None
@@ -363,7 +338,8 @@ class Engine:
             last_failure = self._last_failure
 
         if not granted:
-            self._listener.on_rejected(name=self._name)
+            if self._listener is not None:
+                notify(self._listener, 'on_rejected', name=self._name)
             raise CircuitOpenError(self._name, retry_after=None, last_failure=last_failure)
 
         return Admission(generation=generation, probe=True)
@@ -382,7 +358,8 @@ class Engine:
 
         self._emit_transitions(before, after, effective_before, effective_after)
         if not admitted:
-            self._listener.on_rejected(name=self._name)
+            if self._listener is not None:
+                notify(self._listener, 'on_rejected', name=self._name)
             raise CircuitOpenError(
                 self._name,
                 retry_after=retry_after,
@@ -423,7 +400,11 @@ class Engine:
             if failure and exception is not None:
                 self._last_failure = exception
 
-        self._listener.on_call(name=self._name, outcome=outcome, duration=duration)
+        # Pre-checked here and on the rejection paths — the two that run per
+        # call. Passing through ``notify`` would pack a kwargs dict on every
+        # protected call before it could discover there is no listener.
+        if self._listener is not None:
+            notify(self._listener, 'on_call', name=self._name, outcome=outcome, duration=duration)
         self._emit_transitions(before, after, effective_before, effective_after)
 
         coordinator = self._sync_coordinator or self._async_coordinator
@@ -457,8 +438,12 @@ class Engine:
         OPEN → HALF_OPEN). In local mode the two are identical.
         """
         if effective_after != effective_before:
-            self._listener.on_state_change(
-                name=self._name, old=effective_before, new=effective_after
+            notify(
+                self._listener,
+                'on_state_change',
+                name=self._name,
+                old=effective_before,
+                new=effective_after,
             )
 
         if machine_after == machine_before:
@@ -501,7 +486,7 @@ class Engine:
             self._storage_degraded = True
             effective_after = self._effective_state_locked()
 
-        _notify_safely(self._listener, 'on_storage_degraded', name=self._name, error=error)
+        notify(self._listener, 'on_storage_degraded', name=self._name, error=error)
         self._emit_transitions(machine_state, machine_state, effective_before, effective_after)
 
     def _on_storage_recovered(self) -> None:
@@ -512,7 +497,7 @@ class Engine:
             self._storage_degraded = False
             effective_after = self._effective_state_locked()
 
-        _notify_safely(self._listener, 'on_storage_recovered', name=self._name)
+        notify(self._listener, 'on_storage_recovered', name=self._name)
         self._emit_transitions(machine_state, machine_state, effective_before, effective_after)
 
     def _schedule_auto_transition(self) -> None:

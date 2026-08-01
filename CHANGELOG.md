@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- An `EventListener` that raises can no longer damage the breaker it observes.
+  Hooks were invoked directly at every call site, so a bug in a listener —
+  a metrics exporter, a logging handler, a custom sink — could replace a
+  successful protected result with an observability exception or mask the
+  dependency's own error. In coordinated (storage-backed) mode the damage was
+  worse and silent: a raising `on_state_change` propagated out of the
+  background lane's poll tick and terminated the lane for good, after which
+  the breaker never refreshed the shared view or flushed queued writes again;
+  and the same exception raised during a queued write was reported to the
+  application as a *storage* failure through `on_storage_degraded`. Every hook
+  now goes through one dispatcher: an `Exception` is logged to the `interlock`
+  logger at `ERROR` with its traceback and then ignored, while
+  `BaseException` — cancellation, shutdown — still propagates untouched. Hooks
+  are dispatched by name and only if defined, so a listener may implement just
+  the ones it needs. User-supplied *policy* callbacks keep their previous
+  behaviour and still raise: a `FailureClassifier`, a pipeline fallback
+  function, a tenacity `before_sleep` hook.
+
 ## [2.1.3] - 2026-07-31
 
 ### Fixed

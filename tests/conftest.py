@@ -55,6 +55,55 @@ def listener() -> RecordingListener:
     return RecordingListener()
 
 
+class ExplodingListener:
+    """An EventListener that records the hook it received, then raises.
+
+    The failure mode the safe-dispatch policy isolates. Recording *before*
+    raising is what makes the assertions possible: the hook fired, and the
+    caller survived it.
+    """
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def _fire(self, hook: str) -> None:
+        self.events.append(hook)
+        msg = f'listener {hook} exploded'
+        raise RuntimeError(msg)
+
+    def on_state_change(self, *, name: str, old: State, new: State) -> None:
+        self._fire('on_state_change')
+
+    def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
+        self._fire('on_call')
+
+    def on_rejected(self, *, name: str) -> None:
+        self._fire('on_rejected')
+
+    def on_reset(self, *, name: str) -> None:
+        self._fire('on_reset')
+
+    def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
+        self._fire('on_storage_degraded')
+
+    def on_storage_recovered(self, *, name: str) -> None:
+        self._fire('on_storage_recovered')
+
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
+        self._fire('on_retry')
+
+    def on_bulkhead_rejected(self, *, name: str) -> None:
+        self._fire('on_bulkhead_rejected')
+
+    def on_fallback(self, *, name: str, error: BaseException) -> None:
+        self._fire('on_fallback')
+
+
+@pytest.fixture
+def exploding() -> ExplodingListener:
+    return ExplodingListener()
+
+
 @dataclass
 class Upstream:
     """A thread-safe switch for a fake HTTP upstream's behaviour.

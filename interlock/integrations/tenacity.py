@@ -67,6 +67,7 @@ except ImportError as exc:
         "install it with `pip install 'interlock-cb[tenacity]'`"
     ) from exc
 
+from interlock._notify import notify
 from interlock.errors import CircuitOpenError
 from interlock.protocols import EventListener
 
@@ -209,13 +210,17 @@ class RetryStrategy:
         self._listener = listener
 
     def _on_before_sleep(self, retry_state: RetryCallState) -> None:
-        """Emit ``on_retry`` (safe getattr — pre-2.0 listeners fine), then the user hook."""
-        if self._listener is not None:
-            next_action = retry_state.next_action
-            delay = next_action.sleep if next_action is not None else 0.0
-            method = getattr(self._listener, 'on_retry', None)
-            if callable(method):
-                method(name=self._name, attempt=retry_state.attempt_number, delay=delay)
+        """Emit ``on_retry`` (isolated from the retry loop), then the user hook."""
+        next_action = retry_state.next_action
+        notify(
+            self._listener,
+            'on_retry',
+            name=self._name,
+            attempt=retry_state.attempt_number,
+            delay=next_action.sleep if next_action is not None else 0.0,
+        )
+        # The user's before_sleep is retry policy, not observability: it keeps
+        # its own error semantics and is not swallowed.
         if self._before_sleep is not None:
             self._before_sleep(retry_state)
 
