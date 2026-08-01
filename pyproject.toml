@@ -234,7 +234,6 @@ dev = [
     "ruff>=0.15.18",
     "tenacity>=9.0.0",
     "types-requests>=2.31.0",
-    "ty>=0.0.55",
     "zensical>=0.0.46",
     "litestar>=2.24.0",
     "httpx>=0.28.1",

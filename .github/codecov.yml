@@ -13,4 +13,7 @@ coverage:
 
 comment:
   layout: condensed_header, diff, files
-  require_changes: true
+  # The suite sits at 100%, so a PR that keeps it there produces no coverage
+  # *change* — with the default `require_changes`, Codecov would stay silent on
+  # exactly the PRs that are supposed to be boring. Always comment.
+  require_changes: false
