@@ -16,9 +16,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   window counts add up under concurrent recording, `snapshot()` never returns a
   torn view, the HALF_OPEN caps (`max_concurrent_probes`,
   `permitted_calls_in_half_open`) are never exceeded, and a `Registry` hands out
-  exactly one breaker per name. No races were found; free-threaded builds are
-  not a distribution target (no wheels, no classifiers) — this verifies an
-  existing claim rather than making a new one.
+  exactly one breaker per name. No races were found; this verifies an existing
+  claim rather than making a new one. The package is pure Python, so one wheel
+  already serves both build flavours and the only distribution-level signal
+  left is metadata: it now declares
+  `Programming Language :: Python :: Free Threading :: 3 - Stable`.
+
+- The state machine is now also tested as a **model**
+  (`tests/test_state_machine_model.py`): a hypothesis `RuleBasedStateMachine`
+  generates the *sequence* of steps — interleaved outcomes, clock advances,
+  admissions, probe releases and operator overrides — rather than replaying a
+  hand-written one, and checks the machine against an independently predicted
+  state, generation, window aggregates and probe budget after every step.
+  The existing properties in `tests/test_state_machine_properties.py` target
+  documented boundaries directly and stay; this one looks for the transition
+  orders nobody thought to write down (an override during a probe round, a
+  probe settling an era late). No counterexample was found against the current
+  implementation.
 
 - `CircuitBreaker.close()` / `aclose()` and `Registry.close_all()` /
   `aclose_all()` — a deterministic way to release a breaker's background work.
