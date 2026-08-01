@@ -8,6 +8,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The test suite now runs on **free-threaded CPython (3.14t)** in CI, alongside
+  3.11–3.14. interlock has always documented the breaker as thread-safe, but
+  every interpreter in the matrix had a GIL, so nothing could falsify that
+  claim. A new `tests/test_concurrency.py` drives a single breaker from many
+  threads at once and asserts the four properties the lock exists to provide:
+  window counts add up under concurrent recording, `snapshot()` never returns a
+  torn view, the HALF_OPEN caps (`max_concurrent_probes`,
+  `permitted_calls_in_half_open`) are never exceeded, and a `Registry` hands out
+  exactly one breaker per name. No races were found; free-threaded builds are
+  not a distribution target (no wheels, no classifiers) — this verifies an
+  existing claim rather than making a new one.
+
 - `CircuitBreaker.close()` / `aclose()` and `Registry.close_all()` /
   `aclose_all()` — a deterministic way to release a breaker's background work.
   Until now a coordinated breaker's lane (a daemon thread for a sync storage,

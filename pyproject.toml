@@ -144,6 +144,9 @@ ban-relative-imports = "all"
   "ARG002",  # test doubles accept protocol args they intentionally ignore
   "SLF001",  # coordination tests drive internal lanes/coordinators deterministically
 ]
+"tests/test_redis_storage.py" = [
+  "E402",    # fakeredis is imported only when it is the backend (see the module)
+]
 
 [tool.mypy]
 python_version = "3.11"
