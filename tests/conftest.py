@@ -5,9 +5,32 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from hypothesis import strategies as st
 
+from interlock.config import Config
 from interlock.outcome import Outcome
 from interlock.state import State
+
+_LARGE_WINDOW = 500
+
+
+@st.composite
+def configs(draw: st.DrawFn) -> Config:
+    """Build a valid ``Config`` honouring the ``max_concurrent_probes`` bound.
+
+    Shared by the hypothesis suites over the state machine: the property tests
+    and the model-based one.
+    """
+    permitted = draw(st.integers(min_value=1, max_value=10))
+    return Config(
+        failure_rate_threshold=draw(st.floats(min_value=0.01, max_value=1.0)),
+        minimum_number_of_calls=draw(st.integers(min_value=1, max_value=20)),
+        slow_call_rate_threshold=draw(st.floats(min_value=0.01, max_value=1.0)),
+        permitted_calls_in_half_open=permitted,
+        max_concurrent_probes=draw(st.integers(min_value=1, max_value=permitted)),
+        wait_duration_in_open=draw(st.floats(min_value=1.0, max_value=100.0)),
+        window_size=_LARGE_WINDOW,
+    )
 
 
 class FakeClock:
