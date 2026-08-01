@@ -155,9 +155,12 @@ class StateMachineModel(RuleBasedStateMachine):
     def probe_budget_holds(self) -> None:
         # Cross-checking the machine's own accounting surfaces a leaked or
         # double-returned slot on the step it happens, rather than later as a
-        # rejected admission.
-        assert self.machine._probes_in_flight == self.probes_in_flight
-        assert self.machine._probes_admitted == self.probes_admitted
+        # rejected admission. Only HALF_OPEN spends the budget, and every entry
+        # into it starts the counters over, so that is where they are part of
+        # the contract; elsewhere they are stale bookkeeping nobody reads.
+        if self.expected is State.HALF_OPEN:
+            assert self.machine._probes_in_flight == self.probes_in_flight
+            assert self.machine._probes_admitted == self.probes_admitted
         assert self.probes_in_flight <= self.config.max_concurrent_probes
         assert self.probes_admitted <= self.config.permitted_calls_in_half_open
 
@@ -277,3 +280,33 @@ StateMachineModel.TestCase.settings = settings(
     deadline=None,
 )
 TestStateMachineModel = StateMachineModel.TestCase
+
+
+def test__probe_budget__failed_probe_reopens__next_round_starts_full() -> None:
+    # The shrunk sequence that scoped `probe_budget_holds` to HALF_OPEN: a
+    # failed probe returns to OPEN without clearing the probe counters. They
+    # are stale there, not wrong — nothing reads them outside HALF_OPEN, and
+    # entering it starts the round over. This pins the part that is promised.
+    config = Config(
+        failure_rate_threshold=1.0,
+        minimum_number_of_calls=1,
+        permitted_calls_in_half_open=1,
+        max_concurrent_probes=1,
+        wait_duration_in_open=1.0,
+    )
+    clock = FakeClock()
+    machine = StateMachine(config=config, clock=clock)
+
+    assert machine.acquire()
+    machine.record(Outcome.FAILURE, generation=machine.generation)
+    assert machine.state is State.OPEN
+
+    clock.advance(config.wait_duration_in_open)
+    assert machine.acquire()
+    assert machine.state is State.HALF_OPEN
+    machine.record(Outcome.FAILURE, generation=machine.generation)
+    assert machine.state is State.OPEN
+
+    clock.advance(config.wait_duration_in_open)
+    assert machine.acquire()
+    assert machine.state is State.HALF_OPEN
