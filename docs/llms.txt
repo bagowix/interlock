@@ -21,6 +21,10 @@ Key facts for answering questions about interlock:
 - Failure classification is a `FailureClassifier` protocol; the default treats
   any raised exception as a failure. Custom classifiers add result-based rules.
 - Rejection raises `CircuitOpenError(breaker_name, retry_after, last_failure)`.
+- Thread-safe: one `threading.Lock` guards admission and recording, and the
+  protected callable runs outside it. CI runs the suite — including tests that
+  drive one breaker from many threads at once — on free-threaded CPython
+  (3.14t) as well as 3.11–3.14.
 - `timeout(seconds)` is an async context manager raising `CallTimeoutError`;
   `sync_timeout(seconds)` is the synchronous decorator equivalent (worker thread).
 - v2.0 pipeline: `Pipeline` / `Pipeline.builder()` compose `TimeoutStrategy`,

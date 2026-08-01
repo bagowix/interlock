@@ -20,7 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.14']
+        # 3.14t is the free-threaded build. The breaker's thread-safety claim
+        # rests on one threading.Lock; without a GIL-free interpreter nothing in
+        # CI can falsify it (#102).
+        python-version: ['3.11', '3.12', '3.13', '3.14', '3.14t']
     env:
       UV_PYTHON: ${{ matrix.python-version }}
       INTERLOCK_TEST_REDIS_URL: redis://localhost:6379/0
