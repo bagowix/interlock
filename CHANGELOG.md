@@ -32,7 +32,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   documented boundaries directly and stay; this one looks for the transition
   orders nobody thought to write down (an override during a probe round, a
   probe settling an era late). No counterexample was found against the current
-  implementation.
+  implementation. The one sequence it did shrink pointed at the model instead:
+  a failed probe returns to `OPEN` without clearing the probe counters, which
+  is stale bookkeeping rather than a leak — nothing reads them outside
+  `HALF_OPEN`, and entering it starts the round over. The budget invariant is
+  now scoped to `HALF_OPEN`, where the contract defines it, and the sequence is
+  pinned as a regression test.
 
 - `CircuitBreaker.close()` / `aclose()` and `Registry.close_all()` /
   `aclose_all()` — a deterministic way to release a breaker's background work.
