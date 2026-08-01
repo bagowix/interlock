@@ -181,10 +181,31 @@ self._state = State.OPEN
 # rushes in as probes and knocks over the barely recovered dependency.
 ```
 
+## Definition of done
+
+A change is not finished when the tests pass. Before opening a PR:
+
+- **`CHANGELOG.md`** — add an entry under `[Unreleased]` (`Added` / `Fixed` / `Changed`). Describe
+  what was broken and why it mattered to a user, not just which symbol moved. Only the release
+  step dates the section and updates the link refs.
+- **`docs/`** — update the affected pages for any user-facing change, then regenerate the LLM
+  mirror: `uv run python scripts/build_llms_full.py`. A new page also goes into `docs/llms.txt`
+  under `## Docs` first. Commit the Markdown and `llms-full.txt` together.
+- **Coverage stays at 100%**; `ruff format`, `ruff check`, `mypy` and `pyright` all clean.
+- **Tests first.** A bug fix starts with a test that reproduces it; a feature starts with the
+  behaviour it must exhibit.
+
+The PR checklist in `.github/PULL_REQUEST_TEMPLATE.md` mirrors this — it is the last gate, not the
+first reminder.
+
 ## Hard rules (violation = bug)
 
 - **No fallback values**: never invent defaults to paper over missing data.
 - **No silent exceptions**: catch only what is expected, log with context, re-raise.
+  The one sanctioned exception is `interlock/_notify.py`: an `EventListener` hook is observability,
+  never policy, so a raising hook is logged with its traceback and swallowed rather than allowed to
+  fail the protected call or kill a coordinator lane. It is not silent, and `BaseException` still
+  propagates. Do not "fix" it, and do not generalise it — every other `except` obeys the rule.
 - **No default chains in business logic**: `a or b or c` is for UI labels only, never for
   required config or data.
 - **No hidden retries**: retries are acceptable only when explicitly requested, idempotent,
