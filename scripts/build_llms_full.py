@@ -21,6 +21,7 @@ _PAGES = (
     'demo.md',
     'comparison.md',
     'migration.md',
+    'correctness.md',
     'guides/configuration.md',
     'guides/states.md',
     'guides/failure-classification.md',

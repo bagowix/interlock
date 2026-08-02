@@ -43,6 +43,7 @@ Key facts for answering questions about interlock:
 - [Runnable demo](demo.md): three deterministic scripts (`examples/`) with the expected output explained line by line.
 - [Comparison](comparison.md): interlock-cb vs pybreaker, circuitbreaker, aiobreaker and purgatory — feature table and honest trade-offs.
 - [Migration](migration.md): moving from pybreaker / circuitbreaker (and aiobreaker / purgatory) — constructor, listener, classifier and Redis mappings; streak → rate threshold translation.
+- [Correctness and testing](correctness.md): what is verified and how — types, coverage, property/model-based tests, mutation testing, free-threaded concurrency, storage contract, supply chain — with links to the enforcing config/workflow/test, and a known-limits section.
 - [Configuration](guides/configuration.md): every `Config` field, windows.
 - [States & manual control](guides/states.md): lifecycle and overrides.
 - [Failure classification](guides/failure-classification.md): custom classifiers.

@@ -71,6 +71,12 @@ slow-call detection, coordinated state with graceful degradation and a fully
 typed API. The [full comparison](docs/comparison.md) also covers **aiobreaker**
 and **purgatory**.
 
+What interlock-cb offers in place of years in production: 100% branch
+coverage, three strict type checkers, mutation testing on the state machine
+and engine, property- and model-based tests, and CI on free-threaded CPython —
+see [Correctness and testing](docs/correctness.md) for what is verified, how,
+and where the limits are.
+
 [pybreaker]: https://github.com/danielfm/pybreaker
 [circuitbreaker]: https://github.com/fabfuel/circuitbreaker
 
