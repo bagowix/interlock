@@ -8,6 +8,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Public-API breakage detection** (`griffe check`) on every pull request.
+  v2.0 shipped without breaking changes and the standalone breaker surface
+  stays untouched by the pipeline layer, but until now nothing mechanically
+  verified either promise — mypy, pyright and pyrefly check that the code is
+  internally consistent, not that its public surface is still compatible with
+  the previous release, and `tests/typing_surface.py` only pins the shapes
+  somebody remembered to write down. `.github/workflows/api-compatibility.yml`
+  diffs the working tree against the latest release tag: removed or renamed
+  objects, changed parameter kinds, order or defaults, narrowed return types.
+  It covers `interlock/integrations/*` too, since that surface is public even
+  though it is not re-exported from `__init__`. A breaking change is not
+  automatically wrong — a future major release will make one on purpose — so
+  the job is failable but overridable: label the pull request `breaking-change`
+  to acknowledge it. `griffe` is a dev/CI-only dependency; the core stays at
+  zero.
+
 - **Mutation testing** (`mutmut`) over `interlock/_state_machine.py` and
   `interlock/_engine.py` — the two modules where a surviving mutant is a real
   bug. The 100% coverage gate proves every branch executes, not that anything

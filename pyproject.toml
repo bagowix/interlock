@@ -280,4 +280,5 @@ dev = [
     "pyrefly>=1.2.0",
     "mutmut>=3.7.0",
     "zizmor>=1.29.0",
+    "griffe>=2.1.0",
 ]
