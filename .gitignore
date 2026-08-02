@@ -21,6 +21,7 @@ coverage.xml
 junit.xml
 .mypy_cache/
 .pytest_cache/
+mutants/
 .pytype/
 *.pyc
 .env

@@ -8,6 +8,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Mutation testing** (`mutmut`) over `interlock/_state_machine.py` and
+  `interlock/_engine.py` — the two modules where a surviving mutant is a real
+  bug. The 100% coverage gate proves every branch executes, not that anything
+  would notice if it changed, and the first run made that concrete: 105 of 549
+  mutants survived a fully covered suite. Killing them added tests for what the
+  suite was taking on trust — that probe accounting frees exactly one slot,
+  that a probe round is judged on rates rather than counts, that an era counter
+  is never reused, that `retry_after` is clamped and measured from the moment
+  the breaker opened, that a coordinated rejection still names its breaker and
+  its last failure, and that the `auto_transition` timer is armed and cancelled
+  exactly at the two moments it should be and by nothing else. The score is now
+  **526 of 549 (95.8%)**; the 23 survivors are equivalent mutants, enumerated by
+  class in `CONTRIBUTING.md`. It runs weekly out of band
+  (`.github/workflows/mutation.yml`), never as a pull-request gate, and against
+  the deterministic suite only — a randomised test that reaches a branch some of
+  the time makes the score irreproducible.
+
 - The test suite now runs on **free-threaded CPython (3.14t)** in CI, alongside
   3.11–3.14. interlock has always documented the breaker as thread-safe, but
   every interpreter in the matrix had a GIL, so nothing could falsify that

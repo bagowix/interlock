@@ -71,6 +71,40 @@ free-threading support, so importing it re-enables the GIL — and
 `filterwarnings = "error"` turns that warning into a collection error. Set
 `INTERLOCK_TEST_REDIS_URL` (CI does) and `fakeredis` is never imported.
 
+### Mutation testing
+
+The 100% coverage gate proves every line and branch runs; it does not prove any
+assertion would notice if the behaviour changed. `mutmut` closes that gap for
+the two modules where a surviving mutant is a real bug — `interlock/_state_machine.py`
+(thresholds, transitions, probe admission) and `interlock/_engine.py` (lock scope,
+dispatch, recording order):
+
+```bash
+uv run mutmut run                 # ~1 min; writes mutants/ (gitignored)
+uv run mutmut results             # what survived
+uv run mutmut show <mutant-name>  # the diff that survived
+```
+
+It is deliberately out of band: `.github/workflows/mutation.yml` runs it weekly
+and on demand, never as a pull-request gate. The score is measured against the
+deterministic suite only — the hypothesis suites are excluded, because a test
+that reaches a branch only sometimes makes both mutmut's test-selection mapping
+and the score itself irreproducible.
+
+Baseline: **526 of 549 mutants killed (95.8%)**. Every survivor is an equivalent
+mutant, in one of five classes:
+
+| Class | Why it cannot be killed |
+|---|---|
+| `_generation += 2`, and the initial `_generation = 1` | The era counter is only ever compared with `!=`. Any strictly increasing sequence behaves identically — what matters is that a value is never reused, which `test__generation__never_repeats_across_transitions` does check. |
+| `_opened_at = None` / `= 1.0` in `StateMachine.__init__` | Read only in `OPEN`, and `_open()` always writes it first. |
+| `_closed = None`, `_storage_degraded = None` | Used only as a boolean; `None` is as falsy as `False`. |
+| Dropping `retry_after=None` from `CircuitOpenError(...)` | The keyword repeats the constructor default. |
+| `_emit_transitions(..., after=None)` on paths that never enter `OPEN`, and the `_detach_shared_view` / storage-callback variants | The timer branch only reacts to `OPEN`; on these paths both arguments are equal, or the timer is already shut down. |
+
+If a run turns up a survivor outside those classes, it is a missing test — write
+it rather than raising `SURVIVOR_BUDGET` in the workflow.
+
 ### Benchmarks
 
 `benchmarks/` holds the performance suite, measured by

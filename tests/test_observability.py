@@ -153,6 +153,18 @@ def test__metrics_only__records_but_never_trips(breaker: CircuitBreaker) -> None
     assert breaker.snapshot().total_calls == 5
 
 
+def test__every_event__is_attributed_to_the_breaker(
+    breaker: CircuitBreaker, listener: RecordingListener
+) -> None:
+    _trip(breaker)  # on_call x2 + on_state_change
+    with pytest.raises(Exception, match='open'):
+        breaker.call(lambda: 1)  # on_rejected
+    breaker.reset()  # on_reset + on_state_change
+
+    assert len(listener.names) == 6
+    assert set(listener.names) == {'svc'}
+
+
 def test__no_listener__operations_do_not_raise() -> None:
     breaker = CircuitBreaker(name='quiet')
 
