@@ -8,6 +8,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **"Correctness and testing" docs page** (`docs/correctness.md`), linked from
+  the docs nav and from `README.md`. `README.md` was honest that interlock-cb
+  is young and that pybreaker and circuitbreaker are proven, but left the
+  strongest counter-argument unmade: the project already holds a bar most
+  libraries in this space do not — 100% branch coverage, three strict type
+  checkers, property- and model-based tests for the state machine, mutation
+  testing on the state machine and engine, CI on free-threaded CPython, tested
+  (not guessed) lower-bound dependency versions, and an auditable supply chain.
+  The new page has one section per mechanism, each linking to the enforcing
+  config, workflow or test file, plus a "known limits" section stating what is
+  not covered.
+
 - **Public-API breakage detection** (`griffe check`) on every pull request.
   v2.0 shipped without breaking changes and the standalone breaker surface
   stays untouched by the pipeline layer, but until now nothing mechanically
