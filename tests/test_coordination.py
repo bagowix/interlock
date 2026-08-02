@@ -9,6 +9,7 @@ ticks run via ``poll_once()``, and fire-and-forget writes are awaited with
 import asyncio
 import gc
 import weakref
+from dataclasses import replace
 from typing import cast
 
 import pytest
@@ -60,9 +61,11 @@ class StorageEventsListener(RecordingListener):
         self.recovered: int = 0
 
     def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
+        self.names.append(name)
         self.degraded.append(error)
 
     def on_storage_recovered(self, *, name: str) -> None:
+        self.names.append(name)
         self.recovered += 1
 
 
@@ -1005,3 +1008,134 @@ def test__interrupted_leased_probe__not_returned_to_shared_budget(
     assert shared.state is State.HALF_OPEN
     assert shared.probes_remaining == 1
     assert shared.probes_completed == 0
+
+
+def test__shared_open__rejection__reports_the_breaker_and_its_last_failure(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    listener = RecordingListener()
+    breaker = _breaker(config, fake_clock, storage, listener)
+    _trip(breaker)
+    _coordinator(breaker).wait_idle()
+    _coordinator(breaker).poll_once()  # adopt its own trip as the shared view
+    listener.rejected = 0
+
+    with pytest.raises(CircuitOpenError) as exc_info:
+        breaker.call(lambda: 1)
+
+    # A shared trip carries no local wait to estimate from, but it must still
+    # say which breaker rejected the call and why it was open.
+    assert listener.rejected == 1
+    assert set(listener.names) == {NAME}
+    assert exc_info.value.breaker_name == NAME
+    assert exc_info.value.retry_after is None
+    assert isinstance(exc_info.value.last_failure, ValueError)
+
+
+def test__denied_lease__rejection__reports_the_breaker_and_its_last_failure(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    listener = RecordingListener()
+    a = _breaker(config, fake_clock, storage, listener)
+    b = _breaker(config, fake_clock, storage)
+    _trip(a)
+    _coordinator(a).wait_idle()
+    fake_clock.advance(WAIT)
+    _coordinator(a).poll_once()
+    _coordinator(b).poll_once()
+    assert a.call(lambda: 'probe-a') == 'probe-a'  # lease 1 of 2
+    assert b.call(lambda: 'probe-b') == 'probe-b'  # lease 2 of 2
+    listener.rejected = 0
+
+    with pytest.raises(CircuitOpenError) as exc_info:
+        a.call(lambda: 'probe-c')  # global budget spent
+
+    assert listener.rejected == 1
+    assert set(listener.names) == {NAME}
+    assert exc_info.value.breaker_name == NAME
+    assert exc_info.value.retry_after is None
+    assert isinstance(exc_info.value.last_failure, ValueError)
+
+
+def test__storage_events__are_attributed_to_the_breaker(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky = FlakyStorage(storage)
+    listener = StorageEventsListener()
+    breaker = _breaker(config, fake_clock, flaky, listener)
+    flaky.fail = True
+    _coordinator(breaker).poll_once()
+
+    flaky.fail = False
+    fake_clock.advance(flaky.retry_backoff)
+    _coordinator(breaker).poll_once()
+
+    assert len(listener.degraded) == 1
+    assert listener.recovered == 1
+    assert set(listener.names) == {NAME}
+
+
+def test__leased_probe__settling_after_a_local_reset__is_dropped(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    breaker = _breaker(config, fake_clock, storage)
+    _trip(breaker)
+    _coordinator(breaker).wait_idle()
+    fake_clock.advance(WAIT)
+    _coordinator(breaker).poll_once()
+    engine = breaker._engine
+    start, admission = engine.enter_block()  # leased probe, still running
+
+    breaker.reset()  # the operator resets the local machine under it
+    engine.exit_block(start=start, admission=admission, exception=ValueError('late'))
+
+    # The lease was granted in the era the reset ended: the outcome belongs to
+    # nobody and must not land in the fresh window.
+    assert breaker.snapshot().total_calls == 0
+
+
+# --- adopting a shared view ---
+
+
+def test__shared_view__newer_open__does_not_reset_the_local_machine(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky = FlakyStorage(storage)
+    breaker = _breaker(config, fake_clock, flaky, listener=None)
+    _trip(breaker)
+    _coordinator(breaker).wait_idle()
+    _coordinator(breaker).poll_once()
+
+    storage.close(name=NAME, ttl=60.0)  # a peer closes, then trips again: newer OPEN
+    storage.trip_open(name=NAME, ttl=60.0)
+    _coordinator(breaker).poll_once()
+
+    # Only a shared *recovery* may cut a local OPEN short. Degrading afterwards
+    # hands protection back to the local machine, which is where the difference
+    # would show: a machine reset here would admit traffic to a dead dependency.
+    flaky.fail = True
+    _coordinator(breaker).poll_once()
+    assert breaker.state is State.OPEN
+
+
+def test__shared_view__closed_at_the_same_version__does_not_reset_the_local_machine(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    breaker = _breaker(config, fake_clock, storage)
+    _trip(breaker)
+    opened = SharedState(
+        state=State.OPEN,
+        opened_at=0.0,
+        version=7,
+        probes_permitted=0,
+        probes_remaining=0,
+        probes_completed=0,
+        probe_failures=0,
+        probe_slows=0,
+    )
+    breaker._engine._on_shared_view(opened)
+
+    breaker._engine._on_shared_view(replace(opened, state=State.CLOSED))
+
+    # Same version: a duplicate or out-of-order delivery, not a recovery.
+    assert breaker.state is State.OPEN

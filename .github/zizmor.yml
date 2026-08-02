@@ -1,0 +1,9 @@
+rules:
+  # `gh release create --generate-notes` would replace the action, but
+  # softprops/action-gh-release is pinned to a SHA, tracked by Dependabot and
+  # already proven on every release so far. Rewriting the one step that runs
+  # with `contents: write` is a change to the release path, not a hardening of
+  # it — revisit it on its own, not as part of the pinning work (#105).
+  superfluous-actions:
+    ignore:
+      - release.yml

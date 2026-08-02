@@ -16,6 +16,10 @@ integrations at the transport level.
   ships `py.typed` and passes mypy in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
   optional extras.
+- **Thread-safe, and checked.** One `threading.Lock` guards the critical
+  sections; your callable runs outside it. CI drives a single breaker from many
+  threads at once — on free-threaded CPython (3.14t) as well as the GIL builds —
+  so the guarantee is verified, not merely asserted.
 - **Distributed state (optional).** Coordinate tripping and recovery probing
   across instances through Redis/Valkey, with graceful degradation to local
   state — see the [Redis integration](integrations/redis.md).

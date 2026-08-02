@@ -1,0 +1,49 @@
+name: API compatibility
+
+# griffe check diffs the public API of the working tree against the latest
+# release tag: interlock/__init__.py's re-exports plus interlock/integrations/*,
+# which is public without being re-exported from __init__ (#104). A detected
+# breakage is not automatically wrong — it must be deliberate, so the job is
+# failable but overridable: label the pull request `breaking-change` to
+# acknowledge it.
+on:
+  pull_request:
+
+concurrency:
+  group: api-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  griffe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # tags must be present locally; griffe resolves the latest one itself
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Check public API against the latest release
+        id: griffe
+        continue-on-error: true
+        run: uv run griffe check interlock --search . -f github
+
+      - name: Acknowledge intentional breakage
+        if: steps.griffe.outcome == 'failure' && contains(github.event.pull_request.labels.*.name, 'breaking-change')
+        run: echo '::warning::griffe reported a public-API breakage, acknowledged via the "breaking-change" label.'
+
+      - name: Fail on unacknowledged breakage
+        if: steps.griffe.outcome == 'failure' && !contains(github.event.pull_request.labels.*.name, 'breaking-change')
+        run: |
+          echo '::error::griffe detected a public-API breakage. If intentional, label the pull request "breaking-change" and record it in CHANGELOG.md.'
+          exit 1

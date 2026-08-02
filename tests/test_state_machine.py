@@ -462,3 +462,187 @@ def test__release_probe__outside_half_open__ignored(config: Config, fake_clock: 
 
     assert machine.state is State.CLOSED
     assert machine.acquire() is True
+
+
+def test__release_probe__stale_generation_in_a_later_round__ignored(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    first_round = machine.generation
+    assert machine.acquire() is True
+    machine.record(Outcome.FAILURE, generation=first_round)
+    machine.record(Outcome.FAILURE, generation=first_round)  # round one fails -> OPEN
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True  # round two, probe 1 of 2
+
+    machine.release_probe(generation=first_round)  # a probe of round one, interrupted late
+
+    # Being in HALF_OPEN is not enough: the slot belonged to a round that is
+    # already over, and returning it would hand round two a third probe.
+    assert machine.acquire() is True
+    assert machine.acquire() is False
+
+
+def test__release_probe__frees_exactly_one_concurrency_slot(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(
+        config=replace(config, permitted_calls_in_half_open=4, max_concurrent_probes=1),
+        clock=fake_clock,
+    )
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    machine.release_probe(generation=machine.generation)
+
+    assert machine.acquire() is True  # the interrupted probe gave its slot back
+    assert machine.acquire() is False  # and gave back exactly one
+
+
+def test__release_probe__returns_exactly_one_call_to_the_probe_budget(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    machine.release_probe(generation=machine.generation)
+
+    # permitted_calls_in_half_open=2, and the released call spent none of it:
+    # exactly two probes may still run, not three.
+    assert machine.acquire() is True
+    machine.record(Outcome.SUCCESS)
+    assert machine.acquire() is True
+    assert machine.acquire() is False
+
+
+def test__half_open__permitted_cap__counts_settled_probes_too(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    machine.record(Outcome.SUCCESS)  # settles, so the concurrency slot is free again
+
+    assert machine.acquire() is True  # the second and last permitted probe
+    assert machine.acquire() is False  # budget spent even though a slot is free
+
+
+def test__half_open__settled_probe__frees_exactly_one_concurrency_slot(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(
+        config=replace(config, permitted_calls_in_half_open=4, max_concurrent_probes=1),
+        clock=fake_clock,
+    )
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    machine.record(Outcome.SUCCESS)
+
+    assert machine.acquire() is True
+    assert machine.acquire() is False
+
+
+def test__half_open__one_bad_probe_in_three__closes(config: Config, fake_clock: FakeClock) -> None:
+    machine = StateMachine(
+        config=replace(
+            config,
+            permitted_calls_in_half_open=3,
+            max_concurrent_probes=3,
+            slow_call_rate_threshold=0.5,
+        ),
+        clock=fake_clock,
+    )
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    for _ in range(3):
+        assert machine.acquire() is True
+
+    machine.record(Outcome.SLOW_FAILURE)
+    machine.record(Outcome.SUCCESS)
+    machine.record(Outcome.SUCCESS)
+
+    # One of three probes failed and one was slow: both 1/3, under the 0.5
+    # thresholds. The round is judged on rates, not on counts.
+    assert machine.state is State.CLOSED
+
+
+def test__generation__never_repeats_across_transitions(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    seen = {machine.generation}
+
+    def assert_new_era() -> None:
+        # A reused generation would let an outcome admitted in an older era
+        # settle into the current one — the exact confusion the counter exists
+        # to prevent. Any transition must therefore mint a value never used yet.
+        assert machine.generation not in seen
+        seen.add(machine.generation)
+
+    _trip_to_open(machine, 2)
+    assert_new_era()
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    assert_new_era()
+    assert machine.acquire() is True
+    machine.record(Outcome.FAILURE)
+    machine.record(Outcome.FAILURE)
+    assert_new_era()
+    machine.force_open()
+    assert_new_era()
+    machine.disable()
+    assert_new_era()
+    machine.metrics_only()
+    assert_new_era()
+    machine.reset()
+    assert_new_era()
+
+
+def test__open__retry_after__measured_from_the_moment_it_opened(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    fake_clock.advance(10.0)  # the breaker does not open at t=0
+    _trip_to_open(machine, 2)
+    fake_clock.advance(2.0)
+
+    assert machine.retry_after() == 3.0
+
+
+def test__open__retry_after__is_zero_once_the_wait_elapsed(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(config.wait_duration_in_open * 2)
+
+    # A caller that sleeps for retry_after must not be sent away again: the
+    # wait is over and the next call is the probe.
+    assert machine.retry_after() == 0.0
+
+
+def test__close__time_based_window__is_rebuilt_with_the_injected_clock(
+    fake_clock: FakeClock,
+) -> None:
+    config = Config(
+        window_type=WindowType.TIME_BASED,
+        window_size=10,
+        minimum_number_of_calls=2,
+        permitted_calls_in_half_open=2,
+        max_concurrent_probes=2,
+        wait_duration_in_open=5.0,
+    )
+    machine = StateMachine(config=config, clock=fake_clock)
+    machine.record(Outcome.FAILURE)
+    machine.record(Outcome.FAILURE)
+
+    machine.reset()  # the fresh window still needs a clock to bucket by
+    machine.record(Outcome.SUCCESS)
+
+    assert machine.snapshot().total_calls == 1

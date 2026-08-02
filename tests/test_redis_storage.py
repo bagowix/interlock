@@ -18,7 +18,6 @@ import time
 import uuid
 from collections.abc import Iterator
 
-import fakeredis
 import pytest
 import redis as redis_mod
 import redis.asyncio as aredis
@@ -29,6 +28,13 @@ from interlock.integrations.redis import AsyncRedisStorage, RedisStorage
 REDIS_URL = os.environ.get('INTERLOCK_TEST_REDIS_URL')
 USE_REAL_REDIS = REDIS_URL is not None
 TTL = 60.0
+
+if not USE_REAL_REDIS:
+    # Deferred, not top-level: fakeredis' Lua engine (lupa) does not declare
+    # free-threading support, so importing it on 3.14t re-enables the GIL with a
+    # RuntimeWarning — and filterwarnings=error turns that into a collection
+    # error for the whole file. A real server needs no Lua engine in-process.
+    import fakeredis
 
 requires_real_redis = pytest.mark.skipif(
     not USE_REAL_REDIS,

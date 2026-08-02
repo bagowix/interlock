@@ -15,26 +15,9 @@ All time is driven through ``FakeClock`` so the runs stay deterministic.
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from conftest import FakeClock
+from conftest import FakeClock, configs
 from interlock import Config, Outcome, State
 from interlock._state_machine import StateMachine
-
-_LARGE_WINDOW = 500
-
-
-@st.composite
-def _configs(draw: st.DrawFn) -> Config:
-    """Build a valid ``Config`` honouring the ``max_concurrent_probes`` bound."""
-    permitted = draw(st.integers(min_value=1, max_value=10))
-    return Config(
-        failure_rate_threshold=draw(st.floats(min_value=0.01, max_value=1.0)),
-        minimum_number_of_calls=draw(st.integers(min_value=1, max_value=20)),
-        slow_call_rate_threshold=draw(st.floats(min_value=0.01, max_value=1.0)),
-        permitted_calls_in_half_open=permitted,
-        max_concurrent_probes=draw(st.integers(min_value=1, max_value=permitted)),
-        wait_duration_in_open=draw(st.floats(min_value=1.0, max_value=100.0)),
-        window_size=_LARGE_WINDOW,
-    )
 
 
 def _open(config: Config, clock: FakeClock) -> StateMachine:
@@ -45,7 +28,7 @@ def _open(config: Config, clock: FakeClock) -> StateMachine:
     return machine
 
 
-@given(config=_configs(), extra=st.integers(min_value=0, max_value=50))
+@given(config=configs(), extra=st.integers(min_value=0, max_value=50))
 def test__closed__saturated_failure_window__always_opens(config: Config, extra: int) -> None:
     machine = StateMachine(config=config, clock=FakeClock())
 
@@ -56,7 +39,7 @@ def test__closed__saturated_failure_window__always_opens(config: Config, extra: 
     assert machine.state is State.OPEN
 
 
-@given(config=_configs(), outcomes=st.lists(st.sampled_from(list(Outcome)), max_size=60))
+@given(config=configs(), outcomes=st.lists(st.sampled_from(list(Outcome)), max_size=60))
 def test__closed__below_minimum_calls__never_opens(config: Config, outcomes: list[Outcome]) -> None:
     machine = StateMachine(config=config, clock=FakeClock())
 
@@ -66,7 +49,7 @@ def test__closed__below_minimum_calls__never_opens(config: Config, outcomes: lis
     assert machine.state is State.CLOSED
 
 
-@given(config=_configs(), fraction=st.floats(min_value=0.0, max_value=0.999))
+@given(config=configs(), fraction=st.floats(min_value=0.0, max_value=0.999))
 def test__open__before_wait_elapsed__always_rejects(config: Config, fraction: float) -> None:
     clock = FakeClock()
     machine = _open(config, clock)
@@ -78,7 +61,7 @@ def test__open__before_wait_elapsed__always_rejects(config: Config, fraction: fl
 
 
 @settings(max_examples=200)
-@given(config=_configs(), attempts=st.integers(min_value=0, max_value=40))
+@given(config=configs(), attempts=st.integers(min_value=0, max_value=40))
 def test__half_open__probe_admission__never_exceeds_caps(config: Config, attempts: int) -> None:
     clock = FakeClock()
     machine = _open(config, clock)

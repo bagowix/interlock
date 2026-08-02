@@ -1,7 +1,9 @@
 # interlock
 
 [![CI](https://github.com/bagowix/interlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bagowix/interlock/actions/workflows/ci.yml)
-[![Coverage](https://raw.githubusercontent.com/bagowix/interlock/python-coverage-comment-action-data/badge.svg)](https://github.com/bagowix/interlock/tree/python-coverage-comment-action-data)
+[![Coverage](https://codecov.io/gh/bagowix/interlock/branch/main/graph/badge.svg)](https://codecov.io/gh/bagowix/interlock)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/bagowix/interlock/badge)](https://scorecard.dev/viewer/?uri=github.com/bagowix/interlock)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13932/badge)](https://www.bestpractices.dev/projects/13932)
 [![PyPI](https://img.shields.io/pypi/v/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![Downloads](https://img.shields.io/pypi/dm/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![Python versions](https://img.shields.io/pypi/pyversions/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
@@ -9,6 +11,7 @@
 [![llms.txt](https://img.shields.io/badge/-llms.txt-brightgreen)](docs/llms.txt)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-2f6f55.svg)](https://bagowix.github.io/interlock/)
 [![Context7](https://img.shields.io/badge/docs-Context7-1f6feb.svg)](https://context7.com/bagowix/interlock)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/bagowix/interlock?utm_source=badge)
 
 A modern circuit breaker for Python — sync and async in a single class,
 sliding-window rate and slow-call detection, a type-safe API, and transparent
@@ -23,8 +26,8 @@ integrations at the transport level.
 - **Slow-call detection.** Treat calls slower than a threshold as failures —
   not available in any other Python circuit breaker.
 - **Type-safe.** `ParamSpec` + `TypeVar` decorators preserve the wrapped
-  signature *and* its sync/async nature; ships `py.typed`, passes mypy and
-  pyright in strict mode.
+  signature *and* its sync/async nature; ships `py.typed`, passes mypy,
+  pyright and pyrefly in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
   optional extras (`httpx2`, `aiohttp`, `requests`, `tenacity`, `fastapi`,
   `litestar`, `redis`, `otel`).
@@ -68,6 +71,12 @@ built-in fallback. Choose interlock-cb when you want rate-based windows,
 slow-call detection, coordinated state with graceful degradation and a fully
 typed API. The [full comparison](docs/comparison.md) also covers **aiobreaker**
 and **purgatory**.
+
+What interlock-cb offers in place of years in production: 100% branch
+coverage, three strict type checkers, mutation testing on the state machine
+and engine, property- and model-based tests, and CI on free-threaded CPython —
+see [Correctness and testing](docs/correctness.md) for what is verified, how,
+and where the limits are.
 
 [pybreaker]: https://github.com/danielfm/pybreaker
 [circuitbreaker]: https://github.com/fabfuel/circuitbreaker

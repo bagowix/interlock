@@ -138,6 +138,17 @@ def test__call_sync__open_circuit__error_carries_last_failure(engine: Engine) ->
     assert str(exc_info.value.last_failure) == 'boom'
 
 
+def test__call_sync__forced_open__before_any_failure__error_has_no_last_failure(
+    engine: Engine,
+) -> None:
+    engine.force_open()
+
+    with pytest.raises(CircuitOpenError) as exc_info:
+        engine.call_sync(lambda: 1)
+
+    assert exc_info.value.last_failure is None
+
+
 def test__call_sync__forced_open__error_has_no_retry_after(engine: Engine) -> None:
     engine.force_open()  # operator override has no time-based estimate
 
@@ -313,3 +324,86 @@ def test__call_sync__base_exception_in_closed__records_nothing(engine: Engine) -
         engine.call_sync(interrupted)
 
     assert engine.snapshot().total_calls == 0
+
+
+class _BadPayloadIsFailure:
+    """Classifier that judges the returned value, not only raised exceptions."""
+
+    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+        return exception is not None or result == 'bad'
+
+
+class _NothingIsFailure:
+    """Classifier for which no call ever fails, exception or not."""
+
+    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+        return False
+
+
+def test__call_sync__failure_read_from_the_returned_value__records_failure(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    engine = Engine(name='t', config=config, clock=fake_clock, classifier=_BadPayloadIsFailure())
+
+    assert engine.call_sync(lambda: 'bad') == 'bad'
+
+    assert engine.snapshot().failed_calls == 1
+
+
+@pytest.mark.asyncio
+async def test__call_async__failure_read_from_the_returned_value__records_failure(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    engine = Engine(name='t', config=config, clock=fake_clock, classifier=_BadPayloadIsFailure())
+
+    async def bad() -> str:
+        return 'bad'
+
+    assert await engine.call_async(bad) == 'bad'
+
+    assert engine.snapshot().failed_calls == 1
+
+
+def test__call_sync__exception_the_classifier_forgives__is_not_the_last_failure(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    engine = Engine(name='t', config=config, clock=fake_clock, classifier=_NothingIsFailure())
+
+    def boom() -> None:
+        raise ValueError('boom')
+
+    with pytest.raises(ValueError, match='boom'):
+        engine.call_sync(boom)
+    engine.force_open()
+
+    # The exception reached the caller, but the classifier said it was not a
+    # failure — so it is not what a later rejection should point at.
+    with pytest.raises(CircuitOpenError) as exc_info:
+        engine.call_sync(lambda: 1)
+    assert exc_info.value.last_failure is None
+
+
+def test__call_sync__duration_exactly_at_the_slow_threshold__records_slow(
+    engine: Engine, fake_clock: FakeClock
+) -> None:
+    def borderline() -> None:
+        fake_clock.advance(1.0)  # == slow_call_duration_threshold
+
+    engine.call_sync(borderline)
+
+    assert engine.snapshot().slow_calls == 1
+
+
+def test__call_sync__forwards_positional_and_keyword_arguments(engine: Engine) -> None:
+    def echo(first: int, *, second: int) -> tuple[int, int]:
+        return first, second
+
+    assert engine.call_sync(echo, 1, second=2) == (1, 2)
+
+
+@pytest.mark.asyncio
+async def test__call_async__forwards_positional_and_keyword_arguments(engine: Engine) -> None:
+    async def echo(first: int, *, second: int) -> tuple[int, int]:
+        return first, second
+
+    assert await engine.call_async(echo, 1, second=2) == (1, 2)

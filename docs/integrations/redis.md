@@ -135,6 +135,55 @@ class StorageWatch:
 written before these hooks existed keep working — the engine calls them only if
 present.
 
+## Shutdown
+
+A coordinated breaker owns a background lane — a daemon thread for a sync
+storage, an asyncio task for an async one. It polls the shared view and drains
+fire-and-forget writes. Left alone, it ends only when the breaker is garbage
+collected, which is why an async lane can outlive `asyncio.run()` and log
+"task was destroyed but it is pending".
+
+`close()` (or `aclose()` for an async storage) ends it deterministically:
+
+```python
+breaker = CircuitBreaker(name='payments', storage=storage)
+try:
+    ...  # serve traffic
+finally:
+    breaker.close()  # drains queued writes, stops the lane, joins it
+```
+
+`Registry` does the whole set at once:
+
+```python
+registry = Registry(storage=storage)
+...
+registry.close_all()  # or: await registry.aclose_all()
+```
+
+What it guarantees:
+
+- **Queued writes are drained first.** Ops already on the queue run in order
+  before the lane exits, so a trip recorded just before shutdown still reaches
+  Redis. Writes that the degraded gate would drop are still dropped.
+- **No waiting out `poll_interval`.** A parked lane is woken immediately.
+- **The `auto_transition` timer is cancelled**, and no new one is armed.
+- **It is idempotent** and safe to call from any thread.
+
+Two consequences worth knowing:
+
+- **Shutdown is terminal.** The lane never restarts. Afterwards the breaker
+  keeps protecting calls on its local state, and shared writes are dropped —
+  the same behaviour as a degraded storage. `Registry.get()` keeps returning the
+  closed instance rather than silently starting a fresh lane.
+- **The cached shared view is dropped.** Nothing refreshes it once the lane is
+  gone, so keeping it would pin the breaker in whatever a peer last published —
+  a shared `OPEN` would never expire. The fallback to local state is reported
+  through `on_state_change` like any other.
+
+`close()` is teardown, not a state change: it does **not** close the circuit.
+That is `reset()`.
+
 ## Tuning
 
 All knobs live on the storage constructor; the core `Config` stays

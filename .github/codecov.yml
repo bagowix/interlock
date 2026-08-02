@@ -1,0 +1,19 @@
+# The 100% gate is enforced by pytest itself (`fail_under` in pyproject.toml).
+# These statuses mirror it inside the PR so the gap is visible per-file before
+# the job turns red.
+coverage:
+  status:
+    project:
+      default:
+        target: 100%
+        threshold: 0%
+    patch:
+      default:
+        target: 100%
+
+comment:
+  layout: condensed_header, diff, files
+  # The suite sits at 100%, so a PR that keeps it there produces no coverage
+  # *change* — with the default `require_changes`, Codecov would stay silent on
+  # exactly the PRs that are supposed to be boring. Always comment.
+  require_changes: false

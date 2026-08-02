@@ -52,12 +52,29 @@ _SyncOp = Callable[[], None]
 _AsyncOp = Callable[[], Awaitable[None]]
 
 
+def _sync_stop() -> None:
+    """Queue sentinel: identity-compared by the lane, never invoked."""
+
+
+async def _async_stop() -> None:
+    """Queue sentinel: identity-compared by the lane, never invoked."""
+
+
 class _CoordinatorBase:
     """State and policy shared by the sync and async coordinators.
 
     Everything here is I/O-free; subclasses supply the storage calls and the
     background lane. ``on_view`` / ``on_degraded`` / ``on_recovered`` are engine
-    callbacks — they must be fast and must not raise.
+    callbacks — they must be fast and must not raise. They notify the user's
+    listener, which is why every hook goes through ``_notify.notify``: a raising
+    listener would otherwise kill the lane (``poll_once`` calls back outside its
+    ``try``) or be misreported as a storage failure (inside ``execute_op``).
+
+    ``shutdown`` is terminal: the lane never restarts, and later writes are
+    dropped exactly as they are while the storage is degraded. Everything that
+    touches ``_stopped``, the lane handle and ``_work.put`` happens under
+    ``_lock``, so a write can never be enqueued onto a lane that will not run
+    to consume it — which would leave ``wait_idle`` unable to return.
     """
 
     def __init__(
@@ -84,7 +101,7 @@ class _CoordinatorBase:
         self._degraded = False
         self._retry_at = 0.0
         self._last_view: SharedState | None = None
-        self._lane_started = False
+        self._stopped = False
 
     def _gate_open(self) -> bool:
         """Whether the storage may be touched now (not degraded, or retry due)."""
@@ -158,21 +175,29 @@ class SyncCoordinator(_CoordinatorBase):
         )
         self._storage = storage
         self._work: queue.Queue[_SyncOp] = queue.Queue()
+        self._thread: threading.Thread | None = None
 
     def ensure_lane(self) -> None:
         """Start the background lane once; safe to call on every admission."""
         with self._lock:
-            if self._lane_started:
-                return
-            self._lane_started = True
+            self._start_lane_locked()
 
-        thread = threading.Thread(
-            target=_sync_lane,
-            args=(weakref.ref(self), self._work, self._interval),
-            name=f'interlock-coordinator-{self._name}',
-            daemon=True,
-        )
-        thread.start()
+    def shutdown(self) -> None:
+        """Drain the queued writes, stop the lane and join it. Idempotent.
+
+        The sentinel wakes a lane parked in ``get`` immediately, so shutdown
+        never waits out ``poll_interval``. Writes already queued run first
+        (FIFO); ones the degraded gate would drop are still dropped.
+        """
+        with self._lock:
+            first = not self._stopped
+            self._stopped = True
+            thread = self._thread
+            if first and thread is not None:
+                self._work.put(_sync_stop)
+
+        if thread is not None:
+            thread.join()  # outside the lock: the lane takes it in poll_once
 
     def try_lease(self) -> bool | None:
         """Claim one shared probe slot inline; ``None`` means storage degraded."""
@@ -253,8 +278,23 @@ class SyncCoordinator(_CoordinatorBase):
         self._work.join()
 
     def _enqueue(self, op: _SyncOp) -> None:
-        self._work.put(op)
-        self.ensure_lane()
+        with self._lock:
+            if self._stopped:
+                return  # shut down: drop the write, as the degraded gate does
+            self._work.put(op)
+            self._start_lane_locked()
+
+    def _start_lane_locked(self) -> None:
+        if self._thread is not None or self._stopped:
+            return
+
+        self._thread = threading.Thread(
+            target=_sync_lane,
+            args=(weakref.ref(self), self._work, self._interval),
+            name=f'interlock-coordinator-{self._name}',
+            daemon=True,
+        )
+        self._thread.start()
 
     def execute_op(self, op: _SyncOp) -> None:
         """Run one queued write under degradation protection (lane-internal)."""
@@ -276,9 +316,12 @@ def _sync_lane_tick(
 ) -> bool:
     """One lane iteration: run a queued write, or poll on timeout.
 
-    Returns whether the lane should keep running. The lane holds only a weak
-    reference between iterations so an abandoned breaker can be collected and
-    its lane exits on the next tick.
+    Returns whether the lane should keep running. It stops on the shutdown
+    sentinel, and on a dead weak reference — the lane holds only a weak
+    reference between iterations, so an abandoned breaker can be collected and
+    its lane exits on the next tick. Either way a dequeued op is marked done,
+    or ``unfinished_tasks`` would stay positive and ``wait_idle`` could never
+    return.
     """
     try:
         op = work.get(timeout=interval)
@@ -286,7 +329,9 @@ def _sync_lane_tick(
         op = None
 
     coordinator = ref()
-    if coordinator is None:
+    if coordinator is None or op is _sync_stop:
+        if op is not None:
+            work.task_done()
         return False
 
     if op is None:
@@ -339,14 +384,23 @@ class AsyncCoordinator(_CoordinatorBase):
     def ensure_lane(self) -> None:
         """Start the lane task once; must be called with a running event loop."""
         with self._lock:
-            if self._lane_started:
-                return
-            self._lane_started = True
+            self._start_lane_locked()
 
-        self._lane_task = asyncio.get_running_loop().create_task(
-            _async_lane(weakref.ref(self), self._work, self._interval),
-            name=f'interlock-coordinator-{self._name}',
-        )
+    async def shutdown(self) -> None:
+        """Drain the queued writes, stop the lane and await it. Idempotent.
+
+        The async mirror of ``SyncCoordinator.shutdown``; awaiting the task is
+        what keeps a pending lane from outliving ``asyncio.run``.
+        """
+        with self._lock:
+            first = not self._stopped
+            self._stopped = True
+            task = self._lane_task
+            if first and task is not None:
+                self._work.put_nowait(_async_stop)
+
+        if task is not None:
+            await task
 
     async def try_lease(self) -> bool | None:
         """Claim one shared probe slot inline; ``None`` means storage degraded."""
@@ -422,8 +476,20 @@ class AsyncCoordinator(_CoordinatorBase):
         await self._work.join()
 
     def _enqueue(self, op: _AsyncOp) -> None:
-        self._work.put_nowait(op)
-        self.ensure_lane()
+        with self._lock:
+            if self._stopped:
+                return  # shut down: drop the write, as the degraded gate does
+            self._work.put_nowait(op)
+            self._start_lane_locked()
+
+    def _start_lane_locked(self) -> None:
+        if self._lane_task is not None or self._stopped:
+            return
+
+        self._lane_task = asyncio.get_running_loop().create_task(
+            _async_lane(weakref.ref(self), self._work, self._interval),
+            name=f'interlock-coordinator-{self._name}',
+        )
 
     async def execute_op(self, op: _AsyncOp) -> None:
         """Run one queued write under degradation protection (lane-internal)."""
@@ -450,7 +516,9 @@ async def _async_lane_tick(
         op = None
 
     coordinator = ref()
-    if coordinator is None:
+    if coordinator is None or op is _async_stop:
+        if op is not None:
+            work.task_done()
         return False
 
     if op is None:

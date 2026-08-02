@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+.venv-*
 
 .idea/
 .vscode/
@@ -16,8 +17,11 @@ wheels/
 .venv/
 venv/
 .coverage
+coverage.xml
+junit.xml
 .mypy_cache/
 .pytest_cache/
+mutants/
 .pytype/
 *.pyc
 .env

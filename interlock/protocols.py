@@ -171,7 +171,18 @@ class FailureClassifier(Protocol):
 
 @runtime_checkable
 class EventListener(Protocol):
-    """Hooks for observability. Implementations must not raise into the core."""
+    """Hooks for observability, isolated from the paths they observe.
+
+    A hook that raises an ``Exception`` is logged to the ``interlock`` logger
+    and ignored: the protected call keeps its result, a failing call keeps its
+    own exception, transition bookkeeping completes, and a coordinated
+    breaker's background lane keeps running. ``BaseException`` — cancellation,
+    shutdown — still propagates.
+
+    Every hook is dispatched by name and only if defined, so a listener may
+    implement just the ones it needs and one written before a hook existed
+    keeps working unchanged. See ``docs/guides/observability.md``.
+    """
 
     def on_state_change(self, *, name: str, old: State, new: State) -> None:
         """Called after the breaker transitions between states."""
@@ -193,9 +204,9 @@ class EventListener(Protocol):
         """Called when the shared storage backend becomes unavailable.
 
         The breaker keeps working on local state; this event makes the
-        degradation observable instead of silent. The engine invokes the two
-        storage hooks via safe ``getattr``, so listeners written before they
-        existed keep working unchanged.
+        degradation observable instead of silent. It reports storage failures
+        only — a listener of your own that raises is logged, never reported
+        here.
         """
         ...
 
@@ -207,9 +218,7 @@ class EventListener(Protocol):
         """Called by a pipeline retry layer before it sleeps between attempts.
 
         ``attempt`` is the number of the attempt that just failed; ``delay``
-        is the upcoming backoff in seconds. Like the storage hooks, the three
-        pipeline hooks are dispatched via safe ``getattr`` — listeners written
-        before v2.0 keep working unchanged.
+        is the upcoming backoff in seconds.
         """
         ...
 

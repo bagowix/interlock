@@ -5,9 +5,32 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from hypothesis import strategies as st
 
+from interlock.config import Config
 from interlock.outcome import Outcome
 from interlock.state import State
+
+_LARGE_WINDOW = 500
+
+
+@st.composite
+def configs(draw: st.DrawFn) -> Config:
+    """Build a valid ``Config`` honouring the ``max_concurrent_probes`` bound.
+
+    Shared by the hypothesis suites over the state machine: the property tests
+    and the model-based one.
+    """
+    permitted = draw(st.integers(min_value=1, max_value=10))
+    return Config(
+        failure_rate_threshold=draw(st.floats(min_value=0.01, max_value=1.0)),
+        minimum_number_of_calls=draw(st.integers(min_value=1, max_value=20)),
+        slow_call_rate_threshold=draw(st.floats(min_value=0.01, max_value=1.0)),
+        permitted_calls_in_half_open=permitted,
+        max_concurrent_probes=draw(st.integers(min_value=1, max_value=permitted)),
+        wait_duration_in_open=draw(st.floats(min_value=1.0, max_value=100.0)),
+        window_size=_LARGE_WINDOW,
+    )
 
 
 class FakeClock:
@@ -29,30 +52,88 @@ def fake_clock() -> FakeClock:
 
 
 class RecordingListener:
-    """An EventListener that records every event it receives, for assertions."""
+    """An EventListener that records every event it receives, for assertions.
+
+    ``names`` collects the ``name`` every hook was given: it is how an event is
+    attributed to a breaker, so it is worth asserting on its own.
+    """
 
     def __init__(self) -> None:
         self.state_changes: list[tuple[State, State]] = []
         self.calls: list[tuple[Outcome, float]] = []
+        self.names: list[str] = []
         self.rejected = 0
         self.resets = 0
 
     def on_state_change(self, *, name: str, old: State, new: State) -> None:
+        self.names.append(name)
         self.state_changes.append((old, new))
 
     def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
+        self.names.append(name)
         self.calls.append((outcome, duration))
 
     def on_rejected(self, *, name: str) -> None:
+        self.names.append(name)
         self.rejected += 1
 
     def on_reset(self, *, name: str) -> None:
+        self.names.append(name)
         self.resets += 1
 
 
 @pytest.fixture
 def listener() -> RecordingListener:
     return RecordingListener()
+
+
+class ExplodingListener:
+    """An EventListener that records the hook it received, then raises.
+
+    The failure mode the safe-dispatch policy isolates. Recording *before*
+    raising is what makes the assertions possible: the hook fired, and the
+    caller survived it.
+    """
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def _fire(self, hook: str) -> None:
+        self.events.append(hook)
+        msg = f'listener {hook} exploded'
+        raise RuntimeError(msg)
+
+    def on_state_change(self, *, name: str, old: State, new: State) -> None:
+        self._fire('on_state_change')
+
+    def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
+        self._fire('on_call')
+
+    def on_rejected(self, *, name: str) -> None:
+        self._fire('on_rejected')
+
+    def on_reset(self, *, name: str) -> None:
+        self._fire('on_reset')
+
+    def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
+        self._fire('on_storage_degraded')
+
+    def on_storage_recovered(self, *, name: str) -> None:
+        self._fire('on_storage_recovered')
+
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
+        self._fire('on_retry')
+
+    def on_bulkhead_rejected(self, *, name: str) -> None:
+        self._fire('on_bulkhead_rejected')
+
+    def on_fallback(self, *, name: str, error: BaseException) -> None:
+        self._fire('on_fallback')
+
+
+@pytest.fixture
+def exploding() -> ExplodingListener:
+    return ExplodingListener()
 
 
 @dataclass

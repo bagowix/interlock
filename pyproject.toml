@@ -22,6 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Free Threading :: 3 - Stable",
     "Typing :: Typed",
 ]
 dependencies = []
@@ -130,6 +131,11 @@ ban-relative-imports = "all"
 "interlock/pipeline.py" = [
   "PLR0913", # PipelineBuilder.retry mirrors RetryStrategy's keyword-only collaborators
 ]
+"benchmarks/**/*.py" = [
+  "INP001",  # benchmarks are collected by pytest, not imported
+  "S101",    # a sanity assert keeps each benchmark honest about what it measures
+  "SIM105",  # try/except is cheaper than contextlib.suppress inside a measured body
+]
 "tests/**/*.py" = [
   "S101",    # asserts are the point of tests
   "PLR2004", # magic values are fine in tests
@@ -138,6 +144,9 @@ ban-relative-imports = "all"
   "FBT001",  # boolean params come from @parametrize, not real flag args
   "ARG002",  # test doubles accept protocol args they intentionally ignore
   "SLF001",  # coordination tests drive internal lanes/coordinators deterministically
+]
+"tests/test_redis_storage.py" = [
+  "E402",    # fakeredis is imported only when it is the backend (see the module)
 ]
 
 [tool.mypy]
@@ -151,6 +160,17 @@ files = ["interlock", "tests/typing_surface.py"]
 include = ["interlock", "tests/typing_surface.py"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
+
+[tool.pyrefly]
+project-includes = ["interlock", "tests/typing_surface.py"]
+python-version = "3.11"
+preset = "strict"
+
+[tool.pyrefly.errors]
+# typing.override is 3.12+, and the core carries no typing_extensions
+# dependency to backport it — the integrations' transport overrides cannot be
+# decorated while 3.11 is supported.
+missing-override-decorator = false
 
 [tool.pymarkdown]
 plugins.MD013.enabled = false   # line-length limit disabled
@@ -192,6 +212,44 @@ exclude_lines = [
 ]
 fail_under = 100
 
+[tool.mutmut]
+# 100% branch coverage proves every line runs, not that anything would notice if
+# it changed. Mutation testing is pointed at the two modules where a surviving
+# mutant is a real bug: the threshold arithmetic and transition ordering of the
+# state machine, and the lock scope, dispatch and recording order of the engine.
+# Run it out of band (`.github/workflows/mutation.yml`), never as a PR gate.
+source_paths = ["interlock"]
+only_mutate = ["interlock/_state_machine.py", "interlock/_engine.py"]
+# typing.cast is erased at runtime: mutating its first argument cannot change
+# behaviour, so those mutants are equivalent by construction.
+do_not_mutate_patterns = ["cast\\("]
+# mutmut runs pytest in-process and copies pyproject.toml into `mutants/`, so
+# the `-n auto` default would fork the collector away from it.
+pytest_add_cli_args = ["-n", "0", "-p", "no:cacheprovider"]
+# Excluded from the mutation suite, for three different reasons:
+#   - the wall-clock example runner and the extras integration tests cost
+#     minutes and exercise third-party code, not the two modules under mutation;
+#   - the hypothesis suites are randomised, and mutmut maps tests to functions
+#     from a single stats run — a test that reaches a branch only sometimes
+#     makes both that mapping and the score irreproducible. The score is a
+#     tracked number, so it is measured against the deterministic suite: a
+#     survivor then means a missing example-based test, every time.
+pytest_add_cli_args_test_selection = [
+  "tests",
+  "--ignore=tests/test_examples.py",
+  "--ignore=tests/test_aiohttp.py",
+  "--ignore=tests/test_fastapi.py",
+  "--ignore=tests/test_httpx2.py",
+  "--ignore=tests/test_httpx2_e2e.py",
+  "--ignore=tests/test_litestar.py",
+  "--ignore=tests/test_otel.py",
+  "--ignore=tests/test_redis_storage.py",
+  "--ignore=tests/test_requests.py",
+  "--ignore=tests/test_tenacity.py",
+  "--ignore=tests/test_state_machine_model.py",
+  "--ignore=tests/test_state_machine_properties.py",
+]
+
 [dependency-groups]
 dev = [
     "aiohttp>=3.14.1",
@@ -214,9 +272,13 @@ dev = [
     "ruff>=0.15.18",
     "tenacity>=9.0.0",
     "types-requests>=2.31.0",
-    "ty>=0.0.55",
     "zensical>=0.0.46",
     "litestar>=2.24.0",
     "httpx>=0.28.1",
     "pytest-xdist>=3.8.0",
+    "pytest-codspeed>=5.0.3",
+    "pyrefly>=1.2.0",
+    "mutmut>=3.7.0",
+    "zizmor>=1.29.0",
+    "griffe>=2.1.0",
 ]

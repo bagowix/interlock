@@ -6,6 +6,187 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **"Correctness and testing" docs page** (`docs/correctness.md`), linked from
+  the docs nav and from `README.md`. `README.md` was honest that interlock-cb
+  is young and that pybreaker and circuitbreaker are proven, but left the
+  strongest counter-argument unmade: the project already holds a bar most
+  libraries in this space do not — 100% branch coverage, three strict type
+  checkers, property- and model-based tests for the state machine, mutation
+  testing on the state machine and engine, CI on free-threaded CPython, tested
+  (not guessed) lower-bound dependency versions, and an auditable supply chain.
+  The new page has one section per mechanism, each linking to the enforcing
+  config, workflow or test file, plus a "known limits" section stating what is
+  not covered.
+
+- **OpenSSF Best Practices badge**, earned at the passing level
+  (<https://www.bestpractices.dev/projects/13932>) and added to `README.md`,
+  closing out #107.
+
+- **Public-API breakage detection** (`griffe check`) on every pull request.
+  v2.0 shipped without breaking changes and the standalone breaker surface
+  stays untouched by the pipeline layer, but until now nothing mechanically
+  verified either promise — mypy, pyright and pyrefly check that the code is
+  internally consistent, not that its public surface is still compatible with
+  the previous release, and `tests/typing_surface.py` only pins the shapes
+  somebody remembered to write down. `.github/workflows/api-compatibility.yml`
+  diffs the working tree against the latest release tag: removed or renamed
+  objects, changed parameter kinds, order or defaults, narrowed return types.
+  It covers `interlock/integrations/*` too, since that surface is public even
+  though it is not re-exported from `__init__`. A breaking change is not
+  automatically wrong — a future major release will make one on purpose — so
+  the job is failable but overridable: label the pull request `breaking-change`
+  to acknowledge it. `griffe` is a dev/CI-only dependency; the core stays at
+  zero.
+
+- **Mutation testing** (`mutmut`) over `interlock/_state_machine.py` and
+  `interlock/_engine.py` — the two modules where a surviving mutant is a real
+  bug. The 100% coverage gate proves every branch executes, not that anything
+  would notice if it changed, and the first run made that concrete: 105 of 549
+  mutants survived a fully covered suite. Killing them added tests for what the
+  suite was taking on trust — that probe accounting frees exactly one slot,
+  that a probe round is judged on rates rather than counts, that an era counter
+  is never reused, that `retry_after` is clamped and measured from the moment
+  the breaker opened, that a coordinated rejection still names its breaker and
+  its last failure, and that the `auto_transition` timer is armed and cancelled
+  exactly at the two moments it should be and by nothing else. The score is now
+  **526 of 549 (95.8%)**; the 23 survivors are equivalent mutants, enumerated by
+  class in `CONTRIBUTING.md`. It runs weekly out of band
+  (`.github/workflows/mutation.yml`), never as a pull-request gate, and against
+  the deterministic suite only — a randomised test that reaches a branch some of
+  the time makes the score irreproducible.
+
+- The test suite now runs on **free-threaded CPython (3.14t)** in CI, alongside
+  3.11–3.14. interlock has always documented the breaker as thread-safe, but
+  every interpreter in the matrix had a GIL, so nothing could falsify that
+  claim. A new `tests/test_concurrency.py` drives a single breaker from many
+  threads at once and asserts the four properties the lock exists to provide:
+  window counts add up under concurrent recording, `snapshot()` never returns a
+  torn view, the HALF_OPEN caps (`max_concurrent_probes`,
+  `permitted_calls_in_half_open`) are never exceeded, and a `Registry` hands out
+  exactly one breaker per name. No races were found; this verifies an existing
+  claim rather than making a new one. The package is pure Python, so one wheel
+  already serves both build flavours and the only distribution-level signal
+  left is metadata: it now declares
+  `Programming Language :: Python :: Free Threading :: 3 - Stable`.
+
+- The state machine is now also tested as a **model**
+  (`tests/test_state_machine_model.py`): a hypothesis `RuleBasedStateMachine`
+  generates the *sequence* of steps — interleaved outcomes, clock advances,
+  admissions, probe releases and operator overrides — rather than replaying a
+  hand-written one, and checks the machine against an independently predicted
+  state, generation, window aggregates and probe budget after every step.
+  The existing properties in `tests/test_state_machine_properties.py` target
+  documented boundaries directly and stay; this one looks for the transition
+  orders nobody thought to write down (an override during a probe round, a
+  probe settling an era late). No counterexample was found against the current
+  implementation. The one sequence it did shrink pointed at the model instead:
+  a failed probe returns to `OPEN` without clearing the probe counters, which
+  is stale bookkeeping rather than a leak — nothing reads them outside
+  `HALF_OPEN`, and entering it starts the round over. The budget invariant is
+  now scoped to `HALF_OPEN`, where the contract defines it, and the sequence is
+  pinned as a regression test.
+
+- `CircuitBreaker.close()` / `aclose()` and `Registry.close_all()` /
+  `aclose_all()` — a deterministic way to release a breaker's background work.
+  Until now a coordinated breaker's lane (a daemon thread for a sync storage,
+  an asyncio task for an async one) and the `auto_transition` timer ended only
+  when the object was garbage collected, so a service could not flush queued
+  shared writes, could not know when its threads were gone, and an async lane
+  outliving `asyncio.run()` produced "task was destroyed but it is pending".
+  `close()` drains the queued writes in order, wakes the lane instead of
+  waiting out `poll_interval`, joins it, and cancels the timer without arming
+  another. It is idempotent, safe to call from any thread, and terminal: the
+  lane never restarts, and afterwards the breaker keeps protecting calls on
+  local state while shared writes are dropped — the same behaviour as a
+  degraded storage. The cached shared view is dropped with the lane, since
+  nothing would refresh it and a peer's `OPEN` would otherwise never expire.
+  This is teardown, not a state change: `close()` does not close the circuit
+  (`reset()` does). The weakref-based collection path stays as the safety net
+  for abandoned breakers.
+
+- **pyrefly** joins mypy and pyright as a third strict type checker in CI and in
+  the pre-commit hooks. Three independent implementations of the same type
+  system disagree in the corners, and the corners are exactly where a
+  signature-preserving decorator lives; a check the other two miss should fail
+  before a release, not in a user's editor. The whole package is clean under its
+  `strict` preset. `missing-override-decorator` is the one error kind turned off:
+  `typing.override` is 3.12+ and the core carries no `typing_extensions`
+  dependency to backport it.
+
+### Changed
+
+- Coverage reporting moved to **Codecov**. `pytest --cov` writes
+  `coverage.xml` plus a JUnit report and CI uploads both, so a PR now shows the
+  per-file coverage diff and the failing tests themselves rather than a single
+  total. The 100% gate is unchanged and still enforced by pytest
+  (`fail_under` in `pyproject.toml`); the Codecov statuses mirror it. This
+  replaces `py-cov-action/python-coverage-comment-action` and the badge branch
+  it maintained — the CI job no longer needs `contents: write` or
+  `pull-requests: write`.
+
+### Fixed
+
+- A coordinator lane that exited while an op was in flight left the work queue
+  permanently unfinished: the op was dequeued before the weak reference was
+  resolved, so a lane stopping on a collected coordinator never called
+  `task_done()` and a join on that queue could never return. Both lanes now
+  release the dequeued op on the drop path.
+- An `EventListener` that raises can no longer damage the breaker it observes.
+  Hooks were invoked directly at every call site, so a bug in a listener —
+  a metrics exporter, a logging handler, a custom sink — could replace a
+  successful protected result with an observability exception or mask the
+  dependency's own error. In coordinated (storage-backed) mode the damage was
+  worse and silent: a raising `on_state_change` propagated out of the
+  background lane's poll tick and terminated the lane for good, after which
+  the breaker never refreshed the shared view or flushed queued writes again;
+  and the same exception raised during a queued write was reported to the
+  application as a *storage* failure through `on_storage_degraded`. Every hook
+  now goes through one dispatcher: an `Exception` is logged to the `interlock`
+  logger at `ERROR` with its traceback and then ignored, while
+  `BaseException` — cancellation, shutdown — still propagates untouched. Hooks
+  are dispatched by name and only if defined, so a listener may implement just
+  the ones it needs. User-supplied *policy* callbacks keep their previous
+  behaviour and still raise: a `FailureClassifier`, a pipeline fallback
+  function, a tenacity `before_sleep` hook.
+
+### Security
+
+- **The CI supply chain is now auditable from the outside.** Workflows are the
+  most privileged code in the repository and were the least checked part of it:
+  every `uses:` resolved to a mutable tag, so a compromised action could have
+  changed what a release publishes without a single commit here. Three changes
+  close that, and they only work together — a Scorecard grade over unpinned
+  actions would have been a badge that says less than it looks like it does:
+  - every action is pinned to a full commit SHA with the version in a trailing
+    comment (Dependabot updates both, and `zizmor --fix=all` writes the pin for
+    a newly added action). Pinning surfaced two actions sitting a major behind
+    their upstream, so they were bumped at the same time:
+    `astral-sh/setup-uv` 7 → 9 and `codecov/codecov-action` 5 → 7;
+  - [zizmor](https://docs.zizmor.sh) audits `.github/workflows/` on every pull
+    request and locally through the pre-commit hook. CI hands it the job's own
+    token so the four audits that resolve a pin against its upstream repository
+    — `impostor-commit`, `ref-confusion`, `known-vulnerable-actions`,
+    `stale-action-refs` — actually run; without one they are silently skipped
+    and a SHA is only as trustworthy as the person who typed it. Its findings
+    are fixed
+    rather than muted: `actions/checkout` no longer leaves the job's credentials
+    in `.git/config` (`persist-credentials: false`), `docs.yml` grants
+    `pages: write` and `id-token: write` to the deploy job instead of to the
+    whole workflow, and the release build no longer restores a dependency cache
+    that a pull-request run could have written. The one suppression, with its
+    reason, lives in `.github/zizmor.yml`;
+  - [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/bagowix/interlock)
+    runs weekly and on every push to `main`, publishing a per-check score to the
+    code-scanning dashboard and to a README badge.
+
+  Nothing about the release flow changed: it still builds once and publishes
+  that artefact through PyPI's OIDC trusted publisher. The PEP 740 attestations
+  it already produced are now requested explicitly rather than inherited from
+  the action's default, and `SECURITY.md` documents where to fetch and verify
+  them.
+
 ### Fixed
 
 - Migration-guide links now use the anchors generated by Zensical, and the

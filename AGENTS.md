@@ -30,8 +30,12 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
 - **hatchling** — build backend. The version is **static** in `interlock/version.py`
   (`[tool.hatch.version] path`), bumped manually on release and exposed as `interlock.__version__`.
 - **ruff** — formatting and linting.
-- **mypy + pyright** in strict mode — static analysis.
+- **mypy + pyright + pyrefly** in strict mode — static analysis.
 - **pytest** + `pytest-asyncio`, `pytest-cov`, `pytest-mock`, `pytest-sugar`, `faker`, `hypothesis`.
+- **mutmut** — mutation testing over the state machine and the engine; out of band, never a PR gate.
+- **zizmor** — static audit of the GitHub Actions workflows; a PR gate like ruff and mypy.
+- **griffe** — public-API breakage detection against the latest release tag; a PR gate,
+  overridable with the `breaking-change` label for intentional changes.
 - **Zensical** — documentation (plain-Markdown content, portable).
 
 ## Environment and commands
@@ -41,8 +45,11 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
 - Dependencies: `uv add <package>` / dev: `uv add --dev <package>`
 - Format: `uv run ruff format`
 - Lint: `uv run ruff check --fix`
-- Types: `uv run mypy` and `uv run pyright`
+- Types: `uv run mypy`, `uv run pyright` and `uv run pyrefly check`
 - Tests: `uv run pytest` / with coverage: `uv run pytest --cov`
+- Workflows: `uv run zizmor .github/workflows/` (export `GH_TOKEN` for the online audits)
+- Public API: `uv run griffe check interlock --search .` (diffs against the latest release tag)
+- Mutants: `uv run mutmut run` (optional, out of band — see `CONTRIBUTING.md`)
 
 ruff is configured in `pyproject.toml` (`line-length = 100`, `target-version = "py311"`), not via
 CLI flags.
@@ -181,10 +188,34 @@ self._state = State.OPEN
 # rushes in as probes and knocks over the barely recovered dependency.
 ```
 
+## Definition of done
+
+A change is not finished when the tests pass. Before opening a PR:
+
+- **`CHANGELOG.md`** — add an entry under `[Unreleased]` (`Added` / `Fixed` / `Changed`). Describe
+  what was broken and why it mattered to a user, not just which symbol moved. Only the release
+  step dates the section and updates the link refs.
+- **`docs/`** — update the affected pages for any user-facing change, then regenerate the LLM
+  mirror: `uv run python scripts/build_llms_full.py`. A new page also goes into `docs/llms.txt`
+  under `## Docs` first. Commit the Markdown and `llms-full.txt` together.
+- **Coverage stays at 100%**; `ruff format`, `ruff check`, `mypy`, `pyright` and `pyrefly` all
+  clean.
+- **Tests first.** A bug fix starts with a test that reproduces it; a feature starts with the
+  behaviour it must exhibit.
+- **Touching `_state_machine.py` or `_engine.py`?** Run `uv run mutmut run` as well. Coverage will
+  stay at 100% whether or not the new tests assert anything; a surviving mutant says they do not.
+
+The PR checklist in `.github/PULL_REQUEST_TEMPLATE.md` mirrors this — it is the last gate, not the
+first reminder.
+
 ## Hard rules (violation = bug)
 
 - **No fallback values**: never invent defaults to paper over missing data.
 - **No silent exceptions**: catch only what is expected, log with context, re-raise.
+  The one sanctioned exception is `interlock/_notify.py`: an `EventListener` hook is observability,
+  never policy, so a raising hook is logged with its traceback and swallowed rather than allowed to
+  fail the protected call or kill a coordinator lane. It is not silent, and `BaseException` still
+  propagates. Do not "fix" it, and do not generalise it — every other `except` obeys the rule.
 - **No default chains in business logic**: `a or b or c` is for UI labels only, never for
   required config or data.
 - **No hidden retries**: retries are acceptable only when explicitly requested, idempotent,
