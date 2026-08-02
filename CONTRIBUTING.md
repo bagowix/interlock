@@ -27,6 +27,7 @@ uv run pyright                # type checking (strict)
 uv run pyrefly check          # type checking (strict, third opinion)
 uv run pytest --cov           # tests with coverage
 uv run zizmor .github/workflows/   # GitHub Actions audit
+uv run zensical build --strict # docs, including broken links
 ```
 
 `zizmor` needs a GitHub token for four of its audits (`impostor-commit`,

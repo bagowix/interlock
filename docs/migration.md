@@ -73,7 +73,7 @@ breaker = CircuitBreaker(
 | `fail_max` | `minimum_number_of_calls` + `failure_rate_threshold` | Streak → rate; see [above](#the-one-conceptual-change). |
 | `reset_timeout` | `Config.wait_duration_in_open` | Direct, in seconds. |
 | `success_threshold` | `Config.permitted_calls_in_half_open` | Probes admitted before the breaker re-decides. interlock decides on the probe *rate*, not a fixed success count. |
-| `exclude=[...]` | a `FailureClassifier` | See [below](#exclude--failureclassifier). |
+| `exclude=[...]` | a `FailureClassifier` | See [below](#exclude-failureclassifier). |
 | `name=` | `name=` | Same. |
 | `state_storage=CircuitRedisStorage(...)` | `storage=RedisStorage(...)` | See [below](#redis-shared-state). |
 | `listeners=[...]` | `listener=` | See [below](#listeners). |
@@ -245,8 +245,8 @@ def external_call(): ...
 |---|---|---|
 | `failure_threshold` | `minimum_number_of_calls` + `failure_rate_threshold` | Streak → rate. |
 | `recovery_timeout` | `Config.wait_duration_in_open` | Direct, in seconds. |
-| `expected_exception` | a `FailureClassifier` | Only these count as failures; see [below](#expected_exception--failureclassifier). |
-| `fallback_function` | `FallbackStrategy` in a pipeline | See [below](#fallback_function--fallbackstrategy). |
+| `expected_exception` | a `FailureClassifier` | Only these count as failures; see [below](#expected_exception-failureclassifier). |
+| `fallback_function` | `FallbackStrategy` in a pipeline | See [below](#fallback_function-fallbackstrategy). |
 | `name=` | `name=` | interlock requires a name explicitly. |
 
 interlock separates the breaker object from the decorator: build one
