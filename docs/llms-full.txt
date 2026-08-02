@@ -1418,7 +1418,11 @@ SHA and audited by [zizmor](https://docs.zizmor.sh) on every pull request, and
 CodeQL default setup over both Python and the workflows themselves. The
 [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/bagowix/interlock)
 badge in the README is the standing summary of this section, refreshed weekly
-and on every push to `main`.
+and on every push to `main`. The project also holds the
+[OpenSSF Best Practices](https://www.bestpractices.dev/projects/13932) badge —
+the self-certified checklist covering release process, vulnerability
+reporting, static/dynamic analysis and secure-development practices, most of
+it satisfied by the mechanisms this page already documents.
 
 ## Known limits
 
