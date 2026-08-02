@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/bagowix/interlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bagowix/interlock/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/bagowix/interlock/branch/main/graph/badge.svg)](https://codecov.io/gh/bagowix/interlock)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/bagowix/interlock/badge)](https://scorecard.dev/viewer/?uri=github.com/bagowix/interlock)
 [![PyPI](https://img.shields.io/pypi/v/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![Downloads](https://img.shields.io/pypi/dm/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
 [![Python versions](https://img.shields.io/pypi/pyversions/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)

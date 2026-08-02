@@ -279,4 +279,5 @@ dev = [
     "pytest-codspeed>=5.0.3",
     "pyrefly>=1.2.0",
     "mutmut>=3.7.0",
+    "zizmor>=1.29.0",
 ]
