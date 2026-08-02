@@ -20,6 +20,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   config, workflow or test file, plus a "known limits" section stating what is
   not covered.
 
+- **OpenSSF Best Practices badge**, earned at the passing level
+  (<https://www.bestpractices.dev/projects/13932>) and added to `README.md`,
+  closing out #107.
+
 - **Public-API breakage detection** (`griffe check`) on every pull request.
   v2.0 shipped without breaking changes and the standalone breaker surface
   stays untouched by the pipeline layer, but until now nothing mechanically
