@@ -32,6 +32,7 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
 - **ruff** — formatting and linting.
 - **mypy + pyright + pyrefly** in strict mode — static analysis.
 - **pytest** + `pytest-asyncio`, `pytest-cov`, `pytest-mock`, `pytest-sugar`, `faker`, `hypothesis`.
+- **mutmut** — mutation testing over the state machine and the engine; out of band, never a PR gate.
 - **Zensical** — documentation (plain-Markdown content, portable).
 
 ## Environment and commands
@@ -43,6 +44,7 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
 - Lint: `uv run ruff check --fix`
 - Types: `uv run mypy`, `uv run pyright` and `uv run pyrefly check`
 - Tests: `uv run pytest` / with coverage: `uv run pytest --cov`
+- Mutants: `uv run mutmut run` (optional, out of band — see `CONTRIBUTING.md`)
 
 ruff is configured in `pyproject.toml` (`line-length = 100`, `target-version = "py311"`), not via
 CLI flags.
@@ -195,6 +197,8 @@ A change is not finished when the tests pass. Before opening a PR:
   clean.
 - **Tests first.** A bug fix starts with a test that reproduces it; a feature starts with the
   behaviour it must exhibit.
+- **Touching `_state_machine.py` or `_engine.py`?** Run `uv run mutmut run` as well. Coverage will
+  stay at 100% whether or not the new tests assert anything; a surviving mutant says they do not.
 
 The PR checklist in `.github/PULL_REQUEST_TEMPLATE.md` mirrors this — it is the last gate, not the
 first reminder.

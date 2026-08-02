@@ -52,24 +52,33 @@ def fake_clock() -> FakeClock:
 
 
 class RecordingListener:
-    """An EventListener that records every event it receives, for assertions."""
+    """An EventListener that records every event it receives, for assertions.
+
+    ``names`` collects the ``name`` every hook was given: it is how an event is
+    attributed to a breaker, so it is worth asserting on its own.
+    """
 
     def __init__(self) -> None:
         self.state_changes: list[tuple[State, State]] = []
         self.calls: list[tuple[Outcome, float]] = []
+        self.names: list[str] = []
         self.rejected = 0
         self.resets = 0
 
     def on_state_change(self, *, name: str, old: State, new: State) -> None:
+        self.names.append(name)
         self.state_changes.append((old, new))
 
     def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
+        self.names.append(name)
         self.calls.append((outcome, duration))
 
     def on_rejected(self, *, name: str) -> None:
+        self.names.append(name)
         self.rejected += 1
 
     def on_reset(self, *, name: str) -> None:
+        self.names.append(name)
         self.resets += 1
 
 

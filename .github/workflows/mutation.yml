@@ -1,0 +1,73 @@
+name: Mutation
+
+# 100% branch coverage proves every line runs; mutation testing asks whether any
+# assertion would notice if it changed. It runs out of band — the signal is a
+# slowly-moving score, not a per-commit gate — so it is never a required check
+# on a pull request.
+on:
+  schedule:
+    - cron: '0 4 * * 1' # Mondays, 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutmut:
+    name: Mutation score
+    runs-on: ubuntu-latest
+    env:
+      # The floor, as in extras-min: compatibility is the matrix's job in ci.yml,
+      # and a mutation score is about what the tests assert, not about the
+      # interpreter. Pinning one keeps the number reproducible.
+      UV_PYTHON: '3.11'
+      # The survivors left are equivalent mutants, enumerated in CONTRIBUTING.md.
+      # Every new one is a test that would not have noticed the change; raise
+      # this only together with the list.
+      SURVIVOR_BUDGET: '23'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run mutation testing
+        run: uv run mutmut run
+
+      - name: Collect the score
+        if: ${{ !cancelled() }}
+        run: |
+          uv run mutmut export-cicd-stats
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os, pathlib
+
+          stats = json.loads(pathlib.Path('mutants/mutmut-cicd-stats.json').read_text())
+          killed, survived, total = stats['killed'], stats['survived'], stats['total']
+          budget = int(os.environ['SURVIVOR_BUDGET'])
+          print('## Mutation score\n')
+          print(f'**{killed / total:.1%}** — {killed} killed, {survived} survived of {total}.\n')
+          print(f'Survivor budget: {survived}/{budget}.')
+          with pathlib.Path(os.environ['GITHUB_ENV']).open('a') as env:
+              env.write(f'SURVIVED={survived}\n')
+          PY
+
+      - name: Upload the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutmut-stats
+          path: mutants/mutmut-cicd-stats.json
+
+      - name: Fail if new mutants survive
+        if: ${{ !cancelled() }}
+        run: |
+          if [ "$SURVIVED" -gt "$SURVIVOR_BUDGET" ]; then
+            echo "::error::$SURVIVED mutants survived, budget is $SURVIVOR_BUDGET."
+            echo 'Run `uv run mutmut results` and `uv run mutmut show <mutant>` locally.'
+            exit 1
+          fi
