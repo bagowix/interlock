@@ -34,6 +34,8 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
 - **pytest** + `pytest-asyncio`, `pytest-cov`, `pytest-mock`, `pytest-sugar`, `faker`, `hypothesis`.
 - **mutmut** — mutation testing over the state machine and the engine; out of band, never a PR gate.
 - **zizmor** — static audit of the GitHub Actions workflows; a PR gate like ruff and mypy.
+- **griffe** — public-API breakage detection against the latest release tag; a PR gate,
+  overridable with the `breaking-change` label for intentional changes.
 - **Zensical** — documentation (plain-Markdown content, portable).
 
 ## Environment and commands
@@ -46,6 +48,7 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
 - Types: `uv run mypy`, `uv run pyright` and `uv run pyrefly check`
 - Tests: `uv run pytest` / with coverage: `uv run pytest --cov`
 - Workflows: `uv run zizmor .github/workflows/` (export `GH_TOKEN` for the online audits)
+- Public API: `uv run griffe check interlock --search .` (diffs against the latest release tag)
 - Mutants: `uv run mutmut run` (optional, out of band — see `CONTRIBUTING.md`)
 
 ruff is configured in `pyproject.toml` (`line-length = 100`, `target-version = "py311"`), not via

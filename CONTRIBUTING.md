@@ -47,6 +47,23 @@ The pre-commit hooks run the fast subset automatically:
 uv run prek install           # one-time, installs the git hook
 ```
 
+### Public API compatibility
+
+`.github/workflows/api-compatibility.yml` runs [`griffe check`](https://mkdocstrings.github.io/griffe/)
+on every pull request, diffing the public API of the working tree against the
+latest release tag — removed or renamed objects, changed parameter kinds,
+order or defaults, narrowed return types. It covers everything importable from
+`interlock/__init__.py` plus `interlock/integrations/*`, which is public even
+though it is not re-exported from `__init__`. Run it locally with:
+
+```bash
+uv run griffe check interlock --search .
+```
+
+A breaking change is not automatically wrong — it must be deliberate, though,
+and reflected in `CHANGELOG.md`. If it is intentional, label the pull request
+`breaking-change`; the job still reports the diff but no longer fails on it.
+
 ### Redis-backed tests
 
 `tests/test_redis_storage.py` runs against in-process **`fakeredis`** by default —
