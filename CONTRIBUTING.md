@@ -26,7 +26,20 @@ uv run mypy                   # type checking
 uv run pyright                # type checking (strict)
 uv run pyrefly check          # type checking (strict, third opinion)
 uv run pytest --cov           # tests with coverage
+uv run zizmor .github/workflows/   # GitHub Actions audit
 ```
+
+`zizmor` needs a GitHub token for four of its audits (`impostor-commit`,
+`ref-confusion`, `known-vulnerable-actions`, `stale-action-refs`) — the ones
+that check what a pinned SHA actually points at. CI passes the job's built-in
+token; locally, export `GH_TOKEN=$(gh auth token)` to run the same set. Without
+one zizmor warns and runs the offline subset, which is enough for everything
+except a bad pin.
+
+Every action in `.github/workflows/` is pinned to a commit SHA with the version
+in a trailing comment. Adding one? Write the tag and let zizmor rewrite it —
+`GH_TOKEN=$(gh auth token) uv run zizmor --fix=all .github/workflows/` resolves
+the SHA and the comment for you. Routine bumps come from Dependabot.
 
 The pre-commit hooks run the fast subset automatically:
 

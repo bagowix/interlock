@@ -119,6 +119,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   behaviour and still raise: a `FailureClassifier`, a pipeline fallback
   function, a tenacity `before_sleep` hook.
 
+### Security
+
+- **The CI supply chain is now auditable from the outside.** Workflows are the
+  most privileged code in the repository and were the least checked part of it:
+  every `uses:` resolved to a mutable tag, so a compromised action could have
+  changed what a release publishes without a single commit here. Three changes
+  close that, and they only work together — a Scorecard grade over unpinned
+  actions would have been a badge that says less than it looks like it does:
+  - every action is pinned to a full commit SHA with the version in a trailing
+    comment (Dependabot updates both, and `zizmor --fix=all` writes the pin for
+    a newly added action). Pinning surfaced two actions sitting a major behind
+    their upstream, so they were bumped at the same time:
+    `astral-sh/setup-uv` 7 → 9 and `codecov/codecov-action` 5 → 7;
+  - [zizmor](https://docs.zizmor.sh) audits `.github/workflows/` on every pull
+    request and locally through the pre-commit hook. CI hands it the job's own
+    token so the four audits that resolve a pin against its upstream repository
+    — `impostor-commit`, `ref-confusion`, `known-vulnerable-actions`,
+    `stale-action-refs` — actually run; without one they are silently skipped
+    and a SHA is only as trustworthy as the person who typed it. Its findings
+    are fixed
+    rather than muted: `actions/checkout` no longer leaves the job's credentials
+    in `.git/config` (`persist-credentials: false`), `docs.yml` grants
+    `pages: write` and `id-token: write` to the deploy job instead of to the
+    whole workflow, and the release build no longer restores a dependency cache
+    that a pull-request run could have written. The one suppression, with its
+    reason, lives in `.github/zizmor.yml`;
+  - [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/bagowix/interlock)
+    runs weekly and on every push to `main`, publishing a per-check score to the
+    code-scanning dashboard and to a README badge.
+
+  Nothing about the release flow changed: it still builds once and publishes
+  that artefact through PyPI's OIDC trusted publisher. The PEP 740 attestations
+  it already produced are now requested explicitly rather than inherited from
+  the action's default, and `SECURITY.md` documents where to fetch and verify
+  them.
+
 ## [2.1.3] - 2026-07-31
 
 ### Fixed

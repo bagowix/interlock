@@ -54,6 +54,13 @@ repos:
         types: [python]
         pass_filenames: false
 
+      - id: zizmor
+        name: zizmor
+        entry: uv run zizmor .github/workflows/
+        language: system
+        files: ^\.github/(workflows/.*\.ya?ml|zizmor\.yml)$
+        pass_filenames: false
+
   - repo: https://github.com/jackdewinter/pymarkdown
     rev: v0.9.38
     hooks:
