@@ -101,6 +101,54 @@ of a round, the deciding instance applies the same thresholds as the local
 state machine and writes the transition guarded by a version check, so a
 delayed decision can never overwrite a newer state.
 
+## Coordinated mode contract
+
+`RedisStorage` implements `Storage` / `AsyncStorage`; a third-party backend can
+too. Four behaviours are part of that contract, not implementation detail —
+skipping any of them breaks the guarantees the coordinator relies on:
+
+1. **Fencing is mandatory.** `trip_open` and `close` accept `expected_version`
+   and must apply the write only when the backend's current version matches
+   it, otherwise no-op and return the current state. The coordinator relies on
+   this for the probe-round decision: a delayed instance computing "probes
+   passed" off a stale view must lose to a state another instance already
+   wrote, never overwrite it.
+2. **A leaked probe slot is bounded only by `state_ttl`.** `lease_probe`
+   decrements a shared budget and has no corresponding un-lease operation. A
+   `BaseException` — cancellation, process kill — between `lease_probe` and
+   `record_probe` never returns that slot; only the key's TTL expiry does.
+   With several instances interrupted mid-probe, `HALF_OPEN` can stall for up
+   to `state_ttl`. Size it with this in mind — it is not just an
+   abandoned-key cleanup knob.
+3. **`record_probe` tallies only while `HALF_OPEN`.** Every coordinated write
+   is best-effort: dropped while degraded, superseded by a later decision,
+   reconciled by the next poll rather than retried.
+4. **Teardown is explicit, not automatic.** `close()` / `aclose()` stop the
+   lane deterministically — see [Shutdown](#shutdown) below. A coordinated
+   breaker left to be garbage-collected can outlive its owning scope instead.
+
+Also: a breaker's `name` becomes a storage key (`interlock:cb:<name>` for
+`RedisStorage`). Never build one from untrusted input — an attacker-controlled
+name can collide with, and corrupt, unrelated breaker state.
+
+### Checklist for a custom `Storage` implementation
+
+- [ ] `trip_open` / `close` honor `expected_version`: apply only on a match,
+      otherwise no-op and return the current state.
+- [ ] Every operation is atomic against concurrent callers (a Lua script, a
+      locked transaction, ...) — no read-modify-write races.
+- [ ] `ttl` is refreshed on every write so an abandoned key self-expires.
+- [ ] `lease_probe` grants only while `HALF_OPEN` and budget remains.
+- [ ] `record_probe` tallies only while `HALF_OPEN`; a late or out-of-round
+      outcome is dropped, not applied.
+- [ ] No method raises into the protected path — the engine treats any
+      exception as a signal to degrade to local state, so a backend that
+      raises for a routine outcome (e.g. a fencing miss) breaks the contract;
+      that case must return the current state instead.
+- [ ] Time comparisons (has `wait_duration_in_open` elapsed?) use the
+      backend's own clock, not the caller's — instance clocks are not
+      comparable across a fleet.
+
 ## Manual controls
 
 Manual controls are local to one process and take precedence over Redis while

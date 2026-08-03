@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The Redis integration guide now documents the coordinated-mode contract
+  (#101).** Fencing (`expected_version`), the `state_ttl`-bounded probe-lease
+  leak on an interrupted probe, the "tallies only while `HALF_OPEN`" rule for
+  `record_probe`, and the need for explicit teardown were previously only
+  implicit in the code and internal notes. `docs/integrations/redis.md` gains
+  a "Coordinated mode contract" section plus a checklist for anyone
+  implementing `Storage` / `AsyncStorage` against a backend other than Redis,
+  and the `Storage` / `AsyncStorage` protocol docstrings point at it.
+
 - **The degraded-storage retry policy is now configurable (#100).** Every
   release before this one retried a downed `Storage` backend on a single
   fixed cadence (`retry_backoff`) — with many instances sharing that backend,

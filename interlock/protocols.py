@@ -65,6 +65,10 @@ class Storage(Protocol):
     This is the synchronous contract; ``AsyncStorage`` mirrors it for async
     breakers. No method may raise into the protected path — the engine degrades
     to local state on backend failure.
+
+    A custom implementation must uphold the fencing, probe-lease TTL and
+    teardown guarantees described in the "Coordinated mode contract" section
+    of ``docs/integrations/redis.md``, including its implementation checklist.
     """
 
     def read(self, name: str) -> SharedState | None:
@@ -128,8 +132,9 @@ class Storage(Protocol):
 class AsyncStorage(Protocol):
     """Async mirror of ``Storage`` for async breakers.
 
-    See ``Storage`` for the full contract; every method is the awaitable
-    counterpart.
+    See ``Storage`` for the full contract, including the coordinated-mode
+    contract a custom implementation must uphold; every method here is the
+    awaitable counterpart.
     """
 
     async def read(self, name: str) -> SharedState | None:
