@@ -120,6 +120,83 @@ jobs:
           tests/test_aiohttp.py
           tests/test_litestar.py
 
+  packaging-smoke:
+    name: Packaging smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      # Metadata rendering and wheel layout are unfixable after upload — a
+      # version cannot be reused. Catch stray top-level files, missing or
+      # duplicated packages, and PyPI long-description rendering errors here.
+      - name: twine check
+        run: uv run twine check dist/*
+
+      - name: check-wheel-contents
+        run: uv run check-wheel-contents dist/*.whl
+
+      # A venv separate from the `uv sync` one above: no dev group, no extras.
+      # This is what `pip install interlock-cb` actually gets a user.
+      - name: Install the wheel into a clean environment
+        run: |
+          uv venv --python 3.11 "${RUNNER_TEMP}/smoke-env"
+          uv pip install --no-deps --python "${RUNNER_TEMP}/smoke-env" dist/*.whl
+
+      # `interlock.__version__` must match the installed distribution's
+      # metadata, and `py.typed` plus every `interlock/integrations/*.py`
+      # module must have survived the build — an accidental import of an
+      # optional dependency from the core, or a packaging config that drops a
+      # subpackage, would pass the dev-env test suite but break here.
+      - name: Import smoke test
+        run: |
+          "${RUNNER_TEMP}/smoke-env/bin/python" - <<'PY'
+          import importlib.metadata
+          import importlib.resources as resources
+          import pathlib
+
+          import interlock
+          import interlock.integrations
+
+          installed_version = importlib.metadata.version('interlock-cb')
+          assert interlock.__version__ == installed_version, (
+              interlock.__version__,
+              installed_version,
+          )
+
+          assert (resources.files('interlock') / 'py.typed').is_file(), (
+              'py.typed missing from the wheel'
+          )
+
+          source_files = {
+              p.name for p in pathlib.Path('interlock/integrations').glob('*.py')
+          }
+          wheel_files = {
+              p.name
+              for p in resources.files('interlock.integrations').iterdir()
+              if p.name.endswith('.py')
+          }
+          missing = source_files - wheel_files
+          assert not missing, f'missing from the wheel: {sorted(missing)}'
+
+          print(
+              f'OK: interlock {interlock.__version__}, py.typed present, '
+              f'{len(wheel_files)} integration modules packaged'
+          )
+          PY
+
   docs:
     name: Docs
     runs-on: ubuntu-latest
