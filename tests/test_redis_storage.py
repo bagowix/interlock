@@ -386,6 +386,32 @@ def test__constructor__rejects_non_positive_knobs(redis_client: redis_mod.Redis)
         RedisStorage(redis_client, retry_backoff=0.0)
 
 
+def test__constructor__rejects_invalid_retry_policy_knobs(redis_client: redis_mod.Redis) -> None:
+    with pytest.raises(ValueError, match='retry_backoff_multiplier'):
+        RedisStorage(redis_client, retry_backoff_multiplier=0.5)
+    with pytest.raises(ValueError, match='retry_backoff_max'):
+        RedisStorage(redis_client, retry_backoff_max=0.0)
+    with pytest.raises(ValueError, match='retry_jitter'):
+        RedisStorage(redis_client, retry_jitter=-0.1)
+
+
+def test__constructor__accepts_configured_retry_policy_knobs(redis_client: redis_mod.Redis) -> None:
+    storage = RedisStorage(
+        redis_client,
+        retry_backoff_multiplier=2.0,
+        retry_backoff_max=30.0,
+        retry_jitter=0.2,
+    )
+    assert storage.retry_backoff_multiplier == 2.0
+    assert storage.retry_backoff_max == 30.0
+    assert storage.retry_jitter == 0.2
+
+    default = RedisStorage(redis_client)
+    assert default.retry_backoff_multiplier == 1.0
+    assert default.retry_backoff_max is None
+    assert default.retry_jitter == 0.0
+
+
 # --- e2e: coordinated breaker over RedisStorage ---
 
 
