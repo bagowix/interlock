@@ -27,7 +27,14 @@ class Clock(Protocol):
     """Source of time for the core. Injected so tests stay deterministic."""
 
     def monotonic(self) -> float:
-        """Return a monotonically increasing time in fractional seconds."""
+        """Return a monotonically increasing, non-negative time in seconds.
+
+        The reference point is arbitrary — only differences are ever used — but
+        the values must not be negative: ``TimeBasedSlidingWindow`` buckets by
+        whole seconds and reserves a negative second as its "never written"
+        sentinel, so a clock that went below zero would report a permanently
+        empty window and the breaker would never trip.
+        """
         ...
 
 

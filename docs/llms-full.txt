@@ -1280,7 +1280,11 @@ never real time:
   checked against an independently predicted state, generation, window and
   probe budget after every step. This is the suite that catches
   order-dependent bugs — an override landing mid-probe-round, a probe settling
-  a generation late — that a fixed sequence cannot reach.
+  a generation late — that a fixed sequence cannot reach. Reaching those
+  interleavings is not left to chance: the rule mix and a `target()` objective
+  steer the search into `HALF_OPEN`, and the share of examples that get there
+  is measured whenever a rule changes, because a generated sequence that never
+  reaches the interesting state proves nothing.
 
 When the model finds a counterexample, the shrunk sequence gets pinned as a
 named regression test next to the model, so the reproducer survives the model

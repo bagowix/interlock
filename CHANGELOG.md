@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The model-based state-machine test now reaches probe rounds.** The
+  `RuleBasedStateMachine` from #106 exists for the order-dependent half of the
+  machine — the probe budget, generation fencing, out-of-order settles — and it
+  was not exercising any of it: measured over 20 seeds, 18 finished a whole run
+  without entering `HALF_OPEN` once, and the best seed managed 7 entries. The
+  rule mix was the cause. Four of nine rules were operator controls, three of
+  them leading into an absorbing override state that only `reset` leaves — and
+  `reset` wipes the window on the way out — while tripping a window took an
+  uninterrupted run of `2 x minimum_number_of_calls` steps, since every call
+  cost one step to admit and another to settle. The walk spent its examples
+  bouncing between the overrides and CLOSED. Three changes fix it: a `call`
+  rule that admits and settles in one step, the way `Engine.call_*` actually
+  works; the four operator controls collapsed into one sampled rule; and a
+  `teardown` that reports trips and probe rounds through `target()` so
+  hypothesis's search steers toward them. `advance` also draws from a strategy
+  that reaches the end of the open wait, which plain `st.floats` — biased
+  toward `0.0` — almost never did. 17 of 20 seeds now reach `HALF_OPEN` on
+  roughly half of their examples, and every override state is still entered, so
+  the #79 invariant keeps its coverage. `max_examples` drops from 200 to 120:
+  the walk no longer needs the extra examples to stumble into a probe round,
+  which keeps the file's runtime in the same range as before.
+
+- The `Clock` protocol now documents that `monotonic()` must be non-negative.
+  `TimeBasedSlidingWindow` reserves a negative second as its "never written"
+  bucket sentinel, so a custom clock returning negative values would report a
+  permanently empty window and the breaker would never trip. Every stdlib
+  monotonic clock already satisfies this; the contract simply said
+  "monotonically increasing" and left the rest implied.
+
 ## [2.1.4] - 2026-08-03
 
 ### Added
