@@ -281,4 +281,6 @@ dev = [
     "mutmut>=3.7.0",
     "zizmor>=1.29.0",
     "griffe>=2.1.0",
+    "twine>=7.0.0",
+    "check-wheel-contents>=0.6.3",
 ]

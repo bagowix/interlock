@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **CI now catches two release-only failure modes before they ship (#85).** A
+  `packaging-smoke` job builds the wheel, runs `twine check` and
+  `check-wheel-contents` against it, then installs it with `pip`-equivalent
+  semantics (`--no-deps`, no dev group, no extras) into a clean Python 3.11
+  environment and imports `interlock` there. It asserts `interlock.__version__`
+  matches the installed distribution's metadata, that `interlock/py.typed`
+  survived the build, and that every module under `interlock/integrations/`
+  made it into the wheel — an accidental import of an optional dependency from
+  the core, or a packaging config that silently dropped a subpackage, would
+  pass the dev-env test suite and only break for a plain `pip install
+  interlock-cb`. Separately, `release.yml` now verifies the pushed tag is
+  exactly `v{interlock.__version__}` as its first step, before `uv sync`,
+  tests, or the build run — the cheapest possible place to fail, and the tag
+  reaches the shell through `env` rather than direct interpolation.
+
 ### Changed
 
 - **The model-based state-machine test now reaches probe rounds.** The
