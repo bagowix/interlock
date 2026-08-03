@@ -75,11 +75,16 @@ class FlakyStorage:
     def __init__(self, inner: InMemoryStorage) -> None:
         self._inner = inner
         self.fail = False
+        self.calls = 0
         self.state_ttl = inner.state_ttl
         self.poll_interval = inner.poll_interval
         self.retry_backoff = inner.retry_backoff
+        self.retry_backoff_multiplier = inner.retry_backoff_multiplier
+        self.retry_backoff_max = inner.retry_backoff_max
+        self.retry_jitter = inner.retry_jitter
 
     def _check(self) -> None:
+        self.calls += 1
         if self.fail:
             raise ConnectionError('storage down')
 
@@ -465,6 +470,189 @@ def test__degradation__old_style_listener_does_not_break(
     assert breaker.call(lambda: 'ok') == 'ok'
 
 
+# --- degraded-storage retry policy: growth, cap, jitter, reset (#100) ---
+
+
+def test__degraded__backoff_grows_geometrically_with_consecutive_failures(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky = FlakyStorage(storage)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 2.0
+    breaker = _breaker(config, fake_clock, flaky)
+    flaky.fail = True
+
+    _coordinator(breaker).poll_once()  # 1st failure: next delay = 1.0 * 2**0 = 1.0
+    assert flaky.calls == 1
+
+    fake_clock.advance(0.999)
+    _coordinator(breaker).poll_once()  # not due yet: gate stays closed
+    assert flaky.calls == 1
+
+    fake_clock.advance(0.002)  # now 1.001, past the 1.0s delay
+    _coordinator(breaker).poll_once()  # 2nd failure: next delay = 1.0 * 2**1 = 2.0
+    assert flaky.calls == 2
+
+    fake_clock.advance(1.999)  # now 3.0, just short of 1.001 + 2.0 = 3.001
+    _coordinator(breaker).poll_once()
+    assert flaky.calls == 2  # still gated: proves the delay actually doubled
+
+    fake_clock.advance(0.002)  # now 3.002, past the due time
+    _coordinator(breaker).poll_once()  # 3rd failure confirms the geometric growth held
+    assert flaky.calls == 3
+
+
+def test__degraded__backoff_capped_at_retry_backoff_max(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky = FlakyStorage(storage)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 10.0
+    flaky.retry_backoff_max = 5.0
+    breaker = _breaker(config, fake_clock, flaky)
+    flaky.fail = True
+
+    _coordinator(breaker).poll_once()  # 1st failure: next delay = 1.0 (uncapped)
+    assert flaky.calls == 1
+
+    fake_clock.advance(1.0)
+    _coordinator(breaker).poll_once()  # 2nd failure: 1.0 * 10**1 = 10, capped to 5.0
+    assert flaky.calls == 2
+
+    fake_clock.advance(4.999)
+    _coordinator(breaker).poll_once()  # not yet past the capped 5.0s delay
+    assert flaky.calls == 2
+
+    fake_clock.advance(0.002)  # now past it: an uncapped 10s delay would still gate this
+    _coordinator(breaker).poll_once()
+    assert flaky.calls == 3
+
+
+def test__degraded__attempt_counter_resets_on_recovery(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky = FlakyStorage(storage)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 2.0
+    breaker = _breaker(config, fake_clock, flaky)
+    flaky.fail = True
+
+    _coordinator(breaker).poll_once()  # attempt 0: next delay 1.0
+    fake_clock.advance(1.0)
+    _coordinator(breaker).poll_once()  # attempt 1: next delay 2.0, still failing
+    assert flaky.calls == 2
+
+    flaky.fail = False
+    fake_clock.advance(2.0)
+    _coordinator(breaker).poll_once()  # recovers: attempt counter resets to 0
+    assert flaky.calls == 3
+
+    flaky.fail = True
+    _coordinator(breaker).poll_once()  # fails again right away: gate was open (not degraded)
+    assert flaky.calls == 4  # this failure re-degrades using attempt 0, not 2
+
+    fake_clock.advance(0.999)
+    _coordinator(breaker).poll_once()
+    assert flaky.calls == 4  # gated at ~1.0s, proving the counter did not keep growing from before
+
+    fake_clock.advance(0.002)
+    _coordinator(breaker).poll_once()
+    assert flaky.calls == 5
+
+
+def test__degraded__jitter_is_bounded_and_reproducible_for_the_same_seed(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky_a = FlakyStorage(storage)
+    flaky_a.retry_backoff = 10.0
+    flaky_a.retry_jitter = 0.5
+    breaker_a = _breaker(config, fake_clock, flaky_a)
+
+    flaky_b = FlakyStorage(storage)
+    flaky_b.retry_backoff = 10.0
+    flaky_b.retry_jitter = 0.5
+    breaker_b = _breaker(config, fake_clock, flaky_b)  # different instance, same name + clock
+
+    delay_a = _coordinator(breaker_a)._next_delay(0)
+    delay_b = _coordinator(breaker_b)._next_delay(0)
+
+    # Same (name, clock reading, attempt) seed -> the same draw, not process-global
+    # randomness, so the delay is reproducible under a fake clock in tests.
+    assert delay_a == delay_b
+    assert 10.0 <= delay_a < 15.0  # base delay plus up to 50% proportional spread
+
+    fake_clock.advance(1.0)
+    delay_later = _coordinator(breaker_a)._next_delay(0)
+    assert delay_later != delay_a  # a different clock reading draws differently
+
+
+@pytest.mark.asyncio
+async def test__async__degraded__backoff_grows_geometrically_with_consecutive_failures(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    inner = AsyncInMemoryStorage(clock=fake_clock)
+    flaky = AsyncFlakyStorage(inner)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 2.0
+    breaker = _breaker(config, fake_clock, flaky)
+    coordinator = _async_coordinator(breaker)
+    flaky.fail = True
+
+    await coordinator.poll_once()  # 1st failure: next delay = 1.0
+    assert flaky.calls == 1
+
+    fake_clock.advance(0.999)
+    await coordinator.poll_once()
+    assert flaky.calls == 1  # not due yet
+
+    fake_clock.advance(0.002)
+    await coordinator.poll_once()  # 2nd failure: next delay = 2.0
+    assert flaky.calls == 2
+
+    fake_clock.advance(1.999)
+    await coordinator.poll_once()
+    assert flaky.calls == 2  # still gated: the delay doubled, not stayed at 1.0
+
+    fake_clock.advance(0.002)
+    await coordinator.poll_once()
+    assert flaky.calls == 3
+
+
+@pytest.mark.asyncio
+async def test__async__degraded__attempt_counter_resets_on_recovery(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    inner = AsyncInMemoryStorage(clock=fake_clock)
+    flaky = AsyncFlakyStorage(inner)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 2.0
+    breaker = _breaker(config, fake_clock, flaky)
+    coordinator = _async_coordinator(breaker)
+    flaky.fail = True
+
+    await coordinator.poll_once()  # attempt 0: next delay 1.0
+    fake_clock.advance(1.0)
+    await coordinator.poll_once()  # attempt 1: next delay 2.0
+    assert flaky.calls == 2
+
+    flaky.fail = False
+    fake_clock.advance(2.0)
+    await coordinator.poll_once()  # recovers: attempt counter resets to 0
+    assert flaky.calls == 3
+
+    flaky.fail = True
+    await coordinator.poll_once()  # fails again immediately (gate was open)
+    assert flaky.calls == 4
+
+    fake_clock.advance(0.999)
+    await coordinator.poll_once()
+    assert flaky.calls == 4  # gated at ~1.0s again, not continuing from 4.0
+
+    fake_clock.advance(0.002)
+    await coordinator.poll_once()
+    assert flaky.calls == 5
+
+
 # --- runtime matching (D8) ---
 
 
@@ -660,11 +848,16 @@ class AsyncFlakyStorage:
     def __init__(self, inner: AsyncInMemoryStorage) -> None:
         self._inner = inner
         self.fail = False
+        self.calls = 0
         self.state_ttl = inner.state_ttl
         self.poll_interval = inner.poll_interval
         self.retry_backoff = inner.retry_backoff
+        self.retry_backoff_multiplier = inner.retry_backoff_multiplier
+        self.retry_backoff_max = inner.retry_backoff_max
+        self.retry_jitter = inner.retry_jitter
 
     def _check(self) -> None:
+        self.calls += 1
         if self.fail:
             raise ConnectionError('storage down')
 

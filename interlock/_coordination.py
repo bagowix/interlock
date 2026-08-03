@@ -14,14 +14,19 @@ is the plumbing between the two, built so the protected path stays fast:
   the poller refreshing the cached view every ``poll_interval``.
 - Storage failures never reach the protected path: any storage error
   flips the coordinator into degraded mode — the breaker runs on local state,
-  writes are dropped, and the lane keeps retrying after ``retry_backoff``
-  seconds. Degradation and recovery surface through the engine's listener
-  callbacks; on recovery the shared view becomes authoritative again.
+  writes are dropped, and the lane keeps retrying after a backoff delay that
+  grows with consecutive failures (``retry_backoff`` *
+  ``retry_backoff_multiplier`` ** attempts, capped at ``retry_backoff_max``,
+  plus proportional ``retry_jitter``) so many instances recovering from the
+  same outage do not retry in lockstep. Degradation and recovery surface
+  through the engine's listener callbacks; on recovery the shared view
+  becomes authoritative again and the attempt counter resets.
 
 Tuning knobs are read from optional attributes on the storage object
-(``state_ttl``, ``poll_interval``, ``retry_backoff``) with conservative
-defaults, so the ``Storage`` protocol itself stays minimal and the core
-``Config`` stays storage-agnostic.
+(``state_ttl``, ``poll_interval``, ``retry_backoff``,
+``retry_backoff_multiplier``, ``retry_backoff_max``, ``retry_jitter``) with
+conservative defaults, so the ``Storage`` protocol itself stays minimal and
+the core ``Config`` stays storage-agnostic.
 
 The probe-round decision is the one piece of threshold policy applied here:
 after the last probe the lane computes the same rate checks as the local state
@@ -32,6 +37,7 @@ clobber a newer shared state.
 
 import asyncio
 import queue
+import random
 import threading
 import weakref
 from collections.abc import Awaitable, Callable
@@ -47,6 +53,9 @@ __all__ = ('AsyncCoordinator', 'SyncCoordinator')
 _DEFAULT_STATE_TTL = 300.0
 _DEFAULT_POLL_INTERVAL = 1.0
 _DEFAULT_RETRY_BACKOFF = 5.0
+_DEFAULT_RETRY_BACKOFF_MULTIPLIER = 1.0
+_DEFAULT_RETRY_BACKOFF_MAX: float | None = None
+_DEFAULT_RETRY_JITTER = 0.0
 
 _SyncOp = Callable[[], None]
 _AsyncOp = Callable[[], Awaitable[None]]
@@ -97,9 +106,16 @@ class _CoordinatorBase:
         self._ttl = float(getattr(storage, 'state_ttl', _DEFAULT_STATE_TTL))
         self._interval = float(getattr(storage, 'poll_interval', _DEFAULT_POLL_INTERVAL))
         self._backoff = float(getattr(storage, 'retry_backoff', _DEFAULT_RETRY_BACKOFF))
+        self._backoff_multiplier = float(
+            getattr(storage, 'retry_backoff_multiplier', _DEFAULT_RETRY_BACKOFF_MULTIPLIER)
+        )
+        backoff_max = getattr(storage, 'retry_backoff_max', _DEFAULT_RETRY_BACKOFF_MAX)
+        self._backoff_max = float(backoff_max) if backoff_max is not None else None
+        self._jitter = float(getattr(storage, 'retry_jitter', _DEFAULT_RETRY_JITTER))
         self._lock = threading.Lock()
         self._degraded = False
         self._retry_at = 0.0
+        self._failures = 0
         self._last_view: SharedState | None = None
         self._stopped = False
 
@@ -120,7 +136,8 @@ class _CoordinatorBase:
         with self._lock:
             first = not self._degraded
             self._degraded = True
-            self._retry_at = self._clock.monotonic() + self._backoff
+            self._retry_at = self._clock.monotonic() + self._next_delay(self._failures)
+            self._failures += 1
 
         if first:
             self._on_degraded(error)
@@ -129,9 +146,31 @@ class _CoordinatorBase:
         with self._lock:
             was_degraded = self._degraded
             self._degraded = False
+            self._failures = 0
 
         if was_degraded:
             self._on_recovered()
+
+    def _next_delay(self, attempt: int) -> float:
+        """Backoff for the ``attempt``-th consecutive failure (0-indexed).
+
+        Grows geometrically from ``retry_backoff``, capped at
+        ``retry_backoff_max``, then widened by up to ``retry_jitter`` (a
+        fraction of the capped delay) so that many instances degrading from
+        the same outage do not all retry at the same instant. The jitter draw
+        is seeded from the clock reading, the attempt number and the breaker
+        name rather than process-global randomness, so it stays reproducible
+        under an injected (fake) clock in tests.
+        """
+        delay = self._backoff * (self._backoff_multiplier**attempt)
+        if self._backoff_max is not None:
+            delay = min(delay, self._backoff_max)
+        if self._jitter <= 0.0:
+            return delay
+
+        seed = f'{self._name}:{self._clock.monotonic()}:{attempt}'.encode()
+        spread = random.Random(seed).random()  # noqa: S311 - jitter, not crypto
+        return delay + delay * self._jitter * spread
 
     def _round_finished(self, view: SharedState) -> bool:
         return (

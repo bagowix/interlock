@@ -239,7 +239,7 @@ See the [Litestar integration](integrations/litestar.md).
 
 Extra `interlock-cb[redis]`, module `interlock.integrations.redis`:
 
-- **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0)`** —
+- **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0, retry_backoff_multiplier=1.0, retry_backoff_max=None, retry_jitter=0.0)`** —
   sync `Storage` over a `redis.Redis` client.
 - **`AsyncRedisStorage(client, *, ...)`** — async mirror over
   `redis.asyncio.Redis`.

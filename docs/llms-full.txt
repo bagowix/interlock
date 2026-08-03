@@ -3226,10 +3226,17 @@ for the fleet: the breaker immediately resumes its cached shared `OPEN` or
 
 A storage error never reaches your calls. On the first failure the breaker
 switches to its local state and keeps protecting the process on its own window;
-pending shared writes are dropped, and Redis is left alone for `retry_backoff`
-seconds before the poller tries again. On the first successful operation the
-shared view becomes authoritative again — including adopting a shared OPEN that
-happened while this instance was cut off.
+pending shared writes are dropped, and Redis is left alone before the poller
+tries again. That delay starts at `retry_backoff` seconds and, by default,
+stays there for as long as the outage lasts — the same fixed cadence every
+release before this one used. Set `retry_backoff_multiplier` above `1.0` to
+grow it geometrically with each further consecutive failure (capped at
+`retry_backoff_max`), plus `retry_jitter` to spread out the retries of a fleet
+of instances recovering from the same outage instead of having them all probe
+Redis in the same instant. On the first successful operation the shared view
+becomes authoritative again — including adopting a shared OPEN that happened
+while this instance was cut off — and the failure count resets, so the next
+outage starts back at `retry_backoff`.
 
 Both edges are observable through the listener:
 
@@ -3308,6 +3315,9 @@ RedisStorage(
     state_ttl=300.0,  # key lifetime (s); refreshed on every write
     poll_interval=1.0,  # cache refresh cadence (s)
     retry_backoff=5.0,  # local-only time after a storage failure (s)
+    retry_backoff_multiplier=1.0,  # growth per consecutive failure; 1.0 = fixed delay
+    retry_backoff_max=None,  # cap on the delay (s), or None for no cap
+    retry_jitter=0.0,  # proportional random spread added to the (capped) delay
 )
 ```
 
@@ -3316,7 +3326,19 @@ RedisStorage(
   `wait_duration_in_open`.
 - **`poll_interval`** is the propagation latency of a coordinated trip. Each
   breaker costs about one Redis read per interval.
-- **`retry_backoff`** bounds how often a degraded breaker re-tests Redis.
+- **`retry_backoff`** is the delay before the first retry after a storage
+  failure, and the fixed delay for every retry after that while
+  `retry_backoff_multiplier` stays at its default of `1.0`.
+- **`retry_backoff_multiplier`** grows the delay geometrically with each
+  further *consecutive* failure (`retry_backoff * retry_backoff_multiplier **
+  attempts`); a recovery resets the attempt count. Must be `>= 1.0`.
+- **`retry_backoff_max`** caps the grown delay in seconds. `None` (the
+  default) leaves it uncapped.
+- **`retry_jitter`** adds up to this fraction of the (capped) delay as random
+  spread, so instances that degraded at the same moment do not all retry
+  Redis at the same moment too. Deterministic given the same clock reading,
+  attempt number and breaker name — it does not depend on process-global
+  random state.
 
 ## Compatibility
 
@@ -3665,7 +3687,7 @@ See the [Litestar integration](integrations/litestar.md).
 
 Extra `interlock-cb[redis]`, module `interlock.integrations.redis`:
 
-- **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0)`** —
+- **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0, retry_backoff_multiplier=1.0, retry_backoff_max=None, retry_jitter=0.0)`** —
   sync `Storage` over a `redis.Redis` client.
 - **`AsyncRedisStorage(client, *, ...)`** — async mirror over
   `redis.asyncio.Redis`.

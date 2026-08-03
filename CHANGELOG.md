@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The degraded-storage retry policy is now configurable (#100).** Every
+  release before this one retried a downed `Storage` backend on a single
+  fixed cadence (`retry_backoff`) — with many instances sharing that backend,
+  they all retried in lockstep, so a recovering backend immediately faced a
+  synchronised retry wave. `RedisStorage` / `AsyncRedisStorage` gain three new
+  keyword-only knobs: `retry_backoff_multiplier` grows the delay
+  geometrically with each further *consecutive* failure, `retry_backoff_max`
+  caps it, and `retry_jitter` spreads it with a proportional random draw
+  (deterministic under an injected clock, so it stays reproducible in tests).
+  The attempt counter resets on recovery. Defaults (`multiplier=1.0`,
+  `jitter=0.0`) exactly reproduce the fixed-delay behavior of earlier
+  releases — nothing changes unless you opt in. See the Redis integration
+  guide's Tuning section for the new knobs.
+
 - **CI now catches two release-only failure modes before they ship (#85).** A
   `packaging-smoke` job builds the wheel, runs `twine check` and
   `check-wheel-contents` against it, then installs it with `pip`-equivalent
