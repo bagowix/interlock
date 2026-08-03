@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.1.4] - 2026-08-03
+
 ### Added
 
 - **"Correctness and testing" docs page** (`docs/correctness.md`), linked from
@@ -477,7 +479,8 @@ The major version marks the scope of what is added, not a migration burden.
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v2.1.3...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v2.1.4...HEAD
+[2.1.4]: https://github.com/bagowix/interlock/compare/v2.1.3...v2.1.4
 [2.1.3]: https://github.com/bagowix/interlock/compare/v2.1.2...v2.1.3
 [2.1.2]: https://github.com/bagowix/interlock/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/bagowix/interlock/compare/v2.1.0...v2.1.1
