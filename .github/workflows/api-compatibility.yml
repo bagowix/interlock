@@ -36,7 +36,25 @@ jobs:
       - name: Check public API against the latest release
         id: griffe
         continue-on-error: true
-        run: uv run griffe check interlock --search . -f github
+        run: |
+          # The `-f github` run is what annotates the diff; the gate reads the
+          # `oneline` run so one benign finding can be filtered out of it. Every
+          # release bumps `interlock.VERSION`, and griffe reports the new value
+          # as an attribute change — that is the release mechanism working, not
+          # a public-API breakage, and without this every release PR would need
+          # the `breaking-change` label. The filter is deliberately narrow (that
+          # attribute, in that file, that one check); if griffe ever rewords the
+          # message it stops matching and this job fails, which is the safe
+          # direction to fail in.
+          uv run griffe check interlock --search . -f github || true
+          uv run griffe check interlock --search . -f oneline \
+            > "${RUNNER_TEMP}/griffe.txt" 2>&1 || true
+          grep -vE '^interlock/version\.py:[0-9]+: VERSION: Attribute value was changed:' \
+            "${RUNNER_TEMP}/griffe.txt" > "${RUNNER_TEMP}/breakages.txt" || true
+          if [ -s "${RUNNER_TEMP}/breakages.txt" ]; then
+            cat "${RUNNER_TEMP}/breakages.txt"
+            exit 1
+          fi
 
       - name: Acknowledge intentional breakage
         if: steps.griffe.outcome == 'failure' && contains(github.event.pull_request.labels.*.name, 'breaking-change')

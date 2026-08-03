@@ -39,8 +39,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   though it is not re-exported from `__init__`. A breaking change is not
   automatically wrong — a future major release will make one on purpose — so
   the job is failable but overridable: label the pull request `breaking-change`
-  to acknowledge it. `griffe` is a dev/CI-only dependency; the core stays at
-  zero.
+  to acknowledge it. The one finding it ignores is the release bump of
+  `interlock.VERSION`, which griffe reports as a changed attribute value —
+  that is the release mechanism working, and every release would otherwise
+  have to be labelled a breaking change. `griffe` is a dev/CI-only dependency;
+  the core stays at zero.
 
 - **Mutation testing** (`mutmut`) over `interlock/_state_machine.py` and
   `interlock/_engine.py` — the two modules where a surviving mutant is a real
