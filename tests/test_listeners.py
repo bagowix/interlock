@@ -70,6 +70,16 @@ def test__on_storage_recovered__logs_info(caplog: pytest.LogCaptureFixture) -> N
     assert 'recovered' in caplog.text
 
 
+def test__on_storage_write_dropped__logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    listener = LoggingEventListener(logging.getLogger('interlock.test'))
+
+    with caplog.at_level(logging.WARNING, logger='interlock.test'):
+        listener.on_storage_write_dropped(name='svc')
+
+    assert 'svc' in caplog.text
+    assert 'queue full' in caplog.text
+
+
 def test__on_retry__logs_info(caplog: pytest.LogCaptureFixture) -> None:
     listener = LoggingEventListener(logging.getLogger('interlock.test'))
 

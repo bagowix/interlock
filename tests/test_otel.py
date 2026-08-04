@@ -86,6 +86,17 @@ def test__on_storage_recovered__counts_event() -> None:
     )
 
 
+def test__on_storage_write_dropped__counts_event() -> None:
+    meter, instruments = _meter_with_named_instruments()
+    listener = OTelEventListener(meter=meter)
+
+    listener.on_storage_write_dropped(name='svc')
+
+    instruments['interlock.storage.events'].add.assert_called_once_with(
+        1, {'breaker': 'svc', 'event': 'write_dropped'}
+    )
+
+
 def test__on_retry__counts_a_pipeline_event() -> None:
     meter, instruments = _meter_with_named_instruments()
     listener = OTelEventListener(meter=meter)

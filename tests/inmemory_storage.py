@@ -125,6 +125,7 @@ class InMemoryStorage:
         self.retry_backoff_multiplier = 1.0
         self.retry_backoff_max: float | None = None
         self.retry_jitter = 0.0
+        self.write_queue_size = 128
 
     def read(self, name: str) -> SharedState | None:
         return self._core.read(name)
@@ -163,6 +164,7 @@ class AsyncInMemoryStorage:
         self.retry_backoff_multiplier = 1.0
         self.retry_backoff_max: float | None = None
         self.retry_jitter = 0.0
+        self.write_queue_size = 128
 
     async def read(self, name: str) -> SharedState | None:
         return self._core.read(name)

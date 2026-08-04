@@ -48,7 +48,7 @@ class OTelEventListener:
         )
         self._storage_events = meter.create_counter(
             'interlock.storage.events',
-            description='Shared storage degradations and recoveries.',
+            description='Shared storage degradations, recoveries and dropped writes.',
         )
         self._pipeline_events = meter.create_counter(
             'interlock.pipeline.events',
@@ -80,6 +80,10 @@ class OTelEventListener:
     def on_storage_recovered(self, *, name: str) -> None:
         """Count a storage recovery, labelled with the breaker."""
         self._storage_events.add(1, {'breaker': name, 'event': 'recovered'})
+
+    def on_storage_write_dropped(self, *, name: str) -> None:
+        """Count a dropped coordinated write, labelled with the breaker."""
+        self._storage_events.add(1, {'breaker': name, 'event': 'write_dropped'})
 
     def on_retry(self, *, name: str, attempt: int, delay: float) -> None:  # noqa: ARG002
         """Count a retry, labelled with the strategy name (attempt/delay stay off the label)."""

@@ -123,6 +123,7 @@ def test__sync_lane_tick__dead_coordinator_with_op_in_flight__releases_the_op(
         on_view=lambda _view: None,
         on_degraded=lambda _error: None,
         on_recovered=lambda: None,
+        on_write_dropped=lambda: None,
     )
     work = coordinator._work
     work.put(lambda: None)  # dequeued by the tick, then dropped on the dead ref
@@ -148,6 +149,7 @@ async def test__async_lane_tick__dead_coordinator_with_op_in_flight__releases_th
         on_view=lambda _view: None,
         on_degraded=lambda _error: None,
         on_recovered=lambda: None,
+        on_write_dropped=lambda: None,
     )
     work = coordinator._work
 

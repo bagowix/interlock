@@ -226,6 +226,16 @@ class EventListener(Protocol):
         """Called when the shared storage backend becomes reachable again."""
         ...
 
+    def on_storage_write_dropped(self, *, name: str) -> None:
+        """Called when a coordinated write is dropped by a full write queue.
+
+        The queue only fills when the background lane stops draining it, so
+        this is the signal that shared writes are being lost while the breaker
+        keeps protecting the process locally. The shared state is reconciled
+        by the next successful poll and by ``state_ttl``.
+        """
+        ...
+
     def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
         """Called by a pipeline retry layer before it sleeps between attempts.
 

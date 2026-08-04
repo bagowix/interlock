@@ -121,8 +121,9 @@ skipping any of them breaks the guarantees the coordinator relies on:
    to `state_ttl`. Size it with this in mind — it is not just an
    abandoned-key cleanup knob.
 3. **`record_probe` tallies only while `HALF_OPEN`.** Every coordinated write
-   is best-effort: dropped while degraded, superseded by a later decision,
-   reconciled by the next poll rather than retried.
+   is best-effort *and* bounded: dropped while degraded, dropped when the
+   write queue is full, superseded by a later decision, reconciled by the next
+   poll rather than retried.
 4. **Teardown is explicit, not automatic.** `close()` / `aclose()` stop the
    lane deterministically — see [Shutdown](#shutdown) below. A coordinated
    breaker left to be garbage-collected can outlive its owning scope instead.
@@ -190,6 +191,35 @@ class StorageWatch:
 written before these hooks existed keep working — the engine calls them only if
 present.
 
+## Backpressure: the write queue is bounded
+
+Coordinated writes are fire-and-forget: a local trip and each probe outcome are
+queued for the background lane instead of being written on the protected path.
+That queue holds at most `write_queue_size` writes (128 by default).
+
+It is not a per-call queue — a healthy lane keeps it near empty, because writes
+happen per *transition*, not per call, and probes are capped by
+`permitted_calls_in_half_open`. The bound only matters when the lane stops
+draining at all: a Redis client blocking without a timeout, or an async lane
+whose event loop is gone. Without it, that lane would grow the queue for as
+long as the process lives.
+
+When the queue is full the *arriving* write is dropped — never blocked, never
+raised into the call that produced it — and reported:
+
+```python
+class StorageWatch:
+    def on_storage_write_dropped(self, *, name: str) -> None: ...  # shared state falling behind
+```
+
+Nothing is retried: the shared state is reconciled by the next successful poll
+and, failing that, by `state_ttl` expiring the key. Locally the breaker keeps
+protecting the process on its own window exactly as it does while degraded.
+
+The hook is the signal that a lane is wedged — treat a non-zero rate as an
+alert, not a tuning hint. `LoggingEventListener` logs it at `WARNING` and
+`OTelEventListener` counts it on `interlock.storage.events`.
+
 ## Shutdown
 
 A coordinated breaker owns a background lane — a daemon thread for a sync
@@ -254,6 +284,7 @@ RedisStorage(
     retry_backoff_multiplier=1.0,  # growth per consecutive failure; 1.0 = fixed delay
     retry_backoff_max=None,  # cap on the delay (s), or None for no cap
     retry_jitter=0.0,  # proportional random spread added to the (capped) delay
+    write_queue_size=128,  # max pending coordinated writes; further ones are dropped
 )
 ```
 
@@ -275,6 +306,10 @@ RedisStorage(
   Redis at the same moment too. Deterministic given the same clock reading,
   attempt number and breaker name — it does not depend on process-global
   random state.
+- **`write_queue_size`** bounds the pending coordinated writes; see
+  [Backpressure](#backpressure-the-write-queue-is-bounded). The default of 128
+  is far above what a draining lane ever holds, so raising it does not buy
+  throughput — it only lets a wedged lane hold more memory before dropping.
 
 ## Compatibility
 
