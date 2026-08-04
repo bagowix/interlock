@@ -45,6 +45,10 @@ class LoggingEventListener:
         """Log a storage recovery at INFO."""
         self._log.info('circuit %r: shared storage recovered', name)
 
+    def on_storage_write_dropped(self, *, name: str) -> None:
+        """Log a dropped coordinated write at WARNING (shared state is falling behind)."""
+        self._log.warning('circuit %r: shared write dropped, coordination queue full', name)
+
     def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
         """Log an upcoming retry at INFO (bounded by the attempt cap)."""
         self._log.info('retry %r: attempt %d failed, retrying in %.3fs', name, attempt, delay)

@@ -412,6 +412,16 @@ def test__constructor__accepts_configured_retry_policy_knobs(redis_client: redis
     assert default.retry_jitter == 0.0
 
 
+def test__constructor__write_queue_size__validated_and_configurable(
+    redis_client: redis_mod.Redis,
+) -> None:
+    with pytest.raises(ValueError, match='write_queue_size'):
+        RedisStorage(redis_client, write_queue_size=0)
+
+    assert RedisStorage(redis_client, write_queue_size=8).write_queue_size == 8
+    assert RedisStorage(redis_client).write_queue_size == 128
+
+
 # --- e2e: coordinated breaker over RedisStorage ---
 
 

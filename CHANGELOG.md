@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The coordinator's write queue is now bounded (#99).** The queue feeding a
+  coordinated breaker's background lane had no upper bound: a lane that stopped
+  draining — a storage client blocking without a timeout, an async lane whose
+  event loop is gone — grew it for as long as the process lived. It now holds
+  at most `write_queue_size` writes (a new `RedisStorage` /
+  `AsyncRedisStorage` keyword, default 128, read off the storage object like
+  the other coordination knobs). Over capacity the arriving write is dropped
+  rather than queued: it never blocks and never raises inside the protected
+  path, and it is reported through the new optional
+  `on_storage_write_dropped` listener hook (`LoggingEventListener` logs it at
+  `WARNING`, `OTelEventListener` counts it on `interlock.storage.events`).
+  Coordinated writes were already best-effort — a dropped one is reconciled by
+  the next poll and by `state_ttl` — and healthy lanes never reach the bound,
+  since writes are per transition rather than per call. Shutdown keeps working
+  with a full queue: one slot stays reserved for the stop sentinel.
+
 ## [2.2.0] - 2026-08-03
 
 ### Added

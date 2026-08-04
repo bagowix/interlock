@@ -215,6 +215,13 @@ def _non_negative(name: str, value: float) -> float:
     return value
 
 
+def _positive_int(name: str, value: int) -> int:
+    if value < 1:
+        msg = f'{name} must be >= 1, got {value!r}'
+        raise ValueError(msg)
+    return value
+
+
 class RedisStorage:
     """Synchronous ``Storage`` backed by a ``redis.Redis`` client.
 
@@ -226,7 +233,8 @@ class RedisStorage:
     (``retry_backoff``), how that delay grows on further consecutive failures
     (``retry_backoff_multiplier``, capped at ``retry_backoff_max``), and how
     much proportional jitter to add so that many instances recovering from
-    the same outage do not retry in lockstep (``retry_jitter``).
+    the same outage do not retry in lockstep (``retry_jitter``). One more knob,
+    ``write_queue_size``, bounds the coordinator's fire-and-forget write queue.
 
     Args:
         client: A connected ``redis.Redis`` instance.
@@ -241,6 +249,9 @@ class RedisStorage:
             ``None`` for no cap.
         retry_jitter: Fraction (>= 0) of the capped delay added as random
             spread. The default, 0.0, adds none.
+        write_queue_size: Maximum number of pending coordinated writes; must
+            be >= 1. Further writes are dropped and reported through
+            ``on_storage_write_dropped`` instead of growing the queue.
     """
 
     def __init__(
@@ -254,6 +265,7 @@ class RedisStorage:
         retry_backoff_multiplier: float = 1.0,
         retry_backoff_max: float | None = None,
         retry_jitter: float = 0.0,
+        write_queue_size: int = 128,
     ) -> None:
         self._client = client
         self._prefix = key_prefix
@@ -267,6 +279,7 @@ class RedisStorage:
             None if retry_backoff_max is None else _positive('retry_backoff_max', retry_backoff_max)
         )
         self.retry_jitter = _non_negative('retry_jitter', retry_jitter)
+        self.write_queue_size = _positive_int('write_queue_size', write_queue_size)
 
     def _key(self, name: str) -> str:
         return f'{self._prefix}{name}'
@@ -342,6 +355,9 @@ class AsyncRedisStorage:
             ``None`` for no cap.
         retry_jitter: Fraction (>= 0) of the capped delay added as random
             spread. The default, 0.0, adds none.
+        write_queue_size: Maximum number of pending coordinated writes; must
+            be >= 1. Further writes are dropped and reported through
+            ``on_storage_write_dropped`` instead of growing the queue.
     """
 
     def __init__(
@@ -355,6 +371,7 @@ class AsyncRedisStorage:
         retry_backoff_multiplier: float = 1.0,
         retry_backoff_max: float | None = None,
         retry_jitter: float = 0.0,
+        write_queue_size: int = 128,
     ) -> None:
         self._client = client
         self._prefix = key_prefix
@@ -368,6 +385,7 @@ class AsyncRedisStorage:
             None if retry_backoff_max is None else _positive('retry_backoff_max', retry_backoff_max)
         )
         self.retry_jitter = _non_negative('retry_jitter', retry_jitter)
+        self.write_queue_size = _positive_int('write_queue_size', write_queue_size)
 
     def _key(self, name: str) -> str:
         return f'{self._prefix}{name}'
