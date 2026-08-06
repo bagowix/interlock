@@ -16,6 +16,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The httpx2 transport, aiohttp middleware and requests adapter expose their registry
   for diagnostics and accept the same option.
 
+### Changed
+
+- **The README now gets readers from installation to their first guarded call faster.** The core
+  API appears before project comparisons, the feature language is less brittle, and optional
+  integrations are presented in one compact, linked overview instead of several partial examples.
+
 ### Fixed
 
 - **Closing an HTTP integration now also releases its per-host breakers.** The httpx2
