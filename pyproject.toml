@@ -126,6 +126,12 @@ ban-relative-imports = "all"
 "interlock/breaker.py" = [
   "PLR0913", # the public constructor mirrors the engine's keyword-only collaborators
 ]
+"interlock/registry.py" = [
+  "PLR0913", # the registry takes keyword-only defaults shared by every lazy breaker
+]
+"interlock/integrations/httpx2.py" = [
+  "PLR0913", # transports take the wrapped transport plus keyword-only breaker collaborators
+]
 "interlock/integrations/tenacity.py" = [
   "PLR0913", # RetryStrategy takes keyword-only tenacity policy collaborators
 ]

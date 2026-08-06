@@ -9,7 +9,7 @@ from requests import PreparedRequest, Response
 from requests.adapters import HTTPAdapter
 from tests.conftest import FakeClock
 
-from interlock import CircuitOpenError, Config
+from interlock import CircuitOpenError, Config, State
 from interlock.integrations.requests import CircuitBreakerAdapter, HttpStatusClassifier
 
 _TRIP_FAST = Config(minimum_number_of_calls=2, failure_rate_threshold=0.5)
@@ -98,6 +98,38 @@ def test__adapter__client_errors__do_not_trip(mocker: MockerFixture, fake_clock:
         assert adapter.send(_prepared('https://api.a/x')).status_code == 404
 
     assert transport.call_count == 5
+
+
+def test__adapter__metrics_only_failures__record_without_rejecting(
+    mocker: MockerFixture,
+    fake_clock: FakeClock,
+) -> None:
+    transport = _patch_transport(mocker, [_response(503)] * 5)
+    adapter = CircuitBreakerAdapter(
+        initial_state=State.METRICS_ONLY,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+    )
+
+    for _ in range(5):
+        assert adapter.send(_prepared('https://api.a/x')).status_code == 503
+
+    breaker = adapter.registry.get_existing('api.a')
+    assert breaker is not None
+    assert breaker.state is State.METRICS_ONLY
+    assert breaker.snapshot().failed_calls == 5
+    assert transport.call_count == 5
+
+
+def test__adapter__close__releases_pools_and_registry(mocker: MockerFixture) -> None:
+    parent_close = mocker.patch.object(HTTPAdapter, 'close', autospec=True)
+    adapter = CircuitBreakerAdapter()
+    close_all = mocker.spy(adapter.registry, 'close_all')
+
+    adapter.close()
+
+    parent_close.assert_called_once_with(adapter)
+    close_all.assert_called_once_with()
 
 
 def test__adapter__transport_exception__counts_as_failure(

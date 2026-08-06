@@ -10,9 +10,11 @@ suite cannot observe it.
 
 from typing import assert_type
 
-from interlock import CircuitBreaker, Pipeline
+from interlock import CircuitBreaker, Pipeline, Registry, State
 
 breaker = CircuitBreaker(name='typing-surface')
+shadow_breaker = CircuitBreaker(name='shadow', initial_state=State.METRICS_ONLY)
+registry = Registry(initial_state=State.METRICS_ONLY)
 pipeline = Pipeline()
 
 

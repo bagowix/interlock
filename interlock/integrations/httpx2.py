@@ -22,6 +22,7 @@ a custom ``classifier`` to change that policy.
 
 import http
 from collections.abc import Iterable
+from contextlib import AsyncExitStack, ExitStack
 from typing import cast
 
 from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
@@ -29,6 +30,7 @@ from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
 from interlock.config import Config
 from interlock.protocols import Clock, EventListener, FailureClassifier
 from interlock.registry import Registry
+from interlock.state import State
 
 __all__ = (
     'AsyncCircuitBreakerTransport',
@@ -88,14 +90,17 @@ def _host(request: Request) -> str:
 
 
 def _build_registry(
+    *,
     config: Config | None,
     clock: Clock | None,
+    initial_state: State,
     classifier: FailureClassifier | None,
     listener: EventListener | None,
 ) -> Registry:
     return Registry(
         config=config,
         clock=clock,
+        initial_state=initial_state,
         classifier=classifier if classifier is not None else HttpStatusClassifier(),
         listener=listener,
     )
@@ -109,8 +114,13 @@ class CircuitBreakerTransport(BaseTransport):
         config: Thresholds, window and timing for every host's breaker.
         clock: Time source for the breakers; inject a fake for deterministic
             tests.
+        initial_state: Stable state assigned before a host's first request.
+            Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
+
+    Raises:
+        ValueError: If ``initial_state`` is not a supported stable state.
     """
 
     def __init__(
@@ -119,6 +129,7 @@ class CircuitBreakerTransport(BaseTransport):
         *,
         config: Config | None = None,
         clock: Clock | None = None,
+        initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
     ) -> None:
@@ -126,9 +137,15 @@ class CircuitBreakerTransport(BaseTransport):
         self._registry = _build_registry(
             config=config,
             clock=clock,
+            initial_state=initial_state,
             classifier=classifier,
             listener=listener,
         )
+
+    @property
+    def registry(self) -> Registry:
+        """The per-host registry, exposed for diagnostics and operator control."""
+        return self._registry
 
     def handle_request(self, request: Request) -> Response:
         """Run the request under its host's breaker.
@@ -142,8 +159,10 @@ class CircuitBreakerTransport(BaseTransport):
         return guarded(request)
 
     def close(self) -> None:
-        """Close the wrapped transport, releasing its connection pool."""
-        self._transport.close()
+        """Release the wrapped transport and every per-host breaker."""
+        with ExitStack() as stack:
+            stack.callback(self._registry.close_all)
+            self._transport.close()
 
 
 class AsyncCircuitBreakerTransport(AsyncBaseTransport):
@@ -154,8 +173,13 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         config: Thresholds, window and timing for every host's breaker.
         clock: Time source for the breakers; inject a fake for deterministic
             tests.
+        initial_state: Stable state assigned before a host's first request.
+            Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
+
+    Raises:
+        ValueError: If ``initial_state`` is not a supported stable state.
     """
 
     def __init__(
@@ -164,6 +188,7 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         *,
         config: Config | None = None,
         clock: Clock | None = None,
+        initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
     ) -> None:
@@ -171,9 +196,15 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         self._registry = _build_registry(
             config=config,
             clock=clock,
+            initial_state=initial_state,
             classifier=classifier,
             listener=listener,
         )
+
+    @property
+    def registry(self) -> Registry:
+        """The per-host registry, exposed for diagnostics and operator control."""
+        return self._registry
 
     async def handle_async_request(self, request: Request) -> Response:
         """Run the request under its host's breaker.
@@ -187,5 +218,7 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         return await guarded(request)
 
     async def aclose(self) -> None:
-        """Close the wrapped transport, releasing its connection pool."""
-        await self._transport.aclose()
+        """Release the wrapped transport and every per-host breaker."""
+        async with AsyncExitStack() as stack:
+            stack.push_async_callback(self._registry.aclose_all)
+            await self._transport.aclose()

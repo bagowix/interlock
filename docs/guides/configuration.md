@@ -64,9 +64,12 @@ until you tune it down — safe to leave on while you observe.
 ## Sharing config with a Registry
 
 ```python
-from interlock import Config, Registry
+from interlock import Config, Registry, State
 
-registry = Registry(config=Config(minimum_number_of_calls=20))
+registry = Registry(
+    config=Config(minimum_number_of_calls=20),
+    initial_state=State.METRICS_ONLY,
+)
 
 payments = registry.get('payments')  # shared default
 search = registry.get('search', config=Config(window_size=500))  # per-name override
@@ -74,4 +77,7 @@ search = registry.get('search', config=Config(window_size=500))  # per-name over
 
 The override applies only when the breaker is first created; later `get` calls
 with the same name return the existing instance and ignore the `config`
-argument.
+argument. `initial_state` is also assigned once, inside the registry lock,
+before a newly created breaker can serve traffic. See
+[Safe rollout](states.md#safe-rollout) for using
+`METRICS_ONLY` in production.

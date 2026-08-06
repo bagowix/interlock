@@ -70,6 +70,12 @@ calls, stay open for 60s, then admit up to 10 probe calls (one at a time) and
 decide from their outcomes. See [Configuration](guides/configuration.md) for
 every option.
 
+For an existing production dependency, start with
+`initial_state=State.METRICS_ONLY`: calls are always admitted while their
+outcomes populate the window. Tune thresholds from real traffic, then deploy a
+new breaker in the default `CLOSED` state. See
+[Safe production rollout](guides/states.md#safe-rollout).
+
 ## Three ways to protect work
 
 All three run over the same `call()` primitive.
@@ -849,7 +855,7 @@ Translate the trip condition like this:
 
 There is no exact arithmetic conversion, because the two models answer
 different questions. A safe way to pick numbers is to run in
-[shadow mode](guides/states.md#metrics_only-safe-rollout) first (see
+[shadow mode](guides/states.md#safe-rollout) first (see
 [Roll out incrementally](#roll-out-incrementally) below) and read the real
 rates off `breaker.snapshot()` before enforcing.
 
@@ -1193,7 +1199,7 @@ After migrating, expect these behavioural differences — all intended:
 ## Roll out incrementally
 
 You do not have to trust new threshold numbers on day one. Ship the breaker in
-[shadow mode](guides/states.md#metrics_only-safe-rollout) — it records real
+[shadow mode](guides/states.md#safe-rollout) — it records real
 failure and slow-call rates without rejecting anything — tune against live data,
 then switch to enforcing:
 
@@ -1529,9 +1535,12 @@ until you tune it down — safe to leave on while you observe.
 ## Sharing config with a Registry
 
 ```python
-from interlock import Config, Registry
+from interlock import Config, Registry, State
 
-registry = Registry(config=Config(minimum_number_of_calls=20))
+registry = Registry(
+    config=Config(minimum_number_of_calls=20),
+    initial_state=State.METRICS_ONLY,
+)
 
 payments = registry.get('payments')  # shared default
 search = registry.get('search', config=Config(window_size=500))  # per-name override
@@ -1539,7 +1548,10 @@ search = registry.get('search', config=Config(window_size=500))  # per-name over
 
 The override applies only when the breaker is first created; later `get` calls
 with the same name return the existing instance and ignore the `config`
-argument.
+argument. `initial_state` is also assigned once, inside the registry lock,
+before a newly created breaker can serve traffic. See
+[Safe rollout](states.md#safe-rollout) for using
+`METRICS_ONLY` in production.
 
 ---
 
@@ -1621,12 +1633,46 @@ breaker.metrics_only()  # observe in production without enforcing
 breaker.reset()  # start enforcing with a clean window
 ```
 
-### `METRICS_ONLY` — safe rollout
+### Safe rollout
 
 Shadow mode is the key to introducing a breaker without risk: it records the
 exact failure and slow-call rates real traffic produces, so you can tune
 thresholds against live data before letting the breaker reject anything. It
 costs almost nothing to leave on.
+
+Set the mode at construction when no call may be admitted first:
+
+```python
+from interlock import CircuitBreaker, Registry, State
+
+breaker = CircuitBreaker(name='payments', initial_state=State.METRICS_ONLY)
+registry = Registry(initial_state=State.METRICS_ONLY)
+```
+
+`Registry` applies the state while holding its creation lock and publishes the
+breaker only afterwards. Every name created later therefore starts in shadow
+mode too. Construction is not a state transition, so it does not emit a
+synthetic `CLOSED → METRICS_ONLY` listener event.
+
+Only stable states are valid at construction: `CLOSED`, `FORCED_OPEN`,
+`DISABLED` and `METRICS_ONLY`. `OPEN` and `HALF_OPEN` require timing, probe and
+failure history, so passing either as `initial_state` raises `ValueError`.
+
+For a production rollout:
+
+1. Deploy with `initial_state=State.METRICS_ONLY` and an `EventListener` that
+   exports call outcomes.
+2. Observe failure and slow-call rates, then tune `Config` against real traffic.
+3. Deploy a new breaker, registry or transport with `initial_state=State.CLOSED`
+   (the default). The enforcing instance starts with a fresh window.
+
+Prefer a new deployment for step 3. Calling `reset()` enforces immediately for
+an existing breaker, but a registry configured with `METRICS_ONLY` would still
+apply that original initial state to hosts first seen later.
+
+For local diagnosis, `registry.get_existing(name)` returns a cached breaker or
+`None` without creating one. Inspect its `state` and `snapshot()`; use listeners
+rather than polling snapshots for production metrics.
 
 ## Coordinated state (optional)
 
@@ -2360,6 +2406,10 @@ Every integration follows the same rules, so learning one means knowing all:
 - **One breaker per host.** HTTP integrations key breakers by request host:
   a failing `api.a` never trips `api.b`. Breakers are created lazily in a
   shared [`Registry`](../reference.md).
+- **Safe rollout before enforcement.** Pass
+  `initial_state=State.METRICS_ONLY` to record real traffic without rejecting
+  it. The state is applied before each lazy breaker serves its first request;
+  deploy a new integration with `CLOSED` after tuning thresholds.
 - **One classification model.** Responses are classified by an
   `HttpStatusClassifier` — by default the canonical retryable set
   (`429, 500, 502, 503, 504`) plus any transport exception counts as a
@@ -2373,6 +2423,10 @@ Every integration follows the same rules, so learning one means knowing all:
 - **Zero-dependency core.** Integrations live in `interlock.integrations.*`
   as optional extras; `import interlock` itself never pulls anything beyond
   the standard library.
+- **Explicit ownership and teardown.** Transports and adapters close their
+  native connection resources together with their breaker registry. The
+  aiohttp middleware exposes `aclose()` because `ClientSession` does not own
+  middleware resources.
 
 ## Support tiers
 
@@ -2669,6 +2723,37 @@ client = httpx2.AsyncClient(transport=transport)
 response = await client.get('https://api.example.com/v1/users')
 ```
 
+Closing the client closes both the wrapped connection pool and every breaker
+created by the transport.
+
+## Safe production rollout
+
+Start in shadow mode when introducing the integration to existing traffic:
+
+```python
+import httpx2
+
+from interlock import State
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(
+    httpx2.AsyncHTTPTransport(),
+    initial_state=State.METRICS_ONLY,
+    listener=metrics_listener,
+)
+```
+
+Every host created later starts in `METRICS_ONLY` before its first request: it
+records outcomes but never raises `CircuitOpenError`. Use the listener for
+production metrics. For local diagnosis,
+`transport.registry.get_existing(host)` returns an existing breaker without
+creating one; inspect its `state` and `snapshot()`.
+
+After tuning thresholds, deploy a new transport with the default
+`initial_state=State.CLOSED`. Do not reset only the currently known hosts: a
+transport configured for shadow mode would still create future hosts in
+`METRICS_ONLY`. See the complete [safe-rollout guide](../guides/states.md#safe-rollout).
+
 ## Per-host isolation
 
 Each host gets its own breaker, created lazily and cached. A failing
@@ -2853,7 +2938,13 @@ middleware = CircuitBreakerMiddleware()
 async with aiohttp.ClientSession(middlewares=(middleware,)) as session:
     async with session.get('https://api.example.com/orders') as response:
         orders = await response.json()
+
+await middleware.aclose()
 ```
+
+`ClientSession` does not own middleware resources. Call `middleware.aclose()`
+during application shutdown; it releases every per-host breaker and is
+idempotent.
 
 Each host gets its own breaker (a failing `api.a` never trips `api.b`),
 created lazily and shared across requests. When a host's circuit is open the
@@ -2863,6 +2954,26 @@ made.
 The breaker observes the time to *response headers*; reading the body happens
 outside the guarded call — the same semantics as the
 [httpx2 transport](httpx2.md).
+
+## Safe production rollout
+
+Pass `initial_state=State.METRICS_ONLY` to record real outcomes without
+rejecting requests. The state is applied to every lazily created host before
+its first request:
+
+```python
+from interlock import State
+
+middleware = CircuitBreakerMiddleware(
+    initial_state=State.METRICS_ONLY,
+    listener=metrics_listener,
+)
+```
+
+The public `middleware.registry` supports local diagnosis with
+`get_existing(host)`, `state` and `snapshot()`. Use an `EventListener` for
+production metrics, then deploy a new middleware with the default `CLOSED`
+state to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 
 ## Failure policy
 
@@ -2887,7 +2998,8 @@ Any custom `FailureClassifier` works too — see
 ## Tuning and observability
 
 The middleware accepts the same collaborators as `CircuitBreaker` — `config`,
-`clock`, `classifier`, `listener`. One middleware instance holds one registry
+`clock`, `initial_state`, `classifier`, `listener`. One middleware instance
+holds one registry
 of per-host breakers; reuse the instance across sessions to share breaker
 state, or create separate instances to isolate them. For application-level
 retries combine with the [tenacity integration](tenacity.md) and read
@@ -2939,10 +3051,33 @@ session.mount('http://', adapter)
 response = session.get('https://api.example.com/orders')
 ```
 
+Closing the session closes the adapter's connection pools and every breaker it
+created.
+
 Each host gets its own breaker (a failing `api.a` never trips `api.b`),
 created lazily and shared across requests. When a host's circuit is open the
 request raises [`CircuitOpenError`](../reference.md) *before* a connection is
 made.
+
+## Safe production rollout
+
+Pass `initial_state=State.METRICS_ONLY` to record real outcomes without
+rejecting requests. The state is applied to every lazily created host before
+its first request:
+
+```python
+from interlock import State
+
+adapter = CircuitBreakerAdapter(
+    initial_state=State.METRICS_ONLY,
+    listener=metrics_listener,
+)
+```
+
+The public `adapter.registry` supports local diagnosis with
+`get_existing(host)`, `state` and `snapshot()`. Use an `EventListener` for
+production metrics, then deploy a new adapter with the default `CLOSED` state
+to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 
 ## Failure policy
 
@@ -2967,7 +3102,8 @@ Any custom `FailureClassifier` works too — see
 ## Tuning and observability
 
 The adapter accepts the same collaborators as `CircuitBreaker` — `config`,
-`clock`, `classifier`, `listener` — and forwards everything else
+`clock`, `initial_state`, `classifier`, `listener` — and forwards everything
+else
 (`pool_connections`, `max_retries`, ...) to `HTTPAdapter`. Note that
 `max_retries` is urllib3's connection-level retry; for application-level
 retries combine with the [tenacity integration](tenacity.md) and read
@@ -3676,7 +3812,8 @@ dependency-free.
 ## `CircuitBreaker`
 
 ```python
-CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None, storage=None)
+CircuitBreaker(*, name, config=None, clock=None, initial_state=State.CLOSED,
+               classifier=None, listener=None, storage=None)
 ```
 
 A named breaker for sync and async callables.
@@ -3684,6 +3821,8 @@ A named breaker for sync and async callables.
 - **Use as** a decorator (`@breaker`), a sync/async context manager
   (`with` / `async with`), or `breaker.call(fn, *args, **kwargs)`.
 - **Properties:** `name: str`, `state: State`.
+- **`initial_state`** — one of `CLOSED`, `FORCED_OPEN`, `DISABLED` or
+  `METRICS_ONLY`; transitional `OPEN` / `HALF_OPEN` raise `ValueError`.
 - **`snapshot() -> WindowSnapshot`** — current, self-consistent window aggregates;
   concurrent call settlement cannot expose a partially updated window.
 - **Manual control:** `reset()`, `force_open()`, `disable()`, `metrics_only()`.
@@ -3706,15 +3845,18 @@ See [Configuration](guides/configuration.md) for every field. Raises
 ## `Registry`
 
 ```python
-Registry(*, config=None, clock=None, classifier=None, listener=None, storage=None)
+Registry(*, config=None, clock=None, initial_state=State.CLOSED,
+         classifier=None, listener=None, storage=None)
 registry.get(name, *, config=None) -> CircuitBreaker
+registry.get_existing(name) -> CircuitBreaker | None
 registry.close_all() / await registry.aclose_all()
 ```
 
 Creates and caches named breakers. The same name always returns the same
 instance; the per-call `config` override applies only at creation. A `storage`
 is handed to every breaker the registry creates; each coordinates under its own
-name.
+name. `initial_state` is assigned before a lazy breaker is published;
+`get_existing()` inspects the cache without creating a missing name.
 
 `close_all()` / `aclose_all()` close every breaker created so far. The cache is
 kept, so `get()` keeps returning the same, torn-down instances instead of
@@ -3828,13 +3970,16 @@ Implement any of these to swap a core behaviour:
 
 Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 
-- **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
+- **`CircuitBreakerTransport(transport, *, config=None, clock=None,
+  initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
 - **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
   exceptions and statuses `429, 500, 502, 503, 504` (override the set via
   `failure_statuses`).
 
-See the [httpx2 integration](integrations/httpx2.md).
+Both transports expose their per-host `registry`; `close()` / `aclose()` release
+the wrapped transport and every breaker in that registry. See the
+[httpx2 integration](integrations/httpx2.md).
 
 ## httpx adapters
 
@@ -3853,25 +3998,30 @@ See the [httpx integration](integrations/httpx.md).
 
 Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations.aiohttp`:
 
-- **`CircuitBreakerMiddleware(*, config=None, clock=None, classifier=None, listener=None)`** —
+- **`CircuitBreakerMiddleware(*, config=None, clock=None,
+  initial_state=State.CLOSED, classifier=None, listener=None)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
 - **`HttpStatusClassifier(failure_statuses=None)`** — same canonical HTTP
   policy, reading `ClientResponse.status`.
 
-See the [aiohttp integration](integrations/aiohttp.md).
+It exposes its `registry`; call `await middleware.aclose()` during application
+shutdown. See the [aiohttp integration](integrations/aiohttp.md).
 
 ## requests adapters
 
 Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
 
-- **`CircuitBreakerAdapter(*, config=None, clock=None, classifier=None, listener=None, **adapter_kwargs)`** —
+- **`CircuitBreakerAdapter(*, config=None, clock=None,
+  initial_state=State.CLOSED, classifier=None, listener=None, **adapter_kwargs)`** —
   `HTTPAdapter` subclass for `session.mount(...)`; one breaker per request
   host. Extra kwargs go to `HTTPAdapter`.
 - **`HttpStatusClassifier(failure_statuses=None)`** — same policy, reading
   `Response.status_code`.
 
-See the [requests integration](integrations/requests.md).
+It exposes its `registry`; closing the adapter or owning session releases both
+the connection pools and breaker resources. See the
+[requests integration](integrations/requests.md).
 
 ## tenacity helpers
 
