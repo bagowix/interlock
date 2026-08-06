@@ -47,7 +47,36 @@ response = await client.get('https://api.example.com/v1/users')
 ```
 
 Use the client as a context manager. Closing it delegates `close()` or
-`aclose()` to the wrapped transport and releases the connection pool.
+`aclose()` to the wrapped transport and releases both the connection pool and
+every breaker created by the transport.
+
+## Safe production rollout
+
+Start in shadow mode when introducing the integration to existing traffic:
+
+```python
+import httpx
+
+from interlock import State
+from interlock.integrations.httpx import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(
+    httpx.AsyncHTTPTransport(),
+    initial_state=State.METRICS_ONLY,
+    listener=metrics_listener,
+)
+```
+
+Every host created later starts in `METRICS_ONLY` before its first request: it
+records outcomes but never raises `CircuitOpenError`. Use the listener for
+production metrics. For local diagnosis,
+`transport.registry.get_existing(host)` returns an existing breaker without
+creating one; inspect its `state` and `snapshot()`.
+
+After tuning thresholds, deploy a new transport with the default
+`initial_state=State.CLOSED`. Do not reset only the currently known hosts: a
+transport configured for shadow mode would still create future hosts in
+`METRICS_ONLY`. See the complete [safe-rollout guide](../guides/states.md#safe-rollout).
 
 ## Per-host isolation
 
@@ -72,14 +101,16 @@ Pass `HttpStatusClassifier(failure_statuses={...})` or another
 
 The wrapper returns the original `httpx.Response` unchanged, so sync and async
 streaming remain lazy and connection cleanup keeps httpx's normal semantics.
+Context entry and exit are delegated to the wrapped transport, including for
+custom transports that acquire resources in `__enter__` or `__aenter__`.
 Because the circuit-breaker call completes when response headers arrive, an
 exception raised later while consuming a streaming body is outside that call
 and is not recorded by the breaker.
 
 ## Tuning
 
-`config`, `clock`, `classifier`, and `listener` are shared by every per-host
-breaker created by the transport:
+`config`, `clock`, `initial_state`, `classifier`, and `listener` are shared by
+every per-host breaker created by the transport:
 
 ```python
 import httpx

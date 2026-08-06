@@ -1,10 +1,13 @@
 from collections.abc import AsyncIterator, Callable, Iterator
+from types import TracebackType
+from typing import Self
 
 import httpx
 import pytest
-from tests.conftest import FakeClock
+from pytest_mock import MockerFixture
+from tests.conftest import FakeClock, RecordingListener
 
-from interlock import CircuitOpenError, Config
+from interlock import CircuitOpenError, Config, Outcome, State
 from interlock.integrations.httpx import (
     AsyncCircuitBreakerTransport,
     CircuitBreakerTransport,
@@ -52,6 +55,56 @@ class _AsyncStub(httpx.AsyncBaseTransport):
         self.closed = True
 
 
+class _SyncLifecycleStub(_SyncStub):
+    def __init__(self) -> None:
+        super().__init__(self._handle)
+        self.entered = False
+        self.exited = False
+
+    def __enter__(self) -> Self:
+        self.entered = True
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None:
+        self.exited = True
+        super().__exit__(exc_type, exc_value, traceback)
+
+    def _handle(self, _request: httpx.Request) -> httpx.Response:
+        if not self.entered:
+            raise RuntimeError('transport was not entered')
+        return httpx.Response(200)
+
+
+class _AsyncLifecycleStub(_AsyncStub):
+    def __init__(self) -> None:
+        super().__init__(self._handle)
+        self.entered = False
+        self.exited = False
+
+    async def __aenter__(self) -> Self:
+        self.entered = True
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None:
+        self.exited = True
+        await super().__aexit__(exc_type, exc_value, traceback)
+
+    def _handle(self, _request: httpx.Request) -> httpx.Response:
+        if not self.entered:
+            raise RuntimeError('transport was not entered')
+        return httpx.Response(200)
+
+
 def _request(url: str = 'https://api.example.com/v1') -> httpx.Request:
     return httpx.Request('GET', url)
 
@@ -91,6 +144,19 @@ def test__sync_transport__success_response__passes_through(fake_clock: FakeClock
     response = transport.handle_request(_request())
 
     assert response.status_code == 200
+
+
+def test__sync_transport__context_manager__delegates_wrapped_lifecycle() -> None:
+    inner = _SyncLifecycleStub()
+    transport = CircuitBreakerTransport(inner)
+
+    with transport as entered:
+        response = entered.handle_request(_request())
+
+    assert entered is transport
+    assert response.status_code == 200
+    assert inner.exited
+    assert inner.closed
 
 
 def test__sync_transport__streaming_response__preserves_stream(fake_clock: FakeClock) -> None:
@@ -183,13 +249,55 @@ def test__sync_transport__url_without_host__raises_value_error(fake_clock: FakeC
     assert inner.calls == 0
 
 
-def test__sync_transport__close__delegates_to_wrapped() -> None:
+def test__sync_transport__close__releases_wrapped_transport_and_registry(
+    mocker: MockerFixture,
+) -> None:
     inner = _SyncStub(lambda _request: httpx.Response(200))
     transport = CircuitBreakerTransport(inner)
+    close_all = mocker.spy(transport.registry, 'close_all')
 
     transport.close()
 
     assert inner.closed
+    close_all.assert_called_once_with()
+
+
+def test__sync_transport__wrapped_close_raises__still_releases_registry(
+    mocker: MockerFixture,
+) -> None:
+    inner = _SyncStub(lambda _request: httpx.Response(200))
+    transport = CircuitBreakerTransport(inner)
+    mocker.patch.object(inner, 'close', side_effect=RuntimeError('close failed'))
+    close_all = mocker.spy(transport.registry, 'close_all')
+
+    with pytest.raises(RuntimeError, match='close failed'):
+        transport.close()
+
+    close_all.assert_called_once_with()
+
+
+def test__sync_transport__metrics_only_server_errors__records_without_rejecting(
+    fake_clock: FakeClock,
+    listener: RecordingListener,
+) -> None:
+    inner = _SyncStub(lambda _request: httpx.Response(503))
+    transport = CircuitBreakerTransport(
+        inner,
+        initial_state=State.METRICS_ONLY,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        listener=listener,
+    )
+
+    for _ in range(5):
+        response = transport.handle_request(_request())
+        assert response.status_code == 503
+
+    breaker = transport.registry.get_existing('api.example.com')
+    assert breaker is not None
+    assert breaker.state is State.METRICS_ONLY
+    assert breaker.snapshot().failed_calls == 5
+    assert [outcome for outcome, _duration in listener.calls] == [Outcome.FAILURE] * 5
 
 
 @pytest.mark.asyncio
@@ -200,6 +308,20 @@ async def test__async_transport__success_response__passes_through(fake_clock: Fa
     response = await transport.handle_async_request(_request())
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test__async_transport__context_manager__delegates_wrapped_lifecycle() -> None:
+    inner = _AsyncLifecycleStub()
+    transport = AsyncCircuitBreakerTransport(inner)
+
+    async with transport as entered:
+        response = await entered.handle_async_request(_request())
+
+    assert entered is transport
+    assert response.status_code == 200
+    assert inner.exited
+    assert inner.closed
 
 
 @pytest.mark.asyncio
@@ -300,10 +422,74 @@ async def test__async_transport__url_without_host__raises_value_error(
 
 
 @pytest.mark.asyncio
-async def test__async_transport__aclose__delegates_to_wrapped() -> None:
+async def test__async_transport__aclose__releases_wrapped_transport_and_registry(
+    mocker: MockerFixture,
+) -> None:
     inner = _AsyncStub(lambda _request: httpx.Response(200))
     transport = AsyncCircuitBreakerTransport(inner)
+    aclose_all = mocker.spy(transport.registry, 'aclose_all')
 
     await transport.aclose()
 
     assert inner.closed
+    aclose_all.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test__async_transport__wrapped_aclose_raises__still_releases_registry(
+    mocker: MockerFixture,
+) -> None:
+    inner = _AsyncStub(lambda _request: httpx.Response(200))
+    transport = AsyncCircuitBreakerTransport(inner)
+    mocker.patch.object(inner, 'aclose', side_effect=RuntimeError('close failed'))
+    aclose_all = mocker.spy(transport.registry, 'aclose_all')
+
+    with pytest.raises(RuntimeError, match='close failed'):
+        await transport.aclose()
+
+    aclose_all.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test__async_transport__metrics_only_transport_exception__propagates_and_records(
+    fake_clock: FakeClock,
+) -> None:
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError('down', request=request)
+
+    transport = AsyncCircuitBreakerTransport(
+        _AsyncStub(boom),
+        initial_state=State.METRICS_ONLY,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+    )
+
+    with pytest.raises(httpx.ConnectError, match='down'):
+        await transport.handle_async_request(_request())
+
+    breaker = transport.registry.get_existing('api.example.com')
+    assert breaker is not None
+    assert breaker.state is State.METRICS_ONLY
+    assert breaker.snapshot().failed_calls == 1
+
+
+@pytest.mark.asyncio
+async def test__async_transport__metrics_only_new_hosts__all_start_in_shadow_mode(
+    fake_clock: FakeClock,
+) -> None:
+    inner = _AsyncStub(lambda _request: httpx.Response(503))
+    transport = AsyncCircuitBreakerTransport(
+        inner,
+        initial_state=State.METRICS_ONLY,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+    )
+
+    for host in ('api-a.example.com', 'api-b.example.com'):
+        for _ in range(3):
+            response = await transport.handle_async_request(_request(f'https://{host}/'))
+            assert response.status_code == 503
+
+        breaker = transport.registry.get_existing(host)
+        assert breaker is not None
+        assert breaker.state is State.METRICS_ONLY

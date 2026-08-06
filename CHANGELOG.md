@@ -13,8 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DISABLED` and `METRICS_ONLY` are valid, while transitional `OPEN` / `HALF_OPEN`
   fail fast. Lazy registry creation applies the state before publishing a breaker,
   so per-host HTTP integrations can deploy in shadow mode without a first-call race.
-  The httpx2 transport, aiohttp middleware and requests adapter expose their registry
-  for diagnostics and accept the same option.
+  The httpx2 and httpx transports, aiohttp middleware and requests adapter expose
+  their registry for diagnostics and accept the same option.
 
 - **httpx now has a first-class transport integration (#82).** Install
   `interlock-cb[httpx]` and wrap `httpx.HTTPTransport` or
@@ -33,9 +33,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Closing an HTTP integration now also releases its per-host breakers.** The httpx2
-  transports and requests adapter close both their native connection resources and
-  the registry; the aiohttp middleware exposes `aclose()` for application shutdown.
+- **Custom httpx transports now receive their context-manager lifecycle calls.**
+  The sync and async circuit-breaker wrappers delegate context entry and exit to
+  the wrapped transport, so transports that acquire resources on entry are ready
+  before their first request and can perform their own exit handling.
+
+- **Closing an HTTP integration now also releases its per-host breakers.** The httpx
+  and httpx2 transports and requests adapter close both their native connection
+  resources and the registry; the aiohttp middleware exposes `aclose()` for
+  application shutdown.
 
 ## [2.3.0] - 2026-08-05
 

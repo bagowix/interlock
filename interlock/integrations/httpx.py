@@ -16,13 +16,16 @@ unchanged, preserving httpx's streaming semantics.
 
 import http
 from collections.abc import Iterable
-from typing import cast
+from contextlib import AsyncExitStack, ExitStack
+from types import TracebackType
+from typing import Self, cast
 
 from httpx import AsyncBaseTransport, BaseTransport, Request, Response
 
 from interlock.config import Config
 from interlock.protocols import Clock, EventListener, FailureClassifier
 from interlock.registry import Registry
+from interlock.state import State
 
 __all__ = (
     'AsyncCircuitBreakerTransport',
@@ -72,14 +75,17 @@ def _host(request: Request) -> str:
 
 
 def _build_registry(
+    *,
     config: Config | None,
     clock: Clock | None,
+    initial_state: State,
     classifier: FailureClassifier | None,
     listener: EventListener | None,
 ) -> Registry:
     return Registry(
         config=config,
         clock=clock,
+        initial_state=initial_state,
         classifier=classifier if classifier is not None else HttpStatusClassifier(),
         listener=listener,
     )
@@ -92,8 +98,13 @@ class CircuitBreakerTransport(BaseTransport):
         transport: Wrapped transport that performs requests.
         config: Thresholds, window and timing for every host's breaker.
         clock: Time source for the breakers.
+        initial_state: Stable state assigned before a host's first request.
+            Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
+
+    Raises:
+        ValueError: If ``initial_state`` is not a supported stable state.
     """
 
     def __init__(
@@ -102,6 +113,7 @@ class CircuitBreakerTransport(BaseTransport):
         *,
         config: Config | None = None,
         clock: Clock | None = None,
+        initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
     ) -> None:
@@ -109,9 +121,15 @@ class CircuitBreakerTransport(BaseTransport):
         self._registry = _build_registry(
             config=config,
             clock=clock,
+            initial_state=initial_state,
             classifier=classifier,
             listener=listener,
         )
+
+    @property
+    def registry(self) -> Registry:
+        """The per-host registry, exposed for diagnostics and operator control."""
+        return self._registry
 
     def handle_request(self, request: Request) -> Response:
         """Run a request under the breaker for its host.
@@ -124,9 +142,27 @@ class CircuitBreakerTransport(BaseTransport):
         guarded = breaker(self._transport.handle_request)
         return guarded(request)
 
+    def __enter__(self) -> Self:
+        """Enter the wrapped transport's context and return this wrapper."""
+        self._transport.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None:
+        """Exit the wrapped transport's context and release every breaker."""
+        with ExitStack() as stack:
+            stack.callback(self._registry.close_all)
+            self._transport.__exit__(exc_type, exc_value, traceback)
+
     def close(self) -> None:
-        """Close the wrapped transport and its connection pool."""
-        self._transport.close()
+        """Release the wrapped transport and every per-host breaker."""
+        with ExitStack() as stack:
+            stack.callback(self._registry.close_all)
+            self._transport.close()
 
 
 class AsyncCircuitBreakerTransport(AsyncBaseTransport):
@@ -136,8 +172,13 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         transport: Wrapped async transport that performs requests.
         config: Thresholds, window and timing for every host's breaker.
         clock: Time source for the breakers.
+        initial_state: Stable state assigned before a host's first request.
+            Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
+
+    Raises:
+        ValueError: If ``initial_state`` is not a supported stable state.
     """
 
     def __init__(
@@ -146,6 +187,7 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         *,
         config: Config | None = None,
         clock: Clock | None = None,
+        initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
     ) -> None:
@@ -153,9 +195,15 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         self._registry = _build_registry(
             config=config,
             clock=clock,
+            initial_state=initial_state,
             classifier=classifier,
             listener=listener,
         )
+
+    @property
+    def registry(self) -> Registry:
+        """The per-host registry, exposed for diagnostics and operator control."""
+        return self._registry
 
     async def handle_async_request(self, request: Request) -> Response:
         """Run a request under the breaker for its host.
@@ -168,6 +216,24 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         guarded = breaker(self._transport.handle_async_request)
         return await guarded(request)
 
+    async def __aenter__(self) -> Self:
+        """Enter the wrapped transport's context and return this wrapper."""
+        await self._transport.__aenter__()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None:
+        """Exit the wrapped transport's context and release every breaker."""
+        async with AsyncExitStack() as stack:
+            stack.push_async_callback(self._registry.aclose_all)
+            await self._transport.__aexit__(exc_type, exc_value, traceback)
+
     async def aclose(self) -> None:
-        """Close the wrapped transport and its connection pool."""
-        await self._transport.aclose()
+        """Release the wrapped transport and every per-host breaker."""
+        async with AsyncExitStack() as stack:
+            stack.push_async_callback(self._registry.aclose_all)
+            await self._transport.aclose()

@@ -181,12 +181,14 @@ the wrapped transport and every breaker in that registry. See the
 Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
 `interlock.integrations.httpx`:
 
-- **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
+- **`CircuitBreakerTransport(transport, *, config=None, clock=None,
+  initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
 - **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
   exceptions and statuses `429, 500, 502, 503, 504`.
 
-The transports preserve streaming responses and delegate `close()` / `aclose()`.
+Both transports expose their per-host `registry`, preserve streaming responses,
+and release the wrapped transport and every breaker on `close()` / `aclose()`.
 See the [httpx integration](integrations/httpx.md).
 
 ## aiohttp adapters

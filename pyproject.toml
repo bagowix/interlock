@@ -129,6 +129,9 @@ ban-relative-imports = "all"
 "interlock/registry.py" = [
   "PLR0913", # the registry takes keyword-only defaults shared by every lazy breaker
 ]
+"interlock/integrations/httpx.py" = [
+  "PLR0913", # transports take the wrapped transport plus keyword-only breaker collaborators
+]
 "interlock/integrations/httpx2.py" = [
   "PLR0913", # transports take the wrapped transport plus keyword-only breaker collaborators
 ]
