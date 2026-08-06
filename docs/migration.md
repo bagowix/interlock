@@ -32,7 +32,7 @@ Translate the trip condition like this:
 
 There is no exact arithmetic conversion, because the two models answer
 different questions. A safe way to pick numbers is to run in
-[shadow mode](guides/states.md#metrics_only-safe-rollout) first (see
+[shadow mode](guides/states.md#safe-rollout) first (see
 [Roll out incrementally](#roll-out-incrementally) below) and read the real
 rates off `breaker.snapshot()` before enforcing.
 
@@ -376,7 +376,7 @@ After migrating, expect these behavioural differences — all intended:
 ## Roll out incrementally
 
 You do not have to trust new threshold numbers on day one. Ship the breaker in
-[shadow mode](guides/states.md#metrics_only-safe-rollout) — it records real
+[shadow mode](guides/states.md#safe-rollout) — it records real
 failure and slow-call rates without rejecting anything — tune against live data,
 then switch to enforcing:
 

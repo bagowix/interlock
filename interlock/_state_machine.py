@@ -22,6 +22,7 @@ Three special states are operator overrides: ``FORCED_OPEN`` (reject all),
 metrics, never trip).
 """
 
+from interlock._initial_state import validate_initial_state
 from interlock._windows import build_window
 from interlock.config import Config
 from interlock.outcome import Outcome
@@ -42,11 +43,18 @@ class StateMachine:
     ``Clock``.
     """
 
-    def __init__(self, *, config: Config, clock: Clock) -> None:
+    def __init__(
+        self,
+        *,
+        config: Config,
+        clock: Clock,
+        initial_state: State = State.CLOSED,
+    ) -> None:
+        validate_initial_state(initial_state)
         self._config = config
         self._clock = clock
         self._window = build_window(config=config, clock=clock)
-        self._state = State.CLOSED
+        self._state = initial_state
         self._opened_at = 0.0
         self._generation = 0
         self._reset_probes()

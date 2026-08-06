@@ -157,6 +157,33 @@ Want to watch a breaker trip and recover? Run the
 [examples](examples/) — deterministic output, no network, every transition
 narrated ([walkthrough](docs/demo.md)).
 
+## Safe production rollout
+
+Start a new integration in `METRICS_ONLY` to observe real failure and slow-call
+rates without rejecting traffic. The initial state is applied before a lazy
+per-host breaker can admit its first request:
+
+```python
+import httpx2
+
+from interlock import Config, State
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(
+    httpx2.AsyncHTTPTransport(),
+    initial_state=State.METRICS_ONLY,
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    listener=metrics_listener,
+)
+```
+
+Use an `EventListener` for production metrics. For local diagnostics,
+`transport.registry.get_existing(host)` returns an already-created breaker
+without creating one, so its `state` and `snapshot()` can be inspected safely.
+After tuning thresholds, deploy a new transport with the default
+`initial_state=State.CLOSED`; the enforcing instance starts with a fresh window.
+See [States and manual control](docs/guides/states.md#safe-rollout).
+
 ## Resilience pipeline
 
 When one concern is not enough, compose strategies around a call in an

@@ -40,10 +40,33 @@ session.mount('http://', adapter)
 response = session.get('https://api.example.com/orders')
 ```
 
+Closing the session closes the adapter's connection pools and every breaker it
+created.
+
 Each host gets its own breaker (a failing `api.a` never trips `api.b`),
 created lazily and shared across requests. When a host's circuit is open the
 request raises [`CircuitOpenError`](../reference.md) *before* a connection is
 made.
+
+## Safe production rollout
+
+Pass `initial_state=State.METRICS_ONLY` to record real outcomes without
+rejecting requests. The state is applied to every lazily created host before
+its first request:
+
+```python
+from interlock import State
+
+adapter = CircuitBreakerAdapter(
+    initial_state=State.METRICS_ONLY,
+    listener=metrics_listener,
+)
+```
+
+The public `adapter.registry` supports local diagnosis with
+`get_existing(host)`, `state` and `snapshot()`. Use an `EventListener` for
+production metrics, then deploy a new adapter with the default `CLOSED` state
+to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 
 ## Failure policy
 
@@ -68,7 +91,8 @@ Any custom `FailureClassifier` works too — see
 ## Tuning and observability
 
 The adapter accepts the same collaborators as `CircuitBreaker` — `config`,
-`clock`, `classifier`, `listener` — and forwards everything else
+`clock`, `initial_state`, `classifier`, `listener` — and forwards everything
+else
 (`pool_connections`, `max_retries`, ...) to `HTTPAdapter`. Note that
 `max_retries` is urllib3's connection-level retry; for application-level
 retries combine with the [tenacity integration](tenacity.md) and read

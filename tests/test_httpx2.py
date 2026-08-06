@@ -3,9 +3,10 @@ from collections.abc import Callable
 import httpx2
 import pytest
 from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
-from tests.conftest import FakeClock
+from pytest_mock import MockerFixture
+from tests.conftest import FakeClock, RecordingListener
 
-from interlock import CircuitOpenError, Config
+from interlock import CircuitOpenError, Config, Outcome, State
 from interlock.integrations.httpx2 import (
     AsyncCircuitBreakerTransport,
     CircuitBreakerTransport,
@@ -126,13 +127,31 @@ def test__sync_transport__breakers_isolated_per_host(fake_clock: FakeClock) -> N
     assert transport.handle_request(_request('https://good.example.com/')).status_code == 200
 
 
-def test__sync_transport__close__delegates_to_wrapped() -> None:
+def test__sync_transport__close__releases_wrapped_transport_and_registry(
+    mocker: MockerFixture,
+) -> None:
     inner = _SyncStub(lambda _request: Response(200))
     transport = CircuitBreakerTransport(inner)
+    close_all = mocker.spy(transport.registry, 'close_all')
 
     transport.close()
 
     assert inner.closed
+    close_all.assert_called_once_with()
+
+
+def test__sync_transport__wrapped_close_raises__still_releases_registry(
+    mocker: MockerFixture,
+) -> None:
+    inner = _SyncStub(lambda _request: Response(200))
+    transport = CircuitBreakerTransport(inner)
+    mocker.patch.object(inner, 'close', side_effect=RuntimeError('close failed'))
+    close_all = mocker.spy(transport.registry, 'close_all')
+
+    with pytest.raises(RuntimeError, match='close failed'):
+        transport.close()
+
+    close_all.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -161,13 +180,101 @@ async def test__async_transport__server_errors__open_breaker_for_host(
 
 
 @pytest.mark.asyncio
-async def test__async_transport__aclose__delegates_to_wrapped() -> None:
+async def test__async_transport__aclose__releases_wrapped_transport_and_registry(
+    mocker: MockerFixture,
+) -> None:
     inner = _AsyncStub(lambda _request: Response(200))
     transport = AsyncCircuitBreakerTransport(inner)
+    aclose_all = mocker.spy(transport.registry, 'aclose_all')
 
     await transport.aclose()
 
     assert inner.closed
+    aclose_all.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test__async_transport__wrapped_aclose_raises__still_releases_registry(
+    mocker: MockerFixture,
+) -> None:
+    inner = _AsyncStub(lambda _request: Response(200))
+    transport = AsyncCircuitBreakerTransport(inner)
+    mocker.patch.object(inner, 'aclose', side_effect=RuntimeError('close failed'))
+    aclose_all = mocker.spy(transport.registry, 'aclose_all')
+
+    with pytest.raises(RuntimeError, match='close failed'):
+        await transport.aclose()
+
+    aclose_all.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test__async_transport__metrics_only_server_errors__records_without_rejecting(
+    fake_clock: FakeClock,
+    listener: RecordingListener,
+) -> None:
+    inner = _AsyncStub(lambda _request: Response(503))
+    transport = AsyncCircuitBreakerTransport(
+        inner,
+        initial_state=State.METRICS_ONLY,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        listener=listener,
+    )
+
+    for _ in range(5):
+        response = await transport.handle_async_request(_request())
+        assert response.status_code == 503
+
+    breaker = transport.registry.get_existing('api.example.com')
+    assert breaker is not None
+    assert breaker.state is State.METRICS_ONLY
+    assert breaker.snapshot().failed_calls == 5
+    assert [outcome for outcome, _duration in listener.calls] == [Outcome.FAILURE] * 5
+
+
+@pytest.mark.asyncio
+async def test__async_transport__metrics_only_transport_exception__propagates_and_records(
+    fake_clock: FakeClock,
+) -> None:
+    def boom(_request: Request) -> Response:
+        raise httpx2.ConnectError('down')
+
+    transport = AsyncCircuitBreakerTransport(
+        _AsyncStub(boom),
+        initial_state=State.METRICS_ONLY,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+    )
+
+    with pytest.raises(httpx2.ConnectError, match='down'):
+        await transport.handle_async_request(_request())
+
+    breaker = transport.registry.get_existing('api.example.com')
+    assert breaker is not None
+    assert breaker.snapshot().failed_calls == 1
+
+
+@pytest.mark.asyncio
+async def test__async_transport__metrics_only_new_hosts__all_start_in_shadow_mode(
+    fake_clock: FakeClock,
+) -> None:
+    inner = _AsyncStub(lambda _request: Response(503))
+    transport = AsyncCircuitBreakerTransport(
+        inner,
+        initial_state=State.METRICS_ONLY,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+    )
+
+    for host in ('api-a.example.com', 'api-b.example.com'):
+        for _ in range(3):
+            response = await transport.handle_async_request(_request(f'https://{host}/'))
+            assert response.status_code == 503
+
+        breaker = transport.registry.get_existing(host)
+        assert breaker is not None
+        assert breaker.state is State.METRICS_ONLY
 
 
 def test__http_status_classifier__custom_statuses__override_default_set() -> None:

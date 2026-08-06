@@ -52,6 +52,12 @@ calls, stay open for 60s, then admit up to 10 probe calls (one at a time) and
 decide from their outcomes. See [Configuration](guides/configuration.md) for
 every option.
 
+For an existing production dependency, start with
+`initial_state=State.METRICS_ONLY`: calls are always admitted while their
+outcomes populate the window. Tune thresholds from real traffic, then deploy a
+new breaker in the default `CLOSED` state. See
+[Safe production rollout](guides/states.md#safe-rollout).
+
 ## Three ways to protect work
 
 All three run over the same `call()` primitive.
