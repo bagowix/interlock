@@ -62,6 +62,8 @@ class Engine:
         name: Breaker name, surfaced on ``CircuitOpenError``.
         config: Thresholds, window and timing.
         clock: Time source; injected for deterministic tests.
+        initial_state: Stable state in which the breaker starts. Transitional
+            ``OPEN`` and ``HALF_OPEN`` states are rejected.
         classifier: Decides which outcomes count as failures. Defaults to
             ``DefaultFailureClassifier`` (any raised exception is a failure).
         listener: Observability hooks, dispatched through ``notify`` — a hook
@@ -78,6 +80,7 @@ class Engine:
         name: str,
         config: Config,
         clock: Clock,
+        initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
         storage: Storage | AsyncStorage | None = None,
@@ -87,7 +90,11 @@ class Engine:
         self._clock = clock
         self._classifier = classifier if classifier is not None else DefaultFailureClassifier()
         self._listener = listener
-        self._machine = StateMachine(config=config, clock=clock)
+        self._machine = StateMachine(
+            config=config,
+            clock=clock,
+            initial_state=initial_state,
+        )
         self._lock = threading.Lock()
         self._last_failure: BaseException | None = None
         self._timer: threading.Timer | None = None

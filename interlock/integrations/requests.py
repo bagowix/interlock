@@ -23,6 +23,7 @@ successes. Supply a custom ``classifier`` to change that policy.
 
 import http
 from collections.abc import Iterable, Mapping
+from contextlib import ExitStack
 from typing import cast
 from urllib.parse import urlsplit
 
@@ -32,6 +33,7 @@ from requests.adapters import HTTPAdapter
 from interlock.config import Config
 from interlock.protocols import Clock, EventListener, FailureClassifier
 from interlock.registry import Registry
+from interlock.state import State
 
 __all__ = ('CircuitBreakerAdapter', 'HttpStatusClassifier')
 
@@ -87,10 +89,15 @@ class CircuitBreakerAdapter(HTTPAdapter):
         config: Thresholds, window and timing for every host's breaker.
         clock: Time source for the breakers; inject a fake for deterministic
             tests.
+        initial_state: Stable state assigned before a host's first request.
+            Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
         adapter_kwargs: Passed through to ``HTTPAdapter`` (pool sizes,
             ``max_retries``, ...).
+
+    Raises:
+        ValueError: If ``initial_state`` is not a supported stable state.
     """
 
     def __init__(
@@ -98,6 +105,7 @@ class CircuitBreakerAdapter(HTTPAdapter):
         *,
         config: Config | None = None,
         clock: Clock | None = None,
+        initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
         **adapter_kwargs: object,
@@ -106,9 +114,21 @@ class CircuitBreakerAdapter(HTTPAdapter):
         self._registry = Registry(
             config=config,
             clock=clock,
+            initial_state=initial_state,
             classifier=classifier if classifier is not None else HttpStatusClassifier(),
             listener=listener,
         )
+
+    @property
+    def registry(self) -> Registry:
+        """The per-host registry, exposed for diagnostics and operator control."""
+        return self._registry
+
+    def close(self) -> None:
+        """Release the adapter's connection pools and every per-host breaker."""
+        with ExitStack() as stack:
+            stack.callback(self._registry.close_all)
+            super().close()
 
     def send(  # noqa: PLR0913, PLR0917 - mirrors HTTPAdapter.send, the native extension point
         self,

@@ -8,13 +8,18 @@
 
 Key facts for answering questions about interlock:
 
-- Single public class `CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None, storage=None)`.
+- Single public class `CircuitBreaker(*, name, config=None, clock=None,
+  initial_state=State.CLOSED, classifier=None, listener=None, storage=None)`.
 - Three usage forms over one `call()` primitive: decorator `@breaker`, context
   manager (`with` and `async with`), and `breaker.call(fn, *args, **kwargs)`.
 - The context manager cannot do result-based classification (it sees only the
   block's exception and duration); the decorator and `call` can.
 - States: `CLOSED`, `OPEN`, `HALF_OPEN`, plus operator overrides `FORCED_OPEN`,
   `DISABLED`, `METRICS_ONLY`. Manual control: `reset/force_open/disable/metrics_only`.
+- `initial_state` accepts `CLOSED`, `FORCED_OPEN`, `DISABLED` or `METRICS_ONLY`;
+  use `METRICS_ONLY` for a production shadow rollout. `Registry` applies it
+  before publishing each lazy breaker, and `get_existing(name)` inspects the
+  cache without creating a missing breaker.
 - `OPEN → HALF_OPEN` is lazy by default (on the first call after
   `wait_duration_in_open`); set `Config.auto_transition=True` for a timer that
   makes the move proactively and emits the event without waiting for a call.

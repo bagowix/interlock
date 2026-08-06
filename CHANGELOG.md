@@ -6,11 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Breakers can now start in a safe operator state before serving traffic.**
+  `CircuitBreaker` and `Registry` accept `initial_state`; `CLOSED`, `FORCED_OPEN`,
+  `DISABLED` and `METRICS_ONLY` are valid, while transitional `OPEN` / `HALF_OPEN`
+  fail fast. Lazy registry creation applies the state before publishing a breaker,
+  so per-host HTTP integrations can deploy in shadow mode without a first-call race.
+  The httpx2 transport, aiohttp middleware and requests adapter expose their registry
+  for diagnostics and accept the same option.
+
 ### Changed
 
 - **The README now gets readers from installation to their first guarded call faster.** The core
   API appears before project comparisons, the feature language is less brittle, and optional
   integrations are presented in one compact, linked overview instead of several partial examples.
+
+### Fixed
+
+- **Closing an HTTP integration now also releases its per-host breakers.** The httpx2
+  transports and requests adapter close both their native connection resources and
+  the registry; the aiohttp middleware exposes `aclose()` for application shutdown.
 
 ## [2.3.0] - 2026-08-05
 

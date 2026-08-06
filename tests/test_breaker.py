@@ -82,6 +82,43 @@ def test__init__defaults__usable_without_config_or_clock() -> None:
     assert breaker.state is State.CLOSED
 
 
+@pytest.mark.parametrize(
+    'initial_state',
+    [State.CLOSED, State.FORCED_OPEN, State.DISABLED, State.METRICS_ONLY],
+)
+def test__init__supported_initial_state__starts_in_requested_state(initial_state: State) -> None:
+    breaker = CircuitBreaker(name='rollout', initial_state=initial_state)
+
+    assert breaker.state is initial_state
+
+
+@pytest.mark.parametrize('initial_state', [State.OPEN, State.HALF_OPEN])
+def test__init__transitional_initial_state__raises_value_error(initial_state: State) -> None:
+    with pytest.raises(ValueError, match='initial_state'):
+        CircuitBreaker(name='invalid', initial_state=initial_state)
+
+
+def test__init__metrics_only__records_without_tripping_or_synthetic_transition(
+    config: Config,
+    fake_clock: FakeClock,
+    listener: RecordingListener,
+) -> None:
+    breaker = CircuitBreaker(
+        name='shadow',
+        initial_state=State.METRICS_ONLY,
+        config=config,
+        clock=fake_clock,
+        listener=listener,
+    )
+
+    _fail(breaker)
+    _fail(breaker)
+
+    assert breaker.state is State.METRICS_ONLY
+    assert breaker.snapshot() == WindowSnapshot(total_calls=4, failed_calls=4, slow_calls=0)
+    assert listener.state_changes == []
+
+
 def test__name__exposes_breaker_name(breaker: CircuitBreaker) -> None:
     assert breaker.name == 'svc'
 

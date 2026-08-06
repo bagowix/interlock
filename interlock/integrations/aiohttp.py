@@ -34,6 +34,7 @@ from aiohttp import ClientHandlerType, ClientRequest, ClientResponse
 from interlock.config import Config
 from interlock.protocols import Clock, EventListener, FailureClassifier
 from interlock.registry import Registry
+from interlock.state import State
 
 __all__ = ('CircuitBreakerMiddleware', 'HttpStatusClassifier')
 
@@ -86,8 +87,13 @@ class CircuitBreakerMiddleware:
         config: Thresholds, window and timing for every host's breaker.
         clock: Time source for the breakers; inject a fake for deterministic
             tests.
+        initial_state: Stable state assigned before a host's first request.
+            Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
+
+    Raises:
+        ValueError: If ``initial_state`` is not a supported stable state.
     """
 
     def __init__(
@@ -95,15 +101,26 @@ class CircuitBreakerMiddleware:
         *,
         config: Config | None = None,
         clock: Clock | None = None,
+        initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
     ) -> None:
         self._registry = Registry(
             config=config,
             clock=clock,
+            initial_state=initial_state,
             classifier=classifier if classifier is not None else HttpStatusClassifier(),
             listener=listener,
         )
+
+    @property
+    def registry(self) -> Registry:
+        """The per-host registry, exposed for diagnostics and operator control."""
+        return self._registry
+
+    async def aclose(self) -> None:
+        """Release every per-host breaker's background resources."""
+        await self._registry.aclose_all()
 
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
         """Run the request under its host's breaker.

@@ -7,7 +7,8 @@ dependency-free.
 ## `CircuitBreaker`
 
 ```python
-CircuitBreaker(*, name, config=None, clock=None, classifier=None, listener=None, storage=None)
+CircuitBreaker(*, name, config=None, clock=None, initial_state=State.CLOSED,
+               classifier=None, listener=None, storage=None)
 ```
 
 A named breaker for sync and async callables.
@@ -15,6 +16,8 @@ A named breaker for sync and async callables.
 - **Use as** a decorator (`@breaker`), a sync/async context manager
   (`with` / `async with`), or `breaker.call(fn, *args, **kwargs)`.
 - **Properties:** `name: str`, `state: State`.
+- **`initial_state`** — one of `CLOSED`, `FORCED_OPEN`, `DISABLED` or
+  `METRICS_ONLY`; transitional `OPEN` / `HALF_OPEN` raise `ValueError`.
 - **`snapshot() -> WindowSnapshot`** — current, self-consistent window aggregates;
   concurrent call settlement cannot expose a partially updated window.
 - **Manual control:** `reset()`, `force_open()`, `disable()`, `metrics_only()`.
@@ -37,15 +40,18 @@ See [Configuration](guides/configuration.md) for every field. Raises
 ## `Registry`
 
 ```python
-Registry(*, config=None, clock=None, classifier=None, listener=None, storage=None)
+Registry(*, config=None, clock=None, initial_state=State.CLOSED,
+         classifier=None, listener=None, storage=None)
 registry.get(name, *, config=None) -> CircuitBreaker
+registry.get_existing(name) -> CircuitBreaker | None
 registry.close_all() / await registry.aclose_all()
 ```
 
 Creates and caches named breakers. The same name always returns the same
 instance; the per-call `config` override applies only at creation. A `storage`
 is handed to every breaker the registry creates; each coordinates under its own
-name.
+name. `initial_state` is assigned before a lazy breaker is published;
+`get_existing()` inspects the cache without creating a missing name.
 
 `close_all()` / `aclose_all()` close every breaker created so far. The cache is
 kept, so `get()` keeps returning the same, torn-down instances instead of
@@ -159,37 +165,45 @@ Implement any of these to swap a core behaviour:
 
 Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 
-- **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
+- **`CircuitBreakerTransport(transport, *, config=None, clock=None,
+  initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
 - **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
   exceptions and statuses `429, 500, 502, 503, 504` (override the set via
   `failure_statuses`).
 
-See the [httpx2 integration](integrations/httpx2.md).
+Both transports expose their per-host `registry`; `close()` / `aclose()` release
+the wrapped transport and every breaker in that registry. See the
+[httpx2 integration](integrations/httpx2.md).
 
 ## aiohttp adapters
 
 Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations.aiohttp`:
 
-- **`CircuitBreakerMiddleware(*, config=None, clock=None, classifier=None, listener=None)`** —
+- **`CircuitBreakerMiddleware(*, config=None, clock=None,
+  initial_state=State.CLOSED, classifier=None, listener=None)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
 - **`HttpStatusClassifier(failure_statuses=None)`** — same policy as the
   httpx2 variant, reading `ClientResponse.status`.
 
-See the [aiohttp integration](integrations/aiohttp.md).
+It exposes its `registry`; call `await middleware.aclose()` during application
+shutdown. See the [aiohttp integration](integrations/aiohttp.md).
 
 ## requests adapters
 
 Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
 
-- **`CircuitBreakerAdapter(*, config=None, clock=None, classifier=None, listener=None, **adapter_kwargs)`** —
+- **`CircuitBreakerAdapter(*, config=None, clock=None,
+  initial_state=State.CLOSED, classifier=None, listener=None, **adapter_kwargs)`** —
   `HTTPAdapter` subclass for `session.mount(...)`; one breaker per request
   host. Extra kwargs go to `HTTPAdapter`.
 - **`HttpStatusClassifier(failure_statuses=None)`** — same policy, reading
   `Response.status_code`.
 
-See the [requests integration](integrations/requests.md).
+It exposes its `registry`; closing the adapter or owning session releases both
+the connection pools and breaker resources. See the
+[requests integration](integrations/requests.md).
 
 ## tenacity helpers
 
