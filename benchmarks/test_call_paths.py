@@ -40,6 +40,16 @@ def runner() -> Iterator[asyncio.Runner]:
         yield loop_runner
 
 
+def test_baseline_direct_call(benchmark: BenchmarkFixture) -> None:
+    """The unwrapped sync callable: the denominator for every overhead ratio."""
+    benchmark(lambda: _work(1, 2))
+
+
+def test_baseline_direct_call_async(benchmark: BenchmarkFixture, runner: asyncio.Runner) -> None:
+    """The unwrapped coroutine on the same pre-built loop the async paths pay for."""
+    benchmark(lambda: runner.run(_async_work(1, 2)))
+
+
 def test_call_sync(benchmark: BenchmarkFixture) -> None:
     """``call`` on a closed breaker: detect, admit, run, classify, record."""
     breaker = CircuitBreaker(name='bench-call-sync', config=_CLOSED_CONFIG)

@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Direct-call baseline and threaded-contention benchmarks**, closing out the
+  two gaps left in #84. The CodSpeed suite reported the absolute cost of every
+  protected path but not the number a prospective user actually wants — the
+  breaker's overhead relative to calling the function directly.
+  `test_baseline_direct_call` and its async twin make that ratio derivable
+  from any run. `benchmarks/test_contention.py` drives one breaker from four
+  worker threads so the work under the shared lock is tracked as a trend; its
+  docstring and `CONTRIBUTING.md` spell out that instruction counting runs
+  threads one at a time, so the number is lock-path work, not wall-clock
+  contention.
+
 ## [2.1.4] - 2026-08-03
 
 ### Added
