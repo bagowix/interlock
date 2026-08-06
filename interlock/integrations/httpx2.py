@@ -23,7 +23,8 @@ a custom ``classifier`` to change that policy.
 import http
 from collections.abc import Iterable
 from contextlib import AsyncExitStack, ExitStack
-from typing import cast
+from types import TracebackType
+from typing import Self, cast
 
 from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
 
@@ -158,6 +159,22 @@ class CircuitBreakerTransport(BaseTransport):
         guarded = breaker(self._transport.handle_request)
         return guarded(request)
 
+    def __enter__(self) -> Self:
+        """Enter the wrapped transport's context and return this wrapper."""
+        self._transport.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None:
+        """Exit the wrapped transport's context and release every breaker."""
+        with ExitStack() as stack:
+            stack.callback(self._registry.close_all)
+            self._transport.__exit__(exc_type, exc_value, traceback)
+
     def close(self) -> None:
         """Release the wrapped transport and every per-host breaker."""
         with ExitStack() as stack:
@@ -216,6 +233,22 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         breaker = self._registry.get(_host(request))
         guarded = breaker(self._transport.handle_async_request)
         return await guarded(request)
+
+    async def __aenter__(self) -> Self:
+        """Enter the wrapped transport's context and return this wrapper."""
+        await self._transport.__aenter__()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None:
+        """Exit the wrapped transport's context and release every breaker."""
+        async with AsyncExitStack() as stack:
+            stack.push_async_callback(self._registry.aclose_all)
+            await self._transport.__aexit__(exc_type, exc_value, traceback)
 
     async def aclose(self) -> None:
         """Release the wrapped transport and every per-host breaker."""

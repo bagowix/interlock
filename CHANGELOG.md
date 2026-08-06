@@ -20,7 +20,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `interlock-cb[httpx]` and wrap `httpx.HTTPTransport` or
   `httpx.AsyncHTTPTransport` to apply one breaker per request host without
   decorators. The sync and async wrappers preserve streaming responses,
-  delegate client cleanup, reject host-less URLs before I/O, and use the same
+  delegate the wrapped transport's full lifecycle (context entry and exit,
+  `close()` / `aclose()`), reject host-less URLs before I/O, and use the same
   configurable `429, 500, 502, 503, 504` failure policy as the existing HTTP
   integrations. Unit and real-loopback tests run against both the minimum
   supported httpx 0.27.0 and the locked latest version in CI.
@@ -33,15 +34,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Custom httpx transports now receive their context-manager lifecycle calls.**
-  The sync and async circuit-breaker wrappers delegate context entry and exit to
-  the wrapped transport, so transports that acquire resources on entry are ready
-  before their first request and can perform their own exit handling.
+- **The httpx2 transports now delegate context-manager entry and exit to the
+  wrapped transport.** Entering `with client:` (or `async with client:`)
+  previously never entered the wrapped transport, so a custom transport that
+  acquires resources in `__enter__` / `__aenter__` was not ready before its
+  first request. Exit now also releases every per-host breaker, matching
+  `close()` / `aclose()`.
 
-- **Closing an HTTP integration now also releases its per-host breakers.** The httpx
-  and httpx2 transports and requests adapter close both their native connection
-  resources and the registry; the aiohttp middleware exposes `aclose()` for
-  application shutdown.
+- **Closing an HTTP integration now also releases its per-host breakers.** The httpx2
+  transports and requests adapter close both their native connection resources and
+  the registry; the aiohttp middleware exposes `aclose()` for application shutdown.
 
 ## [2.3.0] - 2026-08-05
 

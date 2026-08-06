@@ -10,8 +10,15 @@ This module imports ``httpx`` and is deliberately not re-exported from
     transport = CircuitBreakerTransport(httpx.HTTPTransport())
     client = httpx.Client(transport=transport)
 
-The wrapper applies one circuit breaker per host. Responses are returned
-unchanged, preserving httpx's streaming semantics.
+The wrapper applies one circuit breaker **per host** transparently: no
+decorators in user code. Each host gets its own breaker (a slow or failing
+``api.a`` must not trip ``api.b``), created lazily and shared across requests.
+Responses are returned unchanged, preserving httpx's streaming semantics.
+
+By default a response counts as a failure when its status is one of
+``HttpStatusClassifier``'s — the canonical retryable set ``429, 500, 502, 503,
+504`` — and any transport exception (connect/read errors) is a failure. Supply
+a custom ``classifier`` to change that policy.
 """
 
 import http
@@ -33,23 +40,33 @@ __all__ = (
     'HttpStatusClassifier',
 )
 
+# Mirrors urllib3's recommended ``status_forcelist`` (also used by AWS/Google):
+# transient server-side conditions where the dependency is unhealthy or
+# overloaded. Permanent 5xx (501 Not Implemented, 505) are excluded — retrying
+# or tripping the breaker cannot help a contract/protocol error.
 _FAILURE_STATUSES = frozenset(
     {
-        http.HTTPStatus.TOO_MANY_REQUESTS,
-        http.HTTPStatus.INTERNAL_SERVER_ERROR,
-        http.HTTPStatus.BAD_GATEWAY,
-        http.HTTPStatus.SERVICE_UNAVAILABLE,
-        http.HTTPStatus.GATEWAY_TIMEOUT,
+        http.HTTPStatus.TOO_MANY_REQUESTS,  # 429
+        http.HTTPStatus.INTERNAL_SERVER_ERROR,  # 500
+        http.HTTPStatus.BAD_GATEWAY,  # 502
+        http.HTTPStatus.SERVICE_UNAVAILABLE,  # 503
+        http.HTTPStatus.GATEWAY_TIMEOUT,  # 504
     }
 )
 
 
 class HttpStatusClassifier:
-    """Count transport exceptions and unhealthy-status responses as failures.
+    """Counts transport exceptions and unhealthy-status responses as failures.
+
+    A returned response is a failure when its status is in ``failure_statuses``
+    — by default the canonical retryable set (``429, 500, 502, 503, 504``);
+    any raised exception is a failure. Other responses — including ``4xx``
+    client mistakes like ``404`` — are successes, so they never trip the
+    breaker.
 
     Args:
         failure_statuses: Statuses to count as failures instead of the
-            canonical set ``429, 500, 502, 503, 504``.
+            canonical set.
     """
 
     def __init__(self, *, failure_statuses: Iterable[int] | None = None) -> None:

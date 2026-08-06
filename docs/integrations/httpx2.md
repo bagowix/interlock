@@ -49,8 +49,10 @@ client = httpx2.AsyncClient(transport=transport)
 response = await client.get('https://api.example.com/v1/users')
 ```
 
-Closing the client closes both the wrapped connection pool and every breaker
-created by the transport.
+Use the client as a context manager. Context entry and exit are delegated to
+the wrapped transport, including for custom transports that acquire resources
+in `__enter__` or `__aenter__`. Closing the client closes both the wrapped
+connection pool and every breaker created by the transport.
 
 ## Safe production rollout
 

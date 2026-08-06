@@ -1,4 +1,6 @@
 from collections.abc import Callable
+from types import TracebackType
+from typing import Self
 
 import httpx2
 import pytest
@@ -44,6 +46,56 @@ class _AsyncStub(AsyncBaseTransport):
         self.closed = True
 
 
+class _SyncLifecycleStub(_SyncStub):
+    def __init__(self) -> None:
+        super().__init__(self._handle)
+        self.entered = False
+        self.exited = False
+
+    def __enter__(self) -> Self:
+        self.entered = True
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None:
+        self.exited = True
+        super().__exit__(exc_type, exc_value, traceback)
+
+    def _handle(self, _request: Request) -> Response:
+        if not self.entered:
+            raise RuntimeError('transport was not entered')
+        return Response(200)
+
+
+class _AsyncLifecycleStub(_AsyncStub):
+    def __init__(self) -> None:
+        super().__init__(self._handle)
+        self.entered = False
+        self.exited = False
+
+    async def __aenter__(self) -> Self:
+        self.entered = True
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ) -> None:
+        self.exited = True
+        await super().__aexit__(exc_type, exc_value, traceback)
+
+    def _handle(self, _request: Request) -> Response:
+        if not self.entered:
+            raise RuntimeError('transport was not entered')
+        return Response(200)
+
+
 def _request(url: str = 'https://api.example.com/v1') -> Request:
     return Request('GET', url)
 
@@ -75,6 +127,19 @@ def test__sync_transport__success_response__passes_through(fake_clock: FakeClock
     response = transport.handle_request(_request())
 
     assert response.status_code == 200
+
+
+def test__sync_transport__context_manager__delegates_wrapped_lifecycle() -> None:
+    inner = _SyncLifecycleStub()
+    transport = CircuitBreakerTransport(inner)
+
+    with transport as entered:
+        response = entered.handle_request(_request())
+
+    assert entered is transport
+    assert response.status_code == 200
+    assert inner.exited
+    assert inner.closed
 
 
 def test__sync_transport__server_errors__open_breaker_for_host(fake_clock: FakeClock) -> None:
@@ -162,6 +227,20 @@ async def test__async_transport__success_response__passes_through(fake_clock: Fa
     response = await transport.handle_async_request(_request())
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test__async_transport__context_manager__delegates_wrapped_lifecycle() -> None:
+    inner = _AsyncLifecycleStub()
+    transport = AsyncCircuitBreakerTransport(inner)
+
+    async with transport as entered:
+        response = await entered.handle_async_request(_request())
+
+    assert entered is transport
+    assert response.status_code == 200
+    assert inner.exited
+    assert inner.closed
 
 
 @pytest.mark.asyncio
