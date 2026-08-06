@@ -1,18 +1,19 @@
-"""httpx2 transport integration — requires the ``httpx2`` extra.
+"""httpx transport integration — requires the ``httpx`` extra.
 
-This module imports ``httpx2`` and is deliberately *not* re-exported from
+This module imports ``httpx`` and is deliberately not re-exported from
 ``interlock`` so the core stays zero-dependency. Install with
-``pip install interlock[httpx2]`` and wrap your transport explicitly::
+``pip install interlock-cb[httpx]`` and wrap a transport explicitly::
 
-    import httpx2
-    from interlock.integrations.httpx2 import CircuitBreakerTransport
+    import httpx
+    from interlock.integrations.httpx import CircuitBreakerTransport
 
-    transport = CircuitBreakerTransport(httpx2.HTTPTransport())
-    client = httpx2.Client(transport=transport)
+    transport = CircuitBreakerTransport(httpx.HTTPTransport())
+    client = httpx.Client(transport=transport)
 
 The wrapper applies one circuit breaker **per host** transparently: no
 decorators in user code. Each host gets its own breaker (a slow or failing
 ``api.a`` must not trip ``api.b``), created lazily and shared across requests.
+Responses are returned unchanged, preserving httpx's streaming semantics.
 
 By default a response counts as a failure when its status is one of
 ``HttpStatusClassifier``'s — the canonical retryable set ``429, 500, 502, 503,
@@ -26,7 +27,7 @@ from contextlib import AsyncExitStack, ExitStack
 from types import TracebackType
 from typing import Self, cast
 
-from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
+from httpx import AsyncBaseTransport, BaseTransport, Request, Response
 
 from interlock.config import Config
 from interlock.protocols import Clock, EventListener, FailureClassifier
@@ -82,7 +83,7 @@ class HttpStatusClassifier:
 
 
 def _host(request: Request) -> str:
-    """The host keying the request's breaker; empty hosts are rejected eagerly."""
+    """Return the host key, rejecting URLs that cannot identify a dependency."""
     host = request.url.host
     if not host:
         raise ValueError(f'Request URL has no host to key a breaker on: {request.url!s}')
@@ -108,13 +109,12 @@ def _build_registry(
 
 
 class CircuitBreakerTransport(BaseTransport):
-    """A synchronous transport that guards each host with a circuit breaker.
+    """Guard every host reached by a synchronous httpx transport.
 
     Args:
-        transport: The wrapped transport that performs the actual request.
+        transport: Wrapped transport that performs requests.
         config: Thresholds, window and timing for every host's breaker.
-        clock: Time source for the breakers; inject a fake for deterministic
-            tests.
+        clock: Time source for the breakers.
         initial_state: Stable state assigned before a host's first request.
             Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
@@ -149,11 +149,11 @@ class CircuitBreakerTransport(BaseTransport):
         return self._registry
 
     def handle_request(self, request: Request) -> Response:
-        """Run the request under its host's breaker.
+        """Run a request under the breaker for its host.
 
         Raises:
             CircuitOpenError: If the host's breaker is open.
-            ValueError: If the request URL carries no host to key a breaker on.
+            ValueError: If the request URL has no host.
         """
         breaker = self._registry.get(_host(request))
         guarded = breaker(self._transport.handle_request)
@@ -183,13 +183,12 @@ class CircuitBreakerTransport(BaseTransport):
 
 
 class AsyncCircuitBreakerTransport(AsyncBaseTransport):
-    """An asynchronous transport that guards each host with a circuit breaker.
+    """Guard every host reached by an asynchronous httpx transport.
 
     Args:
-        transport: The wrapped async transport that performs the request.
+        transport: Wrapped async transport that performs requests.
         config: Thresholds, window and timing for every host's breaker.
-        clock: Time source for the breakers; inject a fake for deterministic
-            tests.
+        clock: Time source for the breakers.
         initial_state: Stable state assigned before a host's first request.
             Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
@@ -224,11 +223,11 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         return self._registry
 
     async def handle_async_request(self, request: Request) -> Response:
-        """Run the request under its host's breaker.
+        """Run a request under the breaker for its host.
 
         Raises:
             CircuitOpenError: If the host's breaker is open.
-            ValueError: If the request URL carries no host to key a breaker on.
+            ValueError: If the request URL has no host.
         """
         breaker = self._registry.get(_host(request))
         guarded = breaker(self._transport.handle_async_request)

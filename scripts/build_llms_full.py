@@ -33,6 +33,7 @@ _PAGES = (
     'integrations/fastapi.md',
     'integrations/litestar.md',
     'integrations/httpx2.md',
+    'integrations/httpx.md',
     'integrations/aiohttp.md',
     'integrations/requests.md',
     'integrations/llm.md',

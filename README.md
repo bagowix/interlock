@@ -147,6 +147,7 @@ By default, transport exceptions and the canonical retryable statuses
 | Integration | Install | Documentation |
 |---|---|---|
 | httpx2 | `interlock-cb[httpx2]` | [Per-host transport](docs/integrations/httpx2.md) |
+| httpx | `interlock-cb[httpx]` | [Per-host transport](docs/integrations/httpx.md) |
 | aiohttp | `interlock-cb[aiohttp]` | [Client middleware](docs/integrations/aiohttp.md) |
 | requests | `interlock-cb[requests]` | [Session adapter](docs/integrations/requests.md) |
 | FastAPI | `interlock-cb[fastapi]` | [`503 + Retry-After` handler](docs/integrations/fastapi.md) |

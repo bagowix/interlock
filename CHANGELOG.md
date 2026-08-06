@@ -13,8 +13,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DISABLED` and `METRICS_ONLY` are valid, while transitional `OPEN` / `HALF_OPEN`
   fail fast. Lazy registry creation applies the state before publishing a breaker,
   so per-host HTTP integrations can deploy in shadow mode without a first-call race.
-  The httpx2 transport, aiohttp middleware and requests adapter expose their registry
-  for diagnostics and accept the same option.
+  The httpx2 and httpx transports, aiohttp middleware and requests adapter expose
+  their registry for diagnostics and accept the same option.
+
+- **httpx now has a first-class transport integration (#82).** Install
+  `interlock-cb[httpx]` and wrap `httpx.HTTPTransport` or
+  `httpx.AsyncHTTPTransport` to apply one breaker per request host without
+  decorators. The sync and async wrappers preserve streaming responses,
+  delegate the wrapped transport's full lifecycle (context entry and exit,
+  `close()` / `aclose()`), reject host-less URLs before I/O, and use the same
+  configurable `429, 500, 502, 503, 504` failure policy as the existing HTTP
+  integrations. Unit and real-loopback tests run against both the minimum
+  supported httpx 0.27.0 and the locked latest version in CI.
 
 ### Changed
 
@@ -23,6 +33,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   integrations are presented in one compact, linked overview instead of several partial examples.
 
 ### Fixed
+
+- **The httpx2 transports now delegate context-manager entry and exit to the
+  wrapped transport.** Entering `with client:` (or `async with client:`)
+  previously never entered the wrapped transport, so a custom transport that
+  acquires resources in `__enter__` / `__aenter__` was not ready before its
+  first request. Exit now also releases every per-host breaker, matching
+  `close()` / `aclose()`.
 
 - **Closing an HTTP integration now also releases its per-host breakers.** The httpx2
   transports and requests adapter close both their native connection resources and

@@ -4,6 +4,9 @@ The `interlock-cb[httpx2]` extra wraps an [httpx2](https://pypi.org/project/http
 transport so a circuit breaker is applied **per host** transparently — no
 decorators or `call` wrappers in your request code.
 
+`interlock-cb` is listed in httpx2's official
+[third-party packages directory](https://github.com/pydantic/httpx2/blob/main/docs/third_party_packages.md#interlock-cb).
+
 === "uv"
 
     ```bash
@@ -46,8 +49,10 @@ client = httpx2.AsyncClient(transport=transport)
 response = await client.get('https://api.example.com/v1/users')
 ```
 
-Closing the client closes both the wrapped connection pool and every breaker
-created by the transport.
+Use the client as a context manager. Context entry and exit are delegated to
+the wrapped transport, including for custom transports that acquire resources
+in `__enter__` or `__aenter__`. Closing the client closes both the wrapped
+connection pool and every breaker created by the transport.
 
 ## Safe production rollout
 

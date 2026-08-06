@@ -176,6 +176,21 @@ Both transports expose their per-host `registry`; `close()` / `aclose()` release
 the wrapped transport and every breaker in that registry. See the
 [httpx2 integration](integrations/httpx2.md).
 
+## httpx adapters
+
+Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
+`interlock.integrations.httpx`:
+
+- **`CircuitBreakerTransport(transport, *, config=None, clock=None,
+  initial_state=State.CLOSED, classifier=None, listener=None)`**
+- **`AsyncCircuitBreakerTransport(transport, *, ...)`**
+- **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
+  exceptions and statuses `429, 500, 502, 503, 504`.
+
+Both transports expose their per-host `registry`, preserve streaming responses,
+and release the wrapped transport and every breaker on `close()` / `aclose()`.
+See the [httpx integration](integrations/httpx.md).
+
 ## aiohttp adapters
 
 Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations.aiohttp`:
@@ -184,8 +199,8 @@ Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations
   initial_state=State.CLOSED, classifier=None, listener=None)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
-- **`HttpStatusClassifier(failure_statuses=None)`** — same policy as the
-  httpx2 variant, reading `ClientResponse.status`.
+- **`HttpStatusClassifier(failure_statuses=None)`** — same canonical HTTP
+  policy, reading `ClientResponse.status`.
 
 It exposes its `registry`; call `await middleware.aclose()` during application
 shutdown. See the [aiohttp integration](integrations/aiohttp.md).

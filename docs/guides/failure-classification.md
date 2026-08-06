@@ -58,7 +58,9 @@ class IgnoreNotFound:
 
 ## HTTP out of the box
 
-For httpx2, you do not need to write this yourself — the
-[httpx2 integration](../integrations/httpx2.md) ships `HttpStatusClassifier`,
-which treats transport exceptions and the canonical retryable statuses
-(`429, 500, 502, 503, 504`) as failures.
+For HTTP clients, you do not need to write this yourself — the
+[httpx2](../integrations/httpx2.md), [httpx](../integrations/httpx.md),
+[aiohttp](../integrations/aiohttp.md), and
+[requests](../integrations/requests.md) integrations ship
+`HttpStatusClassifier`, which treats transport exceptions and the canonical
+retryable statuses (`429, 500, 502, 503, 504`) as failures.
