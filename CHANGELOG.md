@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The README now gets readers from installation to their first guarded call faster.** The core
+  API appears before project comparisons, the feature language is less brittle, and optional
+  integrations are presented in one compact, linked overview instead of several partial examples.
+
 ## [2.3.0] - 2026-08-05
 
 ### Added
