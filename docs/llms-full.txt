@@ -44,6 +44,7 @@ add the ones you need (same names with `pip install` / `poetry add`):
 uv add 'interlock-cb[fastapi]'  # CircuitOpenError -> 503 + Retry-After
 uv add 'interlock-cb[litestar]' # same for Litestar
 uv add 'interlock-cb[httpx2]'   # per-host httpx2 transport
+uv add 'interlock-cb[httpx]'    # per-host httpx transport
 uv add 'interlock-cb[aiohttp]'  # per-host aiohttp client middleware
 uv add 'interlock-cb[requests]' # per-host requests session adapter
 uv add 'interlock-cb[tenacity]' # retry x breaker composition helpers
@@ -150,7 +151,7 @@ breaker.snapshot()  # WindowSnapshot: total_calls, failed_calls, slow_calls,
 - [States & manual control](guides/states.md)
 - [Failure classification](guides/failure-classification.md)
 - [Observability](guides/observability.md)
-- [Integrations](integrations/index.md) — FastAPI, Litestar, httpx2, aiohttp, requests, tenacity, Redis
+- [Integrations](integrations/index.md) — FastAPI, Litestar, httpx2, httpx, aiohttp, requests, tenacity, Redis
 - [Resilience pipeline](guides/pipeline.md) — compose timeout, bulkhead, retry and fallback around the breaker
 
 ---
@@ -705,7 +706,7 @@ invisible again — no strategy ever fires.
 
 These demos hand-roll their guarded clients so you can debug the mechanics.
 In real code you usually don't have to: the [integrations](integrations/index.md)
-apply the same per-dependency pattern to httpx2, aiohttp, requests and
+apply the same per-dependency pattern to httpx2, httpx, aiohttp, requests and
 FastAPI transparently, and the [resilience pipeline](guides/pipeline.md)
 composes the breaker with timeout, bulkhead, retry and fallback declaratively.
 
@@ -745,7 +746,7 @@ choice.
 | Composable resilience pipeline (retry × breaker × bulkhead × timeout × fallback) | ✅ | — | — | — | — |
 | Fully typed API (`py.typed`) | ✅ | — | — | — | ✅ |
 | Signature-preserving decorator (`ParamSpec`) | ✅ | — | — | — | — |
-| HTTP client integrations (httpx2 / aiohttp / requests) | ✅ | — | — | — | — |
+| HTTP client integrations (httpx2 / httpx / aiohttp / requests) | ✅ | — | — | — | — |
 | Retry composition helpers (tenacity) | ✅ | — | — | — | — |
 | OpenTelemetry metrics | ✅ | — | — | — | — |
 | Operator overrides (force-open / disable / shadow mode) | ✅ | — | — | — | — |
@@ -799,9 +800,9 @@ a consecutive-failure threshold with a TTL on the open state.
   atomic across racing instances and half-open probes are budgeted globally,
   with graceful degradation to local state when Redis is down
   ([Redis integration](integrations/redis.md)).
-- **Meets your stack where it is.** Per-host breakers ship for httpx2,
-  aiohttp and requests; tenacity glue composes retries correctly; FastAPI and Litestar
-  map rejections to `503 + Retry-After`
+- **Meets your stack where it is.** Per-host breakers ship for httpx2, httpx,
+  aiohttp and requests; tenacity glue composes retries correctly; FastAPI and
+  Litestar map rejections to `503 + Retry-After`
   ([integrations overview](integrations/index.md)).
 
 The honest trade-off: interlock-cb requires Python ≥ 3.11 and has not had
@@ -1373,7 +1374,8 @@ too slow to run against a real clock.
 ## Lower-bound dependency versions are tested, not guessed
 
 Every optional extra declares a minimum version in `pyproject.toml`
-(`httpx2>=2.4.0`, `redis>=5.0.0`, and so on). The `extras-min` job re-pins each
+(`httpx>=0.27.0`, `httpx2>=2.4.0`, `redis>=5.0.0`, and so on). The
+`extras-min` job re-pins each
 one to exactly that floor and runs the integration suite against it
 ([`ci.yml`](https://github.com/bagowix/interlock/blob/main/.github/workflows/ci.yml)) —
 so a lower bound is a tested claim, not an untested guess about how far back
@@ -1711,10 +1713,12 @@ class IgnoreNotFound:
 
 ## HTTP out of the box
 
-For httpx2, you do not need to write this yourself — the
-[httpx2 integration](../integrations/httpx2.md) ships `HttpStatusClassifier`,
-which treats transport exceptions and the canonical retryable statuses
-(`429, 500, 502, 503, 504`) as failures.
+For HTTP clients, you do not need to write this yourself — the
+[httpx2](../integrations/httpx2.md), [httpx](../integrations/httpx.md),
+[aiohttp](../integrations/aiohttp.md), and
+[requests](../integrations/requests.md) integrations ship
+`HttpStatusClassifier`, which treats transport exceptions and the canonical
+retryable statuses (`429, 500, 502, 503, 504`) as failures.
 
 ---
 
@@ -2337,6 +2341,7 @@ per named dependency) with no decorators in call sites.
 | [FastAPI](fastapi.md) | `interlock-cb[fastapi]` | `Depends`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler |
 | [Litestar](litestar.md) | `interlock-cb[litestar]` | `Provide`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler (Litestar ≥ 2.23) |
 | [httpx2](httpx2.md) | `interlock-cb[httpx2]` | `CircuitBreakerTransport` / `AsyncCircuitBreakerTransport` — per-host breaker at the transport level |
+| [httpx](httpx.md) | `interlock-cb[httpx]` | `CircuitBreakerTransport` / `AsyncCircuitBreakerTransport` — per-host transport for httpx clients |
 | [aiohttp](aiohttp.md) | `interlock-cb[aiohttp]` | `CircuitBreakerMiddleware` — per-host breaker as a client middleware (aiohttp ≥ 3.12) |
 | [requests](requests.md) | `interlock-cb[requests]` | `CircuitBreakerAdapter` — per-host breaker mounted on a `Session` |
 | [LLM SDKs](llm.md) | — (recipe) | Guard OpenAI / Anthropic SDK calls with a breaker + bounded retries |
@@ -2348,7 +2353,7 @@ per named dependency) with no decorators in call sites.
 
 Every integration follows the same rules, so learning one means knowing all:
 
-- **Native extension points only.** A transport (httpx2), a client middleware
+- **Native extension points only.** A transport (httpx2/httpx), a client middleware
   (aiohttp), an adapter (requests), an exception handler (FastAPI). No
   monkey-patching, no private APIs — an integration survives minor releases
   of its host library.
@@ -2619,6 +2624,9 @@ The `interlock-cb[httpx2]` extra wraps an [httpx2](https://pypi.org/project/http
 transport so a circuit breaker is applied **per host** transparently — no
 decorators or `call` wrappers in your request code.
 
+`interlock-cb` is listed in httpx2's official
+[third-party packages directory](https://github.com/pydantic/httpx2/blob/main/docs/third_party_packages.md#interlock-cb).
+
 === "uv"
 
     ```bash
@@ -2701,6 +2709,109 @@ transport = CircuitBreakerTransport(
 
 Supply your own `classifier` to change the failure policy — for example to also
 fail on `408 Request Timeout`.
+
+---
+
+<!-- source: docs/integrations/httpx.md -->
+
+# httpx
+
+The `interlock-cb[httpx]` extra wraps an
+[httpx](https://www.python-httpx.org/) transport so a circuit breaker is
+applied **per host** transparently. It supports httpx 0.27.0 and newer.
+
+=== "uv"
+
+    ```bash
+    uv add 'interlock-cb[httpx]'
+    ```
+
+=== "pip"
+
+    ```bash
+    pip install 'interlock-cb[httpx]'
+    ```
+
+=== "poetry"
+
+    ```bash
+    poetry add 'interlock-cb[httpx]'
+    ```
+
+## Synchronous client
+
+```python
+import httpx
+from interlock.integrations.httpx import CircuitBreakerTransport
+
+transport = CircuitBreakerTransport(httpx.HTTPTransport())
+client = httpx.Client(transport=transport)
+
+response = client.get('https://api.example.com/v1/users')
+```
+
+## Asynchronous client
+
+```python
+import httpx
+from interlock.integrations.httpx import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(httpx.AsyncHTTPTransport())
+client = httpx.AsyncClient(transport=transport)
+
+response = await client.get('https://api.example.com/v1/users')
+```
+
+Use the client as a context manager. Closing it delegates `close()` or
+`aclose()` to the wrapped transport and releases the connection pool.
+
+## Per-host isolation
+
+Each host gets its own lazily created breaker. A failing
+`api.a.example.com` trips only that host; traffic to `api.b.example.com`
+continues normally. An open breaker raises `CircuitOpenError` before the
+wrapped transport performs I/O. A request URL without a host raises
+`ValueError` for the same reason: there is no dependency identity to key on.
+
+## What counts as a failure
+
+The default `HttpStatusClassifier` counts these as failures:
+
+- transport exceptions raised before a response is returned;
+- response statuses `429, 500, 502, 503, 504`.
+
+Other responses, including caller errors such as `404`, count as successes.
+Pass `HttpStatusClassifier(failure_statuses={...})` or another
+`FailureClassifier` to change the policy.
+
+## Streaming responses
+
+The wrapper returns the original `httpx.Response` unchanged, so sync and async
+streaming remain lazy and connection cleanup keeps httpx's normal semantics.
+Because the circuit-breaker call completes when response headers arrive, an
+exception raised later while consuming a streaming body is outside that call
+and is not recorded by the breaker.
+
+## Tuning
+
+`config`, `clock`, `classifier`, and `listener` are shared by every per-host
+breaker created by the transport:
+
+```python
+import httpx
+
+from interlock import Config, LoggingEventListener
+from interlock.integrations.httpx import CircuitBreakerTransport
+
+transport = CircuitBreakerTransport(
+    httpx.HTTPTransport(),
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    listener=LoggingEventListener(),
+)
+```
+
+The transport never retries. If another layer owns retries, keep them bounded
+and stop retrying when the breaker raises `CircuitOpenError`.
 
 ---
 
@@ -2873,8 +2984,9 @@ LLM APIs fail in exactly the ways circuit breakers exist for: rate limits
 LLM calls stops a degraded provider from stalling every request thread, and
 bounded retries recover from blips without amplifying an outage.
 
-This is a **recipe** — no extra needed beyond `interlock-cb[tenacity]`; the
-SDKs raise typed exceptions, which is all the breaker needs.
+You can protect an SDK at either its call boundary, which enables SDK-specific
+classification and slow-call detection, or at the httpx transport,
+which applies transparently to every request made by that client.
 
 ## Classify SDK errors
 
@@ -2966,11 +3078,36 @@ Give each provider its own breaker name (`anthropic`, `openai`, ...) via a
 shared `Registry` and check `breaker.state` to route around an open provider.
 The [states guide](../guides/states.md) covers manual failover controls.
 
-!!! note "Transport-level alternative"
-    The SDKs are built on classic httpx, which does not take httpx2
-    transports; once they migrate to httpx2 you will be able to drop the
-    decorator entirely and pass a client wrapped with the
-    [httpx2 transport](httpx2.md) instead.
+## Transport-level protection
+
+OpenAI and Anthropic clients accept an httpx client. Install
+`interlock-cb[httpx]`, wrap the SDK's underlying transport, and every endpoint
+on the provider host shares the same breaker:
+
+```python
+import httpx
+from openai import DefaultHttpxClient, OpenAI
+
+from interlock.integrations.httpx import CircuitBreakerTransport
+
+transport = CircuitBreakerTransport(httpx.HTTPTransport())
+
+with OpenAI(
+    http_client=DefaultHttpxClient(transport=transport),
+    max_retries=0,
+) as client:
+    response = client.responses.create(model='gpt-5.5', input='Summarise this document...')
+```
+
+Use `AsyncCircuitBreakerTransport`, `httpx.AsyncHTTPTransport`, and the SDK's
+async client for async applications. `max_retries=0` gives the breaker one
+observable attempt per SDK call; if retries are required, keep one explicit,
+bounded retry owner instead of stacking SDK and application retries.
+
+The transport classifier sees HTTP statuses directly, so no SDK exception
+classifier is needed. Choose the call-boundary recipe above when you also need
+to classify SDK-specific exceptions, measure the complete SDK operation as a
+slow call, or use a breaker name that is not derived from the request host.
 
 ---
 
@@ -3699,6 +3836,19 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 
 See the [httpx2 integration](integrations/httpx2.md).
 
+## httpx adapters
+
+Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
+`interlock.integrations.httpx`:
+
+- **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
+- **`AsyncCircuitBreakerTransport(transport, *, ...)`**
+- **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
+  exceptions and statuses `429, 500, 502, 503, 504`.
+
+The transports preserve streaming responses and delegate `close()` / `aclose()`.
+See the [httpx integration](integrations/httpx.md).
+
 ## aiohttp adapters
 
 Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations.aiohttp`:
@@ -3706,8 +3856,8 @@ Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations
 - **`CircuitBreakerMiddleware(*, config=None, clock=None, classifier=None, listener=None)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
-- **`HttpStatusClassifier(failure_statuses=None)`** — same policy as the
-  httpx2 variant, reading `ClientResponse.status`.
+- **`HttpStatusClassifier(failure_statuses=None)`** — same canonical HTTP
+  policy, reading `ClientResponse.status`.
 
 See the [aiohttp integration](integrations/aiohttp.md).
 

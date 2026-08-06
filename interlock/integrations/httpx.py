@@ -1,30 +1,24 @@
-"""httpx2 transport integration — requires the ``httpx2`` extra.
+"""httpx transport integration — requires the ``httpx`` extra.
 
-This module imports ``httpx2`` and is deliberately *not* re-exported from
+This module imports ``httpx`` and is deliberately not re-exported from
 ``interlock`` so the core stays zero-dependency. Install with
-``pip install interlock[httpx2]`` and wrap your transport explicitly::
+``pip install interlock-cb[httpx]`` and wrap a transport explicitly::
 
-    import httpx2
-    from interlock.integrations.httpx2 import CircuitBreakerTransport
+    import httpx
+    from interlock.integrations.httpx import CircuitBreakerTransport
 
-    transport = CircuitBreakerTransport(httpx2.HTTPTransport())
-    client = httpx2.Client(transport=transport)
+    transport = CircuitBreakerTransport(httpx.HTTPTransport())
+    client = httpx.Client(transport=transport)
 
-The wrapper applies one circuit breaker **per host** transparently: no
-decorators in user code. Each host gets its own breaker (a slow or failing
-``api.a`` must not trip ``api.b``), created lazily and shared across requests.
-
-By default a response counts as a failure when its status is one of
-``HttpStatusClassifier``'s — the canonical retryable set ``429, 500, 502, 503,
-504`` — and any transport exception (connect/read errors) is a failure. Supply
-a custom ``classifier`` to change that policy.
+The wrapper applies one circuit breaker per host. Responses are returned
+unchanged, preserving httpx's streaming semantics.
 """
 
 import http
 from collections.abc import Iterable
 from typing import cast
 
-from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
+from httpx import AsyncBaseTransport, BaseTransport, Request, Response
 
 from interlock.config import Config
 from interlock.protocols import Clock, EventListener, FailureClassifier
@@ -36,33 +30,23 @@ __all__ = (
     'HttpStatusClassifier',
 )
 
-# Mirrors urllib3's recommended ``status_forcelist`` (also used by AWS/Google):
-# transient server-side conditions where the dependency is unhealthy or
-# overloaded. Permanent 5xx (501 Not Implemented, 505) are excluded — retrying
-# or tripping the breaker cannot help a contract/protocol error.
 _FAILURE_STATUSES = frozenset(
     {
-        http.HTTPStatus.TOO_MANY_REQUESTS,  # 429
-        http.HTTPStatus.INTERNAL_SERVER_ERROR,  # 500
-        http.HTTPStatus.BAD_GATEWAY,  # 502
-        http.HTTPStatus.SERVICE_UNAVAILABLE,  # 503
-        http.HTTPStatus.GATEWAY_TIMEOUT,  # 504
+        http.HTTPStatus.TOO_MANY_REQUESTS,
+        http.HTTPStatus.INTERNAL_SERVER_ERROR,
+        http.HTTPStatus.BAD_GATEWAY,
+        http.HTTPStatus.SERVICE_UNAVAILABLE,
+        http.HTTPStatus.GATEWAY_TIMEOUT,
     }
 )
 
 
 class HttpStatusClassifier:
-    """Counts transport exceptions and unhealthy-status responses as failures.
-
-    A returned response is a failure when its status is in ``failure_statuses``
-    — by default the canonical retryable set (``429, 500, 502, 503, 504``);
-    any raised exception is a failure. Other responses — including ``4xx``
-    client mistakes like ``404`` — are successes, so they never trip the
-    breaker.
+    """Count transport exceptions and unhealthy-status responses as failures.
 
     Args:
         failure_statuses: Statuses to count as failures instead of the
-            canonical set.
+            canonical set ``429, 500, 502, 503, 504``.
     """
 
     def __init__(self, *, failure_statuses: Iterable[int] | None = None) -> None:
@@ -79,7 +63,7 @@ class HttpStatusClassifier:
 
 
 def _host(request: Request) -> str:
-    """The host keying the request's breaker; empty hosts are rejected eagerly."""
+    """Return the host key, rejecting URLs that cannot identify a dependency."""
     host = request.url.host
     if not host:
         raise ValueError(f'Request URL has no host to key a breaker on: {request.url!s}')
@@ -102,13 +86,12 @@ def _build_registry(
 
 
 class CircuitBreakerTransport(BaseTransport):
-    """A synchronous transport that guards each host with a circuit breaker.
+    """Guard every host reached by a synchronous httpx transport.
 
     Args:
-        transport: The wrapped transport that performs the actual request.
+        transport: Wrapped transport that performs requests.
         config: Thresholds, window and timing for every host's breaker.
-        clock: Time source for the breakers; inject a fake for deterministic
-            tests.
+        clock: Time source for the breakers.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
     """
@@ -131,29 +114,28 @@ class CircuitBreakerTransport(BaseTransport):
         )
 
     def handle_request(self, request: Request) -> Response:
-        """Run the request under its host's breaker.
+        """Run a request under the breaker for its host.
 
         Raises:
             CircuitOpenError: If the host's breaker is open.
-            ValueError: If the request URL carries no host to key a breaker on.
+            ValueError: If the request URL has no host.
         """
         breaker = self._registry.get(_host(request))
         guarded = breaker(self._transport.handle_request)
         return guarded(request)
 
     def close(self) -> None:
-        """Close the wrapped transport, releasing its connection pool."""
+        """Close the wrapped transport and its connection pool."""
         self._transport.close()
 
 
 class AsyncCircuitBreakerTransport(AsyncBaseTransport):
-    """An asynchronous transport that guards each host with a circuit breaker.
+    """Guard every host reached by an asynchronous httpx transport.
 
     Args:
-        transport: The wrapped async transport that performs the request.
+        transport: Wrapped async transport that performs requests.
         config: Thresholds, window and timing for every host's breaker.
-        clock: Time source for the breakers; inject a fake for deterministic
-            tests.
+        clock: Time source for the breakers.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
     """
@@ -176,16 +158,16 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         )
 
     async def handle_async_request(self, request: Request) -> Response:
-        """Run the request under its host's breaker.
+        """Run a request under the breaker for its host.
 
         Raises:
             CircuitOpenError: If the host's breaker is open.
-            ValueError: If the request URL carries no host to key a breaker on.
+            ValueError: If the request URL has no host.
         """
         breaker = self._registry.get(_host(request))
         guarded = breaker(self._transport.handle_async_request)
         return await guarded(request)
 
     async def aclose(self) -> None:
-        """Close the wrapped transport, releasing its connection pool."""
+        """Close the wrapped transport and its connection pool."""
         await self._transport.aclose()

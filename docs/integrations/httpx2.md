@@ -4,6 +4,9 @@ The `interlock-cb[httpx2]` extra wraps an [httpx2](https://pypi.org/project/http
 transport so a circuit breaker is applied **per host** transparently — no
 decorators or `call` wrappers in your request code.
 
+`interlock-cb` is listed in httpx2's official
+[third-party packages directory](https://github.com/pydantic/httpx2/blob/main/docs/third_party_packages.md#interlock-cb).
+
 === "uv"
 
     ```bash

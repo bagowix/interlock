@@ -167,6 +167,19 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 
 See the [httpx2 integration](integrations/httpx2.md).
 
+## httpx adapters
+
+Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
+`interlock.integrations.httpx`:
+
+- **`CircuitBreakerTransport(transport, *, config=None, clock=None, classifier=None, listener=None)`**
+- **`AsyncCircuitBreakerTransport(transport, *, ...)`**
+- **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
+  exceptions and statuses `429, 500, 502, 503, 504`.
+
+The transports preserve streaming responses and delegate `close()` / `aclose()`.
+See the [httpx integration](integrations/httpx.md).
+
 ## aiohttp adapters
 
 Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations.aiohttp`:
@@ -174,8 +187,8 @@ Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations
 - **`CircuitBreakerMiddleware(*, config=None, clock=None, classifier=None, listener=None)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
-- **`HttpStatusClassifier(failure_statuses=None)`** — same policy as the
-  httpx2 variant, reading `ClientResponse.status`.
+- **`HttpStatusClassifier(failure_statuses=None)`** — same canonical HTTP
+  policy, reading `ClientResponse.status`.
 
 See the [aiohttp integration](integrations/aiohttp.md).
 

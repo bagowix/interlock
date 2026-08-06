@@ -29,6 +29,7 @@ dependencies = []
 
 [project.optional-dependencies]
 otel = ["opentelemetry-api>=1.43.0"]
+httpx = ["httpx>=0.27.0"]
 httpx2 = ["httpx2>=2.4.0"]
 fastapi = ["fastapi>=0.128.0"]
 redis = ["redis>=5.0.0"]
@@ -242,6 +243,8 @@ pytest_add_cli_args_test_selection = [
   "--ignore=tests/test_examples.py",
   "--ignore=tests/test_aiohttp.py",
   "--ignore=tests/test_fastapi.py",
+  "--ignore=tests/test_httpx.py",
+  "--ignore=tests/test_httpx_e2e.py",
   "--ignore=tests/test_httpx2.py",
   "--ignore=tests/test_httpx2_e2e.py",
   "--ignore=tests/test_litestar.py",

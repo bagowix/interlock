@@ -30,7 +30,7 @@ choice.
 | Composable resilience pipeline (retry × breaker × bulkhead × timeout × fallback) | ✅ | — | — | — | — |
 | Fully typed API (`py.typed`) | ✅ | — | — | — | ✅ |
 | Signature-preserving decorator (`ParamSpec`) | ✅ | — | — | — | — |
-| HTTP client integrations (httpx2 / aiohttp / requests) | ✅ | — | — | — | — |
+| HTTP client integrations (httpx2 / httpx / aiohttp / requests) | ✅ | — | — | — | — |
 | Retry composition helpers (tenacity) | ✅ | — | — | — | — |
 | OpenTelemetry metrics | ✅ | — | — | — | — |
 | Operator overrides (force-open / disable / shadow mode) | ✅ | — | — | — | — |
@@ -84,9 +84,9 @@ a consecutive-failure threshold with a TTL on the open state.
   atomic across racing instances and half-open probes are budgeted globally,
   with graceful degradation to local state when Redis is down
   ([Redis integration](integrations/redis.md)).
-- **Meets your stack where it is.** Per-host breakers ship for httpx2,
-  aiohttp and requests; tenacity glue composes retries correctly; FastAPI and Litestar
-  map rejections to `503 + Retry-After`
+- **Meets your stack where it is.** Per-host breakers ship for httpx2, httpx,
+  aiohttp and requests; tenacity glue composes retries correctly; FastAPI and
+  Litestar map rejections to `503 + Retry-After`
   ([integrations overview](integrations/index.md)).
 
 The honest trade-off: interlock-cb requires Python ≥ 3.11 and has not had

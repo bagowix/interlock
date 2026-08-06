@@ -12,6 +12,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   API appears before project comparisons, the feature language is less brittle, and optional
   integrations are presented in one compact, linked overview instead of several partial examples.
 
+### Added
+
+- **httpx now has a first-class transport integration (#82).** Install
+  `interlock-cb[httpx]` and wrap `httpx.HTTPTransport` or
+  `httpx.AsyncHTTPTransport` to apply one breaker per request host without
+  decorators. The sync and async wrappers preserve streaming responses,
+  delegate client cleanup, reject host-less URLs before I/O, and use the same
+  configurable `429, 500, 502, 503, 504` failure policy as the existing HTTP
+  integrations. Unit and real-loopback tests run against both the minimum
+  supported httpx 0.27.0 and the locked latest version in CI.
+
 ## [2.3.0] - 2026-08-05
 
 ### Added
