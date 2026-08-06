@@ -134,7 +134,8 @@ Implement any of these to swap a core behaviour:
 - **`FailureClassifier`** — `is_failure(*, result, exception) -> bool`. See
   [Failure classification](guides/failure-classification.md).
 - **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`,
-  plus `on_storage_degraded` / `on_storage_recovered` for coordinated breakers
+  plus `on_storage_degraded` / `on_storage_recovered` /
+  `on_storage_write_dropped` for coordinated breakers
   and `on_retry` / `on_bulkhead_rejected` / `on_fallback` for pipeline
   strategies (all optional hooks are dispatched only if present, so older
   listeners keep working). See [Observability](guides/observability.md).
@@ -239,7 +240,7 @@ See the [Litestar integration](integrations/litestar.md).
 
 Extra `interlock-cb[redis]`, module `interlock.integrations.redis`:
 
-- **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0)`** —
+- **`RedisStorage(client, *, key_prefix='interlock:cb:', state_ttl=300.0, poll_interval=1.0, retry_backoff=5.0, retry_backoff_multiplier=1.0, retry_backoff_max=None, retry_jitter=0.0, write_queue_size=128)`** —
   sync `Storage` over a `redis.Redis` client.
 - **`AsyncRedisStorage(client, *, ...)`** — async mirror over
   `redis.asyncio.Redis`.

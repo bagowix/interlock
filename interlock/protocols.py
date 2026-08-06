@@ -27,7 +27,14 @@ class Clock(Protocol):
     """Source of time for the core. Injected so tests stay deterministic."""
 
     def monotonic(self) -> float:
-        """Return a monotonically increasing time in fractional seconds."""
+        """Return a monotonically increasing, non-negative time in seconds.
+
+        The reference point is arbitrary — only differences are ever used — but
+        the values must not be negative: ``TimeBasedSlidingWindow`` buckets by
+        whole seconds and reserves a negative second as its "never written"
+        sentinel, so a clock that went below zero would report a permanently
+        empty window and the breaker would never trip.
+        """
         ...
 
 
@@ -58,6 +65,10 @@ class Storage(Protocol):
     This is the synchronous contract; ``AsyncStorage`` mirrors it for async
     breakers. No method may raise into the protected path — the engine degrades
     to local state on backend failure.
+
+    A custom implementation must uphold the fencing, probe-lease TTL and
+    teardown guarantees described in the "Coordinated mode contract" section
+    of ``docs/integrations/redis.md``, including its implementation checklist.
     """
 
     def read(self, name: str) -> SharedState | None:
@@ -121,8 +132,9 @@ class Storage(Protocol):
 class AsyncStorage(Protocol):
     """Async mirror of ``Storage`` for async breakers.
 
-    See ``Storage`` for the full contract; every method is the awaitable
-    counterpart.
+    See ``Storage`` for the full contract, including the coordinated-mode
+    contract a custom implementation must uphold; every method here is the
+    awaitable counterpart.
     """
 
     async def read(self, name: str) -> SharedState | None:
@@ -212,6 +224,16 @@ class EventListener(Protocol):
 
     def on_storage_recovered(self, *, name: str) -> None:
         """Called when the shared storage backend becomes reachable again."""
+        ...
+
+    def on_storage_write_dropped(self, *, name: str) -> None:
+        """Called when a coordinated write is dropped by a full write queue.
+
+        The queue only fills when the background lane stops draining it, so
+        this is the signal that shared writes are being lost while the breaker
+        keeps protecting the process locally. The shared state is reconciled
+        by the next successful poll and by ``state_ttl``.
+        """
         ...
 
     def on_retry(self, *, name: str, attempt: int, delay: float) -> None:

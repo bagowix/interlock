@@ -201,14 +201,40 @@ def _positive(name: str, value: float) -> float:
     return value
 
 
+def _at_least_one(name: str, value: float) -> float:
+    if value < 1.0:
+        msg = f'{name} must be >= 1.0, got {value!r}'
+        raise ValueError(msg)
+    return value
+
+
+def _non_negative(name: str, value: float) -> float:
+    if value < 0:
+        msg = f'{name} must be >= 0, got {value!r}'
+        raise ValueError(msg)
+    return value
+
+
+def _positive_int(name: str, value: int) -> int:
+    if value < 1:
+        msg = f'{name} must be >= 1, got {value!r}'
+        raise ValueError(msg)
+    return value
+
+
 class RedisStorage:
     """Synchronous ``Storage`` backed by a ``redis.Redis`` client.
 
-    The three keyword floats are the coordination tuning knobs the engine reads
-    off the storage object: how long state keys live without a refresh
+    The keyword floats are the coordination tuning knobs the engine reads off
+    the storage object: how long state keys live without a refresh
     (``state_ttl``), how often the cached shared view is refreshed
-    (``poll_interval``), and how long the breaker runs purely locally after a
-    storage failure before retrying (``retry_backoff``).
+    (``poll_interval``), and the degraded-storage retry policy — how long the
+    breaker runs purely locally after a storage failure before retrying
+    (``retry_backoff``), how that delay grows on further consecutive failures
+    (``retry_backoff_multiplier``, capped at ``retry_backoff_max``), and how
+    much proportional jitter to add so that many instances recovering from
+    the same outage do not retry in lockstep (``retry_jitter``). One more knob,
+    ``write_queue_size``, bounds the coordinator's fire-and-forget write queue.
 
     Args:
         client: A connected ``redis.Redis`` instance.
@@ -216,6 +242,16 @@ class RedisStorage:
         state_ttl: Key lifetime in seconds; refreshed on every write.
         poll_interval: Seconds between background view refreshes.
         retry_backoff: Seconds to stay degraded after a storage failure.
+        retry_backoff_multiplier: Growth factor applied per consecutive
+            failure; must be >= 1.0. The default, 1.0, reproduces the fixed
+            ``retry_backoff`` delay of earlier releases.
+        retry_backoff_max: Upper bound on the backoff delay in seconds, or
+            ``None`` for no cap.
+        retry_jitter: Fraction (>= 0) of the capped delay added as random
+            spread. The default, 0.0, adds none.
+        write_queue_size: Maximum number of pending coordinated writes; must
+            be >= 1. Further writes are dropped and reported through
+            ``on_storage_write_dropped`` instead of growing the queue.
     """
 
     def __init__(
@@ -226,12 +262,24 @@ class RedisStorage:
         state_ttl: float = 300.0,
         poll_interval: float = 1.0,
         retry_backoff: float = 5.0,
+        retry_backoff_multiplier: float = 1.0,
+        retry_backoff_max: float | None = None,
+        retry_jitter: float = 0.0,
+        write_queue_size: int = 128,
     ) -> None:
         self._client = client
         self._prefix = key_prefix
         self.state_ttl = _positive('state_ttl', state_ttl)
         self.poll_interval = _positive('poll_interval', poll_interval)
         self.retry_backoff = _positive('retry_backoff', retry_backoff)
+        self.retry_backoff_multiplier = _at_least_one(
+            'retry_backoff_multiplier', retry_backoff_multiplier
+        )
+        self.retry_backoff_max = (
+            None if retry_backoff_max is None else _positive('retry_backoff_max', retry_backoff_max)
+        )
+        self.retry_jitter = _non_negative('retry_jitter', retry_jitter)
+        self.write_queue_size = _positive_int('write_queue_size', write_queue_size)
 
     def _key(self, name: str) -> str:
         return f'{self._prefix}{name}'
@@ -300,6 +348,16 @@ class AsyncRedisStorage:
         state_ttl: Key lifetime in seconds; refreshed on every write.
         poll_interval: Seconds between background view refreshes.
         retry_backoff: Seconds to stay degraded after a storage failure.
+        retry_backoff_multiplier: Growth factor applied per consecutive
+            failure; must be >= 1.0. The default, 1.0, reproduces the fixed
+            ``retry_backoff`` delay of earlier releases.
+        retry_backoff_max: Upper bound on the backoff delay in seconds, or
+            ``None`` for no cap.
+        retry_jitter: Fraction (>= 0) of the capped delay added as random
+            spread. The default, 0.0, adds none.
+        write_queue_size: Maximum number of pending coordinated writes; must
+            be >= 1. Further writes are dropped and reported through
+            ``on_storage_write_dropped`` instead of growing the queue.
     """
 
     def __init__(
@@ -310,12 +368,24 @@ class AsyncRedisStorage:
         state_ttl: float = 300.0,
         poll_interval: float = 1.0,
         retry_backoff: float = 5.0,
+        retry_backoff_multiplier: float = 1.0,
+        retry_backoff_max: float | None = None,
+        retry_jitter: float = 0.0,
+        write_queue_size: int = 128,
     ) -> None:
         self._client = client
         self._prefix = key_prefix
         self.state_ttl = _positive('state_ttl', state_ttl)
         self.poll_interval = _positive('poll_interval', poll_interval)
         self.retry_backoff = _positive('retry_backoff', retry_backoff)
+        self.retry_backoff_multiplier = _at_least_one(
+            'retry_backoff_multiplier', retry_backoff_multiplier
+        )
+        self.retry_backoff_max = (
+            None if retry_backoff_max is None else _positive('retry_backoff_max', retry_backoff_max)
+        )
+        self.retry_jitter = _non_negative('retry_jitter', retry_jitter)
+        self.write_queue_size = _positive_int('write_queue_size', write_queue_size)
 
     def _key(self, name: str) -> str:
         return f'{self._prefix}{name}'

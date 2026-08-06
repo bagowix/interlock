@@ -131,6 +131,9 @@ ban-relative-imports = "all"
 "interlock/pipeline.py" = [
   "PLR0913", # PipelineBuilder.retry mirrors RetryStrategy's keyword-only collaborators
 ]
+"interlock/integrations/redis.py" = [
+  "PLR0913", # RedisStorage/AsyncRedisStorage take keyword-only coordination tuning knobs
+]
 "benchmarks/**/*.py" = [
   "INP001",  # benchmarks are collected by pytest, not imported
   "S101",    # a sanity assert keeps each benchmark honest about what it measures
@@ -281,4 +284,6 @@ dev = [
     "mutmut>=3.7.0",
     "zizmor>=1.29.0",
     "griffe>=2.1.0",
+    "twine>=7.0.0",
+    "check-wheel-contents>=0.6.3",
 ]

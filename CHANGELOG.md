@@ -19,6 +19,99 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   threads one at a time, so the number is lock-path work, not wall-clock
   contention.
 
+## [2.3.0] - 2026-08-05
+
+### Added
+
+- **The coordinator's write queue is now bounded (#99).** The queue feeding a
+  coordinated breaker's background lane had no upper bound: a lane that stopped
+  draining — a storage client blocking without a timeout, an async lane whose
+  event loop is gone — grew it for as long as the process lived. It now holds
+  at most `write_queue_size` writes (a new `RedisStorage` /
+  `AsyncRedisStorage` keyword, default 128, read off the storage object like
+  the other coordination knobs). Over capacity the arriving write is dropped
+  rather than queued: it never blocks and never raises inside the protected
+  path, and it is reported through the new optional
+  `on_storage_write_dropped` listener hook (`LoggingEventListener` logs it at
+  `WARNING`, `OTelEventListener` counts it on `interlock.storage.events`).
+  Coordinated writes were already best-effort — a dropped one is reconciled by
+  the next poll and by `state_ttl` — and healthy lanes never reach the bound,
+  since writes are per transition rather than per call. Shutdown keeps working
+  with a full queue: one slot stays reserved for the stop sentinel.
+
+## [2.2.0] - 2026-08-03
+
+### Added
+
+- **The Redis integration guide now documents the coordinated-mode contract
+  (#101).** Fencing (`expected_version`), the `state_ttl`-bounded probe-lease
+  leak on an interrupted probe, the "tallies only while `HALF_OPEN`" rule for
+  `record_probe`, and the need for explicit teardown were previously only
+  implicit in the code and internal notes. `docs/integrations/redis.md` gains
+  a "Coordinated mode contract" section plus a checklist for anyone
+  implementing `Storage` / `AsyncStorage` against a backend other than Redis,
+  and the `Storage` / `AsyncStorage` protocol docstrings point at it.
+
+- **The degraded-storage retry policy is now configurable (#100).** Every
+  release before this one retried a downed `Storage` backend on a single
+  fixed cadence (`retry_backoff`) — with many instances sharing that backend,
+  they all retried in lockstep, so a recovering backend immediately faced a
+  synchronised retry wave. `RedisStorage` / `AsyncRedisStorage` gain three new
+  keyword-only knobs: `retry_backoff_multiplier` grows the delay
+  geometrically with each further *consecutive* failure, `retry_backoff_max`
+  caps it, and `retry_jitter` spreads it with a proportional random draw
+  (deterministic under an injected clock, so it stays reproducible in tests).
+  The attempt counter resets on recovery. Defaults (`multiplier=1.0`,
+  `jitter=0.0`) exactly reproduce the fixed-delay behavior of earlier
+  releases — nothing changes unless you opt in. See the Redis integration
+  guide's Tuning section for the new knobs.
+
+- **CI now catches two release-only failure modes before they ship (#85).** A
+  `packaging-smoke` job builds the wheel, runs `twine check` and
+  `check-wheel-contents` against it, then installs it with `pip`-equivalent
+  semantics (`--no-deps`, no dev group, no extras) into a clean Python 3.11
+  environment and imports `interlock` there. It asserts `interlock.__version__`
+  matches the installed distribution's metadata, that `interlock/py.typed`
+  survived the build, and that every module under `interlock/integrations/`
+  made it into the wheel — an accidental import of an optional dependency from
+  the core, or a packaging config that silently dropped a subpackage, would
+  pass the dev-env test suite and only break for a plain `pip install
+  interlock-cb`. Separately, `release.yml` now verifies the pushed tag is
+  exactly `v{interlock.__version__}` as its first step, before `uv sync`,
+  tests, or the build run — the cheapest possible place to fail, and the tag
+  reaches the shell through `env` rather than direct interpolation.
+
+### Changed
+
+- **The model-based state-machine test now reaches probe rounds.** The
+  `RuleBasedStateMachine` from #106 exists for the order-dependent half of the
+  machine — the probe budget, generation fencing, out-of-order settles — and it
+  was not exercising any of it: measured over 20 seeds, 18 finished a whole run
+  without entering `HALF_OPEN` once, and the best seed managed 7 entries. The
+  rule mix was the cause. Four of nine rules were operator controls, three of
+  them leading into an absorbing override state that only `reset` leaves — and
+  `reset` wipes the window on the way out — while tripping a window took an
+  uninterrupted run of `2 x minimum_number_of_calls` steps, since every call
+  cost one step to admit and another to settle. The walk spent its examples
+  bouncing between the overrides and CLOSED. Three changes fix it: a `call`
+  rule that admits and settles in one step, the way `Engine.call_*` actually
+  works; the four operator controls collapsed into one sampled rule; and a
+  `teardown` that reports trips and probe rounds through `target()` so
+  hypothesis's search steers toward them. `advance` also draws from a strategy
+  that reaches the end of the open wait, which plain `st.floats` — biased
+  toward `0.0` — almost never did. 17 of 20 seeds now reach `HALF_OPEN` on
+  roughly half of their examples, and every override state is still entered, so
+  the #79 invariant keeps its coverage. `max_examples` drops from 200 to 120:
+  the walk no longer needs the extra examples to stumble into a probe round,
+  which keeps the file's runtime in the same range as before.
+
+- The `Clock` protocol now documents that `monotonic()` must be non-negative.
+  `TimeBasedSlidingWindow` reserves a negative second as its "never written"
+  bucket sentinel, so a custom clock returning negative values would report a
+  permanently empty window and the breaker would never trip. Every stdlib
+  monotonic clock already satisfies this; the contract simply said
+  "monotonically increasing" and left the rest implied.
+
 ## [2.1.4] - 2026-08-03
 
 ### Added
@@ -495,7 +588,9 @@ The major version marks the scope of what is added, not a migration burden.
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v2.1.4...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/bagowix/interlock/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/bagowix/interlock/compare/v2.1.4...v2.2.0
 [2.1.4]: https://github.com/bagowix/interlock/compare/v2.1.3...v2.1.4
 [2.1.3]: https://github.com/bagowix/interlock/compare/v2.1.2...v2.1.3
 [2.1.2]: https://github.com/bagowix/interlock/compare/v2.1.1...v2.1.2

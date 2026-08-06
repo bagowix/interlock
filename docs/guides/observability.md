@@ -13,6 +13,7 @@ class EventListener(Protocol):
     def on_reset(self, *, name: str) -> None: ...
     def on_storage_degraded(self, *, name: str, error: BaseException) -> None: ...
     def on_storage_recovered(self, *, name: str) -> None: ...
+    def on_storage_write_dropped(self, *, name: str) -> None: ...
     def on_retry(self, *, name: str, attempt: int, delay: float) -> None: ...
     def on_bulkhead_rejected(self, *, name: str) -> None: ...
     def on_fallback(self, *, name: str, error: BaseException) -> None: ...
@@ -21,7 +22,7 @@ class EventListener(Protocol):
 Listeners are called **outside** the breaker's lock, after the protected call
 returns, so a slow listener never serialises throughput.
 
-The two storage hooks fire only for breakers coordinated through a shared
+The three storage hooks fire only for breakers coordinated through a shared
 [storage](../integrations/redis.md); the three pipeline hooks fire from
 [pipeline strategies](pipeline.md) given a `listener=`. Every hook is
 dispatched only if present — a listener that defines just the ones it cares
@@ -110,7 +111,7 @@ It records five instruments on the `interlock` meter (or a meter you pass in):
 | `interlock.call.rejected` | counter | `breaker` |
 | `interlock.state.changes` | counter | `breaker`, `from`, `to` |
 | `interlock.reset` | counter | `breaker` |
-| `interlock.storage.events` | counter | `breaker`, `event` (`degraded`/`recovered`), `error` |
+| `interlock.storage.events` | counter | `breaker`, `event` (`degraded`/`recovered`/`write_dropped`), `error` |
 
 ## Custom listeners
 

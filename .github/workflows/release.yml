@@ -16,6 +16,24 @@ jobs:
         with:
           persist-credentials: false
 
+      # First and cheapest: a tag that does not match interlock/version.py
+      # must never reach the publish job. `TAG` goes through env, not
+      # straight into the script, so a tag name cannot be read as shell.
+      - name: Verify tag matches package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(python3 -c "
+          import re
+          text = open('interlock/version.py').read()
+          print(re.search(r\"VERSION = '([^']+)'\", text)[1])
+          ")
+          if [ "${TAG}" != "v${version}" ]; then
+            echo "::error::tag ${TAG} does not match package version v${version}"
+            exit 1
+          fi
+          echo "tag ${TAG} matches package version v${version}"
+
       # No cache here, unlike the other workflows: a cache entry written by a
       # pull-request run would be readable by the job that builds the published
       # artefacts. One `uv sync` per release is cheaper than that risk.

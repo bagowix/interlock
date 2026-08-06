@@ -107,6 +107,7 @@ class Engine:
                     on_view=self._on_shared_view,
                     on_degraded=self._on_storage_degraded,
                     on_recovered=self._on_storage_recovered,
+                    on_write_dropped=self._on_storage_write_dropped,
                 )
             else:
                 self._sync_coordinator = SyncCoordinator(
@@ -117,6 +118,7 @@ class Engine:
                     on_view=self._on_shared_view,
                     on_degraded=self._on_storage_degraded,
                     on_recovered=self._on_storage_recovered,
+                    on_write_dropped=self._on_storage_write_dropped,
                 )
 
     @property
@@ -553,6 +555,15 @@ class Engine:
 
         notify(self._listener, 'on_storage_recovered', name=self._name)
         self._emit_transitions(machine_state, machine_state, effective_before, effective_after)
+
+    def _on_storage_write_dropped(self) -> None:
+        """Coordinator callback: a shared write was dropped by a full queue.
+
+        Nothing local changes — the breaker keeps running on the state it
+        already has, and the shared state is reconciled by the next poll and
+        by ``state_ttl``. This only makes the drop observable.
+        """
+        notify(self._listener, 'on_storage_write_dropped', name=self._name)
 
     def _schedule_auto_transition(self) -> None:
         """Arm a timer to fire the proactive OPEN → HALF_OPEN once the wait ends.

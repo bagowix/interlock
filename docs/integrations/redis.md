@@ -101,6 +101,55 @@ of a round, the deciding instance applies the same thresholds as the local
 state machine and writes the transition guarded by a version check, so a
 delayed decision can never overwrite a newer state.
 
+## Coordinated mode contract
+
+`RedisStorage` implements `Storage` / `AsyncStorage`; a third-party backend can
+too. Four behaviours are part of that contract, not implementation detail —
+skipping any of them breaks the guarantees the coordinator relies on:
+
+1. **Fencing is mandatory.** `trip_open` and `close` accept `expected_version`
+   and must apply the write only when the backend's current version matches
+   it, otherwise no-op and return the current state. The coordinator relies on
+   this for the probe-round decision: a delayed instance computing "probes
+   passed" off a stale view must lose to a state another instance already
+   wrote, never overwrite it.
+2. **A leaked probe slot is bounded only by `state_ttl`.** `lease_probe`
+   decrements a shared budget and has no corresponding un-lease operation. A
+   `BaseException` — cancellation, process kill — between `lease_probe` and
+   `record_probe` never returns that slot; only the key's TTL expiry does.
+   With several instances interrupted mid-probe, `HALF_OPEN` can stall for up
+   to `state_ttl`. Size it with this in mind — it is not just an
+   abandoned-key cleanup knob.
+3. **`record_probe` tallies only while `HALF_OPEN`.** Every coordinated write
+   is best-effort *and* bounded: dropped while degraded, dropped when the
+   write queue is full, superseded by a later decision, reconciled by the next
+   poll rather than retried.
+4. **Teardown is explicit, not automatic.** `close()` / `aclose()` stop the
+   lane deterministically — see [Shutdown](#shutdown) below. A coordinated
+   breaker left to be garbage-collected can outlive its owning scope instead.
+
+Also: a breaker's `name` becomes a storage key (`interlock:cb:<name>` for
+`RedisStorage`). Never build one from untrusted input — an attacker-controlled
+name can collide with, and corrupt, unrelated breaker state.
+
+### Checklist for a custom `Storage` implementation
+
+- [ ] `trip_open` / `close` honor `expected_version`: apply only on a match,
+      otherwise no-op and return the current state.
+- [ ] Every operation is atomic against concurrent callers (a Lua script, a
+      locked transaction, ...) — no read-modify-write races.
+- [ ] `ttl` is refreshed on every write so an abandoned key self-expires.
+- [ ] `lease_probe` grants only while `HALF_OPEN` and budget remains.
+- [ ] `record_probe` tallies only while `HALF_OPEN`; a late or out-of-round
+      outcome is dropped, not applied.
+- [ ] No method raises into the protected path — the engine treats any
+      exception as a signal to degrade to local state, so a backend that
+      raises for a routine outcome (e.g. a fencing miss) breaks the contract;
+      that case must return the current state instead.
+- [ ] Time comparisons (has `wait_duration_in_open` elapsed?) use the
+      backend's own clock, not the caller's — instance clocks are not
+      comparable across a fleet.
+
 ## Manual controls
 
 Manual controls are local to one process and take precedence over Redis while
@@ -114,10 +163,17 @@ for the fleet: the breaker immediately resumes its cached shared `OPEN` or
 
 A storage error never reaches your calls. On the first failure the breaker
 switches to its local state and keeps protecting the process on its own window;
-pending shared writes are dropped, and Redis is left alone for `retry_backoff`
-seconds before the poller tries again. On the first successful operation the
-shared view becomes authoritative again — including adopting a shared OPEN that
-happened while this instance was cut off.
+pending shared writes are dropped, and Redis is left alone before the poller
+tries again. That delay starts at `retry_backoff` seconds and, by default,
+stays there for as long as the outage lasts — the same fixed cadence every
+release before this one used. Set `retry_backoff_multiplier` above `1.0` to
+grow it geometrically with each further consecutive failure (capped at
+`retry_backoff_max`), plus `retry_jitter` to spread out the retries of a fleet
+of instances recovering from the same outage instead of having them all probe
+Redis in the same instant. On the first successful operation the shared view
+becomes authoritative again — including adopting a shared OPEN that happened
+while this instance was cut off — and the failure count resets, so the next
+outage starts back at `retry_backoff`.
 
 Both edges are observable through the listener:
 
@@ -134,6 +190,35 @@ class StorageWatch:
 `OTelEventListener` counts both on `interlock.storage.events`. Listeners
 written before these hooks existed keep working — the engine calls them only if
 present.
+
+## Backpressure: the write queue is bounded
+
+Coordinated writes are fire-and-forget: a local trip and each probe outcome are
+queued for the background lane instead of being written on the protected path.
+That queue holds at most `write_queue_size` writes (128 by default).
+
+It is not a per-call queue — a healthy lane keeps it near empty, because writes
+happen per *transition*, not per call, and probes are capped by
+`permitted_calls_in_half_open`. The bound only matters when the lane stops
+draining at all: a Redis client blocking without a timeout, or an async lane
+whose event loop is gone. Without it, that lane would grow the queue for as
+long as the process lives.
+
+When the queue is full the *arriving* write is dropped — never blocked, never
+raised into the call that produced it — and reported:
+
+```python
+class StorageWatch:
+    def on_storage_write_dropped(self, *, name: str) -> None: ...  # shared state falling behind
+```
+
+Nothing is retried: the shared state is reconciled by the next successful poll
+and, failing that, by `state_ttl` expiring the key. Locally the breaker keeps
+protecting the process on its own window exactly as it does while degraded.
+
+The hook is the signal that a lane is wedged — treat a non-zero rate as an
+alert, not a tuning hint. `LoggingEventListener` logs it at `WARNING` and
+`OTelEventListener` counts it on `interlock.storage.events`.
 
 ## Shutdown
 
@@ -196,6 +281,10 @@ RedisStorage(
     state_ttl=300.0,  # key lifetime (s); refreshed on every write
     poll_interval=1.0,  # cache refresh cadence (s)
     retry_backoff=5.0,  # local-only time after a storage failure (s)
+    retry_backoff_multiplier=1.0,  # growth per consecutive failure; 1.0 = fixed delay
+    retry_backoff_max=None,  # cap on the delay (s), or None for no cap
+    retry_jitter=0.0,  # proportional random spread added to the (capped) delay
+    write_queue_size=128,  # max pending coordinated writes; further ones are dropped
 )
 ```
 
@@ -204,7 +293,23 @@ RedisStorage(
   `wait_duration_in_open`.
 - **`poll_interval`** is the propagation latency of a coordinated trip. Each
   breaker costs about one Redis read per interval.
-- **`retry_backoff`** bounds how often a degraded breaker re-tests Redis.
+- **`retry_backoff`** is the delay before the first retry after a storage
+  failure, and the fixed delay for every retry after that while
+  `retry_backoff_multiplier` stays at its default of `1.0`.
+- **`retry_backoff_multiplier`** grows the delay geometrically with each
+  further *consecutive* failure (`retry_backoff * retry_backoff_multiplier **
+  attempts`); a recovery resets the attempt count. Must be `>= 1.0`.
+- **`retry_backoff_max`** caps the grown delay in seconds. `None` (the
+  default) leaves it uncapped.
+- **`retry_jitter`** adds up to this fraction of the (capped) delay as random
+  spread, so instances that degraded at the same moment do not all retry
+  Redis at the same moment too. Deterministic given the same clock reading,
+  attempt number and breaker name — it does not depend on process-global
+  random state.
+- **`write_queue_size`** bounds the pending coordinated writes; see
+  [Backpressure](#backpressure-the-write-queue-is-bounded). The default of 128
+  is far above what a draining lane ever holds, so raising it does not buy
+  throughput — it only lets a wedged lane hold more memory before dropping.
 
 ## Compatibility
 

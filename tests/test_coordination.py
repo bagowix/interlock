@@ -8,13 +8,14 @@ ticks run via ``poll_once()``, and fire-and-forget writes are awaited with
 
 import asyncio
 import gc
+import threading
 import weakref
 from dataclasses import replace
 from typing import cast
 
 import pytest
 
-from conftest import FakeClock, RecordingListener
+from conftest import ExplodingListener, FakeClock, RecordingListener
 from inmemory_storage import AsyncInMemoryStorage, InMemoryStorage
 from interlock import CircuitBreaker, CircuitOpenError, Config, Outcome, Registry, State
 from interlock._coordination import (
@@ -25,11 +26,12 @@ from interlock._coordination import (
     _sync_lane_tick,
 )
 from interlock.errors import InterlockError
-from interlock.protocols import AsyncStorage, EventListener, Storage
+from interlock.protocols import AsyncStorage, Clock, EventListener, Storage
 from interlock.shared import ProbeLease, SharedState
 
 NAME = 'svc'
 WAIT = 5.0
+LANE_TIMEOUT = 5.0  # real seconds: a lane that never parks must fail, not hang
 
 
 @pytest.fixture
@@ -53,12 +55,13 @@ def storage(fake_clock: FakeClock) -> InMemoryStorage:
 
 
 class StorageEventsListener(RecordingListener):
-    """RecordingListener extended with the 1.2 storage hooks."""
+    """RecordingListener extended with the storage hooks."""
 
     def __init__(self) -> None:
         super().__init__()
         self.degraded: list[BaseException] = []
         self.recovered: int = 0
+        self.write_dropped: int = 0
 
     def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
         self.names.append(name)
@@ -68,6 +71,10 @@ class StorageEventsListener(RecordingListener):
         self.names.append(name)
         self.recovered += 1
 
+    def on_storage_write_dropped(self, *, name: str) -> None:
+        self.names.append(name)
+        self.write_dropped += 1
+
 
 class FlakyStorage:
     """In-memory storage whose every operation can be made to raise."""
@@ -75,11 +82,16 @@ class FlakyStorage:
     def __init__(self, inner: InMemoryStorage) -> None:
         self._inner = inner
         self.fail = False
+        self.calls = 0
         self.state_ttl = inner.state_ttl
         self.poll_interval = inner.poll_interval
         self.retry_backoff = inner.retry_backoff
+        self.retry_backoff_multiplier = inner.retry_backoff_multiplier
+        self.retry_backoff_max = inner.retry_backoff_max
+        self.retry_jitter = inner.retry_jitter
 
     def _check(self) -> None:
+        self.calls += 1
         if self.fail:
             raise ConnectionError('storage down')
 
@@ -465,6 +477,335 @@ def test__degradation__old_style_listener_does_not_break(
     assert breaker.call(lambda: 'ok') == 'ok'
 
 
+# --- degraded-storage retry policy: growth, cap, jitter, reset (#100) ---
+
+
+def test__degraded__backoff_grows_geometrically_with_consecutive_failures(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky = FlakyStorage(storage)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 2.0
+    breaker = _breaker(config, fake_clock, flaky)
+    flaky.fail = True
+
+    _coordinator(breaker).poll_once()  # 1st failure: next delay = 1.0 * 2**0 = 1.0
+    assert flaky.calls == 1
+
+    fake_clock.advance(0.999)
+    _coordinator(breaker).poll_once()  # not due yet: gate stays closed
+    assert flaky.calls == 1
+
+    fake_clock.advance(0.002)  # now 1.001, past the 1.0s delay
+    _coordinator(breaker).poll_once()  # 2nd failure: next delay = 1.0 * 2**1 = 2.0
+    assert flaky.calls == 2
+
+    fake_clock.advance(1.999)  # now 3.0, just short of 1.001 + 2.0 = 3.001
+    _coordinator(breaker).poll_once()
+    assert flaky.calls == 2  # still gated: proves the delay actually doubled
+
+    fake_clock.advance(0.002)  # now 3.002, past the due time
+    _coordinator(breaker).poll_once()  # 3rd failure confirms the geometric growth held
+    assert flaky.calls == 3
+
+
+def test__degraded__backoff_capped_at_retry_backoff_max(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky = FlakyStorage(storage)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 10.0
+    flaky.retry_backoff_max = 5.0
+    breaker = _breaker(config, fake_clock, flaky)
+    flaky.fail = True
+
+    _coordinator(breaker).poll_once()  # 1st failure: next delay = 1.0 (uncapped)
+    assert flaky.calls == 1
+
+    fake_clock.advance(1.0)
+    _coordinator(breaker).poll_once()  # 2nd failure: 1.0 * 10**1 = 10, capped to 5.0
+    assert flaky.calls == 2
+
+    fake_clock.advance(4.999)
+    _coordinator(breaker).poll_once()  # not yet past the capped 5.0s delay
+    assert flaky.calls == 2
+
+    fake_clock.advance(0.002)  # now past it: an uncapped 10s delay would still gate this
+    _coordinator(breaker).poll_once()
+    assert flaky.calls == 3
+
+
+def test__degraded__attempt_counter_resets_on_recovery(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky = FlakyStorage(storage)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 2.0
+    breaker = _breaker(config, fake_clock, flaky)
+    flaky.fail = True
+
+    _coordinator(breaker).poll_once()  # attempt 0: next delay 1.0
+    fake_clock.advance(1.0)
+    _coordinator(breaker).poll_once()  # attempt 1: next delay 2.0, still failing
+    assert flaky.calls == 2
+
+    flaky.fail = False
+    fake_clock.advance(2.0)
+    _coordinator(breaker).poll_once()  # recovers: attempt counter resets to 0
+    assert flaky.calls == 3
+
+    flaky.fail = True
+    _coordinator(breaker).poll_once()  # fails again right away: gate was open (not degraded)
+    assert flaky.calls == 4  # this failure re-degrades using attempt 0, not 2
+
+    fake_clock.advance(0.999)
+    _coordinator(breaker).poll_once()
+    assert flaky.calls == 4  # gated at ~1.0s, proving the counter did not keep growing from before
+
+    fake_clock.advance(0.002)
+    _coordinator(breaker).poll_once()
+    assert flaky.calls == 5
+
+
+def test__degraded__jitter_is_bounded_and_reproducible_for_the_same_seed(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    flaky_a = FlakyStorage(storage)
+    flaky_a.retry_backoff = 10.0
+    flaky_a.retry_jitter = 0.5
+    breaker_a = _breaker(config, fake_clock, flaky_a)
+
+    flaky_b = FlakyStorage(storage)
+    flaky_b.retry_backoff = 10.0
+    flaky_b.retry_jitter = 0.5
+    breaker_b = _breaker(config, fake_clock, flaky_b)  # different instance, same name + clock
+
+    delay_a = _coordinator(breaker_a)._next_delay(0)
+    delay_b = _coordinator(breaker_b)._next_delay(0)
+
+    # Same (name, clock reading, attempt) seed -> the same draw, not process-global
+    # randomness, so the delay is reproducible under a fake clock in tests.
+    assert delay_a == delay_b
+    assert 10.0 <= delay_a < 15.0  # base delay plus up to 50% proportional spread
+
+    fake_clock.advance(1.0)
+    delay_later = _coordinator(breaker_a)._next_delay(0)
+    assert delay_later != delay_a  # a different clock reading draws differently
+
+
+@pytest.mark.asyncio
+async def test__async__degraded__backoff_grows_geometrically_with_consecutive_failures(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    inner = AsyncInMemoryStorage(clock=fake_clock)
+    flaky = AsyncFlakyStorage(inner)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 2.0
+    breaker = _breaker(config, fake_clock, flaky)
+    coordinator = _async_coordinator(breaker)
+    flaky.fail = True
+
+    await coordinator.poll_once()  # 1st failure: next delay = 1.0
+    assert flaky.calls == 1
+
+    fake_clock.advance(0.999)
+    await coordinator.poll_once()
+    assert flaky.calls == 1  # not due yet
+
+    fake_clock.advance(0.002)
+    await coordinator.poll_once()  # 2nd failure: next delay = 2.0
+    assert flaky.calls == 2
+
+    fake_clock.advance(1.999)
+    await coordinator.poll_once()
+    assert flaky.calls == 2  # still gated: the delay doubled, not stayed at 1.0
+
+    fake_clock.advance(0.002)
+    await coordinator.poll_once()
+    assert flaky.calls == 3
+
+
+@pytest.mark.asyncio
+async def test__async__degraded__attempt_counter_resets_on_recovery(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    inner = AsyncInMemoryStorage(clock=fake_clock)
+    flaky = AsyncFlakyStorage(inner)
+    flaky.retry_backoff = 1.0
+    flaky.retry_backoff_multiplier = 2.0
+    breaker = _breaker(config, fake_clock, flaky)
+    coordinator = _async_coordinator(breaker)
+    flaky.fail = True
+
+    await coordinator.poll_once()  # attempt 0: next delay 1.0
+    fake_clock.advance(1.0)
+    await coordinator.poll_once()  # attempt 1: next delay 2.0
+    assert flaky.calls == 2
+
+    flaky.fail = False
+    fake_clock.advance(2.0)
+    await coordinator.poll_once()  # recovers: attempt counter resets to 0
+    assert flaky.calls == 3
+
+    flaky.fail = True
+    await coordinator.poll_once()  # fails again immediately (gate was open)
+    assert flaky.calls == 4
+
+    fake_clock.advance(0.999)
+    await coordinator.poll_once()
+    assert flaky.calls == 4  # gated at ~1.0s again, not continuing from 4.0
+
+    fake_clock.advance(0.002)
+    await coordinator.poll_once()
+    assert flaky.calls == 5
+
+
+# --- bounded write queue (#99) ---
+
+
+class BlockingTripStorage(InMemoryStorage):
+    """In-memory storage whose ``trip_open`` parks the lane until released.
+
+    A parked lane is what makes the queue fill up deterministically: it can
+    neither drain a write nor poll while it waits on ``release``.
+    """
+
+    def __init__(self, *, clock: Clock) -> None:
+        super().__init__(clock=clock)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def trip_open(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
+        self.entered.set()
+        self.release.wait()
+        return super().trip_open(name=name, ttl=ttl, expected_version=expected_version)
+
+
+class AsyncBlockingTripStorage(AsyncInMemoryStorage):
+    """Async mirror of ``BlockingTripStorage``."""
+
+    def __init__(self, *, clock: Clock) -> None:
+        super().__init__(clock=clock)
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def trip_open(
+        self, *, name: str, ttl: float, expected_version: int | None = None
+    ) -> SharedState:
+        self.entered.set()
+        await self.release.wait()
+        return await super().trip_open(name=name, ttl=ttl, expected_version=expected_version)
+
+
+def _blocking_storage(fake_clock: FakeClock) -> BlockingTripStorage:
+    storage = BlockingTripStorage(clock=fake_clock)
+    storage.poll_interval = 3600.0
+    storage.write_queue_size = 1
+    return storage
+
+
+def test__write_queue__at_capacity__drops_the_write_and_reports_it(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    storage = _blocking_storage(fake_clock)
+    listener = StorageEventsListener()
+    breaker = _breaker(config, fake_clock, storage, listener)
+    coordinator = _coordinator(breaker)
+
+    coordinator.notify_local_trip()  # the lane takes this one and parks in trip_open
+    assert storage.entered.wait(timeout=LANE_TIMEOUT)
+    coordinator.notify_local_trip()  # fills the single queue slot
+    coordinator.notify_local_trip()  # over capacity: dropped, never queued
+
+    assert listener.write_dropped == 1
+    assert listener.names == [NAME]
+    assert not coordinator._work.full()  # the slot reserved for the sentinel stays free
+
+    storage.release.set()
+    breaker.close()
+
+
+def test__write_queue__at_capacity__settle_neither_blocks_nor_raises(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    storage = _blocking_storage(fake_clock)
+    listener = StorageEventsListener()
+    breaker = _breaker(config, fake_clock, storage, listener)
+    coordinator = _coordinator(breaker)
+
+    coordinator.notify_local_trip()
+    assert storage.entered.wait(timeout=LANE_TIMEOUT)
+    coordinator.notify_local_trip()  # queue now full
+
+    _trip(breaker)  # the trip write is dropped inside _settle, not raised there
+
+    assert breaker.state is State.OPEN  # local protection is unaffected
+    assert listener.write_dropped == 1
+
+    storage.release.set()
+    breaker.close()
+
+
+@pytest.mark.asyncio
+async def test__async__write_queue__at_capacity__drops_the_write_and_reports_it(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    storage = AsyncBlockingTripStorage(clock=fake_clock)
+    storage.poll_interval = 3600.0
+    storage.write_queue_size = 1
+    listener = StorageEventsListener()
+    breaker = _breaker(config, fake_clock, storage, listener)
+    coordinator = _async_coordinator(breaker)
+
+    coordinator.notify_local_trip()
+    await asyncio.wait_for(storage.entered.wait(), timeout=LANE_TIMEOUT)
+    coordinator.notify_local_trip()
+    coordinator.notify_local_trip()
+
+    assert listener.write_dropped == 1
+    assert not coordinator._work.full()
+
+    storage.release.set()
+    await breaker.aclose()
+
+
+def test__write_queue__at_capacity__raising_listener_is_isolated_from_the_call(
+    config: Config, fake_clock: FakeClock, exploding: ExplodingListener
+) -> None:
+    storage = _blocking_storage(fake_clock)
+    breaker = CircuitBreaker(
+        name=NAME,
+        config=config,
+        clock=fake_clock,
+        storage=storage,
+        listener=cast('EventListener', exploding),
+    )
+    coordinator = _coordinator(breaker)
+
+    coordinator.notify_local_trip()
+    assert storage.entered.wait(timeout=LANE_TIMEOUT)
+    coordinator.notify_local_trip()  # queue now full
+
+    _trip(breaker)  # the drop hook raises; the calls keep their own exception
+
+    assert 'on_storage_write_dropped' in exploding.events
+    assert breaker.state is State.OPEN
+
+    storage.release.set()
+    breaker.close()
+
+
+def test__write_queue__default_size__is_the_documented_bound(
+    config: Config, fake_clock: FakeClock, storage: InMemoryStorage
+) -> None:
+    del storage.write_queue_size  # a storage that predates the knob
+    breaker = _breaker(config, fake_clock, storage)
+
+    assert _coordinator(breaker)._queue_size == 128
+
+
 # --- runtime matching (D8) ---
 
 
@@ -660,11 +1001,16 @@ class AsyncFlakyStorage:
     def __init__(self, inner: AsyncInMemoryStorage) -> None:
         self._inner = inner
         self.fail = False
+        self.calls = 0
         self.state_ttl = inner.state_ttl
         self.poll_interval = inner.poll_interval
         self.retry_backoff = inner.retry_backoff
+        self.retry_backoff_multiplier = inner.retry_backoff_multiplier
+        self.retry_backoff_max = inner.retry_backoff_max
+        self.retry_jitter = inner.retry_jitter
 
     def _check(self) -> None:
+        self.calls += 1
         if self.fail:
             raise ConnectionError('storage down')
 
@@ -770,6 +1116,7 @@ def test__sync_lane_tick__dead_coordinator_stops_lane(
         on_view=lambda _view: None,
         on_degraded=lambda _error: None,
         on_recovered=lambda: None,
+        on_write_dropped=lambda: None,
     )
     work = coordinator._work
     ref = weakref.ref(coordinator)
@@ -876,6 +1223,7 @@ def test__sync_lane__exits_on_dead_coordinator(
         on_view=lambda _view: None,
         on_degraded=lambda _error: None,
         on_recovered=lambda: None,
+        on_write_dropped=lambda: None,
     )
     work = coordinator._work
     ref = weakref.ref(coordinator)

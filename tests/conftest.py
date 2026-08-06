@@ -121,6 +121,9 @@ class ExplodingListener:
     def on_storage_recovered(self, *, name: str) -> None:
         self._fire('on_storage_recovered')
 
+    def on_storage_write_dropped(self, *, name: str) -> None:
+        self._fire('on_storage_write_dropped')
+
     def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
         self._fire('on_retry')
 
