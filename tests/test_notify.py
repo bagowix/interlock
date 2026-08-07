@@ -53,6 +53,18 @@ class _RejectionListener(EventListener):
         self.names.append(name)
 
 
+class _CoreOnlyListener(CoreEventListener):
+    pass
+
+
+class _StorageOnlyListener(StorageEventListener):
+    pass
+
+
+class _PipelineOnlyListener(PipelineEventListener):
+    pass
+
+
 def _notify_inherited_hooks(listener: EventListener) -> None:
     hooks: tuple[tuple[str, dict[str, object]], ...] = (
         ('on_state_change', {'old': State.CLOSED, 'new': State.OPEN}),
@@ -142,7 +154,23 @@ def test__partial_listeners__own_hooks_and_inherited_hooks__only_own_hooks_have_
     assert rejection_listener.names == [NAME]
 
 
-def test__listener_protocols__complete_listener__satisfies_every_narrow_contract() -> None:
+def test__listener_protocols__narrow_listeners__satisfy_only_their_event_group() -> None:
+    core_listener = _CoreOnlyListener()
+    storage_listener = _StorageOnlyListener()
+    pipeline_listener = _PipelineOnlyListener()
+
+    assert isinstance(core_listener, CoreEventListener)
+    assert not isinstance(core_listener, StorageEventListener)
+    assert not isinstance(core_listener, PipelineEventListener)
+    assert isinstance(storage_listener, StorageEventListener)
+    assert not isinstance(storage_listener, CoreEventListener)
+    assert not isinstance(storage_listener, PipelineEventListener)
+    assert isinstance(pipeline_listener, PipelineEventListener)
+    assert not isinstance(pipeline_listener, CoreEventListener)
+    assert not isinstance(pipeline_listener, StorageEventListener)
+
+
+def test__event_listener__complete_listener__satisfies_every_event_group() -> None:
     listener = _CallListener()
 
     assert isinstance(listener, CoreEventListener)

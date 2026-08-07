@@ -1778,6 +1778,11 @@ hooks back logging, metrics, and any custom sink.
 ## The hooks
 
 ```python
+from typing import Protocol
+
+from interlock import Outcome, State
+
+
 class CoreEventListener(Protocol):
     def on_state_change(self, *, name: str, old: State, new: State) -> None: ...
     def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None: ...
@@ -1805,8 +1810,14 @@ class EventListener(
 ): ...
 ```
 
-Listeners are called **outside** the breaker's lock, after the protected call
-returns, so a slow listener never serialises throughput.
+Core listeners are called **outside** the breaker's lock, so a slow listener
+never serialises throughput. `on_call` runs after the protected call completes;
+transition, rejection, and reset hooks run immediately after their corresponding
+breaker operation. Storage hooks run from the coordinated breaker's background
+lane when its backend degrades, recovers, or drops a queued write.
+
+Pipeline hooks run inside their strategy's execution path: before retry backoff,
+when bulkhead admission fails, or before a fallback returns its substitute.
 
 The protocols follow the owner of each event. `CoreEventListener` observes the
 breaker itself, `StorageEventListener` observes breakers coordinated through a

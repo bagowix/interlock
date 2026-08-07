@@ -12,9 +12,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `CoreEventListener`, `StorageEventListener` and `PipelineEventListener` let a
   breaker-only, coordination-only or strategy-only sink pass strict type
   checking without inheriting unrelated hooks. The existing `EventListener`
-  remains the complete ten-hook contract, and listener documentation now makes
-  the `name` namespace explicit: breaker for core/storage events, strategy for
-  pipeline events.
+  remains the complete ten-hook contract and continues to satisfy every narrowed
+  annotation, so existing listeners require no migration. Listener documentation
+  now makes the `name` namespace explicit: breaker for core/storage events,
+  strategy for pipeline events.
 
 - **Partial `EventListener` implementations now pass strict type checking.** A
   listener that only needs one hook previously had to stub all ten before mypy,
