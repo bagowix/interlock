@@ -24,14 +24,21 @@ part of the call's behaviour, not observations of it, and keep raising.
 import logging
 from typing import Final
 
-from interlock.protocols import EventListener
+from interlock.protocols import CoreEventListener, PipelineEventListener, StorageEventListener
 
 __all__ = ('notify',)
 
 _logger: Final = logging.getLogger('interlock')
 
 
-def notify(listener: EventListener | None, hook: str, /, *, name: str, **kwargs: object) -> None:
+def notify(
+    listener: CoreEventListener | StorageEventListener | PipelineEventListener | None,
+    hook: str,
+    /,
+    *,
+    name: str,
+    **kwargs: object,
+) -> None:
     """Invoke one listener hook, isolating its failure from the caller.
 
     Args:

@@ -33,7 +33,7 @@ from aiohttp import ClientHandlerType, ClientRequest, ClientResponse
 
 from interlock.config import Config
 from interlock.integrations._registry import reject_registry_options, resolve_registry
-from interlock.protocols import Clock, EventListener, FailureClassifier
+from interlock.protocols import Clock, CoreEventListener, FailureClassifier, StorageEventListener
 from interlock.registry import Registry
 from interlock.state import State
 
@@ -108,7 +108,7 @@ class CircuitBreakerMiddleware:
         clock: Clock | None = None,
         initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
-        listener: EventListener | None = None,
+        listener: CoreEventListener | StorageEventListener | None = None,
         registry: Registry | None = None,
     ) -> None:
         self._registry, self._owns_registry = resolve_registry(

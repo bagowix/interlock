@@ -23,7 +23,14 @@ from interlock._coordination import (
     _sync_lane_tick,
 )
 from interlock._notify import notify
-from interlock.protocols import AsyncStorage, EventListener, Storage
+from interlock.protocols import (
+    AsyncStorage,
+    CoreEventListener,
+    EventListener,
+    PipelineEventListener,
+    Storage,
+    StorageEventListener,
+)
 from interlock.shared import SharedState
 
 NAME = 'svc'
@@ -133,6 +140,14 @@ def test__partial_listeners__own_hooks_and_inherited_hooks__only_own_hooks_have_
 
     assert call_listener.calls == [(NAME, Outcome.SUCCESS)]
     assert rejection_listener.names == [NAME]
+
+
+def test__listener_protocols__complete_listener__satisfies_every_narrow_contract() -> None:
+    listener = _CallListener()
+
+    assert isinstance(listener, CoreEventListener)
+    assert isinstance(listener, StorageEventListener)
+    assert isinstance(listener, PipelineEventListener)
 
 
 def test__notify__raising_hook__is_logged_with_context(

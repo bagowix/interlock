@@ -18,10 +18,13 @@ from interlock.window import WindowSnapshot
 __all__ = (
     'AsyncStorage',
     'Clock',
+    'CoreEventListener',
     'EventListener',
     'FailureClassifier',
+    'PipelineEventListener',
     'SlidingWindow',
     'Storage',
+    'StorageEventListener',
 )
 
 
@@ -185,14 +188,13 @@ class FailureClassifier(Protocol):
 
 
 @runtime_checkable
-class EventListener(Protocol):
-    """Hooks for observability, isolated from the paths they observe.
+class CoreEventListener(Protocol):
+    """Observes circuit-breaker calls, rejections, resets and transitions.
 
     A hook that raises an ``Exception`` is logged to the ``interlock`` logger
     and ignored: the protected call keeps its result, a failing call keeps its
-    own exception, transition bookkeeping completes, and a coordinated
-    breaker's background lane keeps running. ``BaseException`` — cancellation,
-    shutdown — still propagates.
+    own exception, and transition bookkeeping completes. ``BaseException`` —
+    cancellation, shutdown — still propagates.
 
     Every hook is dispatched by name and only if defined, so a listener may
     implement just the ones it needs and one written before a hook existed
@@ -202,23 +204,33 @@ class EventListener(Protocol):
     """
 
     def on_state_change(self, *, name: str, old: State, new: State) -> None:
-        """Called after the breaker transitions between states."""
+        """Called after breaker ``name`` transitions between states."""
         return None
 
     def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
-        """Called after a protected call completes, success or failure."""
+        """Called after a call protected by breaker ``name`` completes."""
         return None
 
     def on_rejected(self, *, name: str) -> None:
-        """Called when a call is rejected because the circuit is open."""
+        """Called when breaker ``name`` rejects a call because its circuit is open."""
         return None
 
     def on_reset(self, *, name: str) -> None:
-        """Called when the breaker is manually reset."""
+        """Called when breaker ``name`` is manually reset."""
         return None
 
+
+@runtime_checkable
+class StorageEventListener(Protocol):
+    """Observes the shared-storage path of a coordinated circuit breaker.
+
+    ``name`` always identifies the breaker whose storage path emitted the
+    event. Hooks inherit the same failure isolation and optional-dispatch
+    policy as ``CoreEventListener``.
+    """
+
     def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
-        """Called when the shared storage backend becomes unavailable.
+        """Called when breaker ``name`` loses its shared storage backend.
 
         The breaker keeps working on local state; this event makes the
         degradation observable instead of silent. It reports storage failures
@@ -228,11 +240,11 @@ class EventListener(Protocol):
         return None
 
     def on_storage_recovered(self, *, name: str) -> None:
-        """Called when the shared storage backend becomes reachable again."""
+        """Called when breaker ``name`` reaches its shared storage backend again."""
         return None
 
     def on_storage_write_dropped(self, *, name: str) -> None:
-        """Called when a coordinated write is dropped by a full write queue.
+        """Called when breaker ``name`` drops a write from its full storage queue.
 
         The queue only fills when the background lane stops draining it, so
         this is the signal that shared writes are being lost while the breaker
@@ -241,8 +253,18 @@ class EventListener(Protocol):
         """
         return None
 
+
+@runtime_checkable
+class PipelineEventListener(Protocol):
+    """Observes retry, bulkhead and fallback pipeline strategies.
+
+    ``name`` always identifies the strategy that emitted the event. Hooks
+    inherit the same failure isolation and optional-dispatch policy as
+    ``CoreEventListener``.
+    """
+
     def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
-        """Called by a pipeline retry layer before it sleeps between attempts.
+        """Called before retry strategy ``name`` sleeps between attempts.
 
         ``attempt`` is the number of the attempt that just failed; ``delay``
         is the upcoming backoff in seconds.
@@ -250,9 +272,19 @@ class EventListener(Protocol):
         return None
 
     def on_bulkhead_rejected(self, *, name: str) -> None:
-        """Called when a pipeline bulkhead rejects a call (no free slot)."""
+        """Called when bulkhead strategy ``name`` rejects a call (no free slot)."""
         return None
 
     def on_fallback(self, *, name: str, error: BaseException) -> None:
-        """Called when a pipeline fallback substitutes a value for ``error``."""
+        """Called when fallback strategy ``name`` substitutes a value for ``error``."""
         return None
+
+
+@runtime_checkable
+class EventListener(
+    CoreEventListener,
+    StorageEventListener,
+    PipelineEventListener,
+    Protocol,
+):
+    """Complete listener contract combining core, storage and pipeline hooks."""

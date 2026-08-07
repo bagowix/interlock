@@ -6,28 +6,50 @@ hooks back logging, metrics, and any custom sink.
 ## The hooks
 
 ```python
-class EventListener(Protocol):
+class CoreEventListener(Protocol):
     def on_state_change(self, *, name: str, old: State, new: State) -> None: ...
     def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None: ...
     def on_rejected(self, *, name: str) -> None: ...
     def on_reset(self, *, name: str) -> None: ...
+
+
+class StorageEventListener(Protocol):
     def on_storage_degraded(self, *, name: str, error: BaseException) -> None: ...
     def on_storage_recovered(self, *, name: str) -> None: ...
     def on_storage_write_dropped(self, *, name: str) -> None: ...
+
+
+class PipelineEventListener(Protocol):
     def on_retry(self, *, name: str, attempt: int, delay: float) -> None: ...
     def on_bulkhead_rejected(self, *, name: str) -> None: ...
     def on_fallback(self, *, name: str, error: BaseException) -> None: ...
+
+
+class EventListener(
+    CoreEventListener,
+    StorageEventListener,
+    PipelineEventListener,
+    Protocol,
+): ...
 ```
 
 Listeners are called **outside** the breaker's lock, after the protected call
 returns, so a slow listener never serialises throughput.
 
-The three storage hooks fire only for breakers coordinated through a shared
-[storage](../integrations/redis.md); the three pipeline hooks fire from
-[pipeline strategies](pipeline.md) given a `listener=`. Every hook is dispatched
-only if present, and the protocol supplies no-op implementations for subclasses.
-A listener can therefore override just the hooks it cares about and keeps
-working when a later interlock version adds a new hook.
+The protocols follow the owner of each event. `CoreEventListener` observes the
+breaker itself, `StorageEventListener` observes breakers coordinated through a
+shared [storage](../integrations/redis.md), and `PipelineEventListener` observes
+[pipeline strategies](pipeline.md) given a `listener=`. `EventListener` combines
+all three for sinks that observe the complete library.
+
+The `name` namespace follows the same boundary: core and storage hooks receive
+the **breaker name**, while pipeline hooks receive the **strategy name**. A
+listener can therefore use `name` directly as its breaker or strategy label
+without rediscovering the distinction from the call site.
+
+Every hook is dispatched only if present, and each protocol supplies no-op
+implementations for subclasses. A listener can override just the hooks it cares
+about and keeps working when a later interlock version adds a new hook.
 
 ## Listener failures are isolated
 
@@ -120,15 +142,15 @@ It records five instruments on the `interlock` meter (or a meter you pass in):
 
 ## Custom listeners
 
-For a partial listener that strict type checkers can verify, inherit
-`EventListener` and override only the hooks you need. Every inherited hook is a
-no-op:
+For a partial listener that strict type checkers can verify, inherit the narrowest
+protocol for its owner and override only the hooks you need. Every inherited hook
+is a no-op:
 
 ```python
-from interlock import EventListener
+from interlock import CoreEventListener
 
 
-class RejectionCounter(EventListener):
+class RejectionCounter(CoreEventListener):
     def __init__(self) -> None:
         self.rejected = 0
 
@@ -136,7 +158,8 @@ class RejectionCounter(EventListener):
         self.rejected += 1
 ```
 
-Inheritance is optional for a listener that implements the complete protocol:
-structural typing continues to accept it. At runtime, dispatch is still by name
-and skips any missing hook, including on older listener objects that do not
-inherit `EventListener`.
+Use `StorageEventListener` for storage-only sinks, `PipelineEventListener` for
+strategy-only sinks, or `EventListener` when one object handles every group.
+Inheritance is optional for a listener that structurally implements the relevant
+protocol. At runtime, dispatch is still by name and skips any missing hook,
+including on older listener objects that inherit none of them.

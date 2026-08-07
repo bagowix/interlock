@@ -69,7 +69,7 @@ except ImportError as exc:
 
 from interlock._notify import notify
 from interlock.errors import CircuitOpenError
-from interlock.protocols import EventListener
+from interlock.protocols import PipelineEventListener
 
 __all__ = ('RetryStrategy', 'retry_unless_open', 'wait_probe')
 
@@ -195,7 +195,7 @@ class RetryStrategy:
         async_sleep: Callable[[float], Awaitable[None]] | None = None,
         before_sleep: Callable[[RetryCallState], None] | None = None,
         name: str = 'retry',
-        listener: EventListener | None = None,
+        listener: PipelineEventListener | None = None,
     ) -> None:
         if attempts < 1:
             raise ValueError(f'attempts must be >= 1, got {attempts!r}')

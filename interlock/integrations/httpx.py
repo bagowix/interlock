@@ -31,7 +31,7 @@ from httpx import AsyncBaseTransport, BaseTransport, Request, Response
 
 from interlock.config import Config
 from interlock.integrations._registry import reject_registry_options, resolve_registry
-from interlock.protocols import Clock, EventListener, FailureClassifier
+from interlock.protocols import Clock, CoreEventListener, FailureClassifier, StorageEventListener
 from interlock.registry import Registry
 from interlock.state import State
 
@@ -120,7 +120,7 @@ class CircuitBreakerTransport(BaseTransport):
         clock: Clock | None = None,
         initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
-        listener: EventListener | None = None,
+        listener: CoreEventListener | StorageEventListener | None = None,
         registry: Registry | None = None,
     ) -> None:
         self._transport = transport
@@ -205,7 +205,7 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         clock: Clock | None = None,
         initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
-        listener: EventListener | None = None,
+        listener: CoreEventListener | StorageEventListener | None = None,
         registry: Registry | None = None,
     ) -> None:
         self._transport = transport

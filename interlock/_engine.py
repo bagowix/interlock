@@ -28,7 +28,14 @@ from interlock._typing import AsyncCallable, P, R, SyncCallable
 from interlock.config import Config
 from interlock.errors import CircuitOpenError, InterlockError
 from interlock.outcome import Outcome
-from interlock.protocols import AsyncStorage, Clock, EventListener, FailureClassifier, Storage
+from interlock.protocols import (
+    AsyncStorage,
+    Clock,
+    CoreEventListener,
+    FailureClassifier,
+    Storage,
+    StorageEventListener,
+)
 from interlock.shared import SharedState
 from interlock.state import State
 from interlock.window import WindowSnapshot
@@ -82,7 +89,7 @@ class Engine:
         clock: Clock,
         initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
-        listener: EventListener | None = None,
+        listener: CoreEventListener | StorageEventListener | None = None,
         storage: Storage | AsyncStorage | None = None,
     ) -> None:
         self._name = name
