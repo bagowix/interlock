@@ -48,6 +48,21 @@ The pre-commit hooks run the fast subset automatically:
 uv run prek install           # one-time, installs the git hook
 ```
 
+### Supported platforms
+
+interlock supports Python 3.11–3.14 on Linux, Windows and macOS. The full test,
+coverage, static-analysis and Redis matrix runs on Ubuntu. A smaller runtime matrix
+runs on Windows and macOS with the oldest and newest supported Python versions. It
+covers the core breaker, concurrency and shutdown paths, timeouts, the resilience
+pipeline, state-machine invariants, the runtime typing surface and loopback HTTP
+integrations.
+
+Redis tests are the only platform-smoke exclusion tied to an operating-system
+constraint: GitHub-hosted Windows and macOS runners do not support service
+containers. They remain covered against a real Redis server in every Python version
+of the Ubuntu matrix. Ruff and the static type checkers also stay in that full matrix
+because their results are platform-independent.
+
 ### Public API compatibility
 
 `.github/workflows/api-compatibility.yml` runs [`griffe check`](https://mkdocstrings.github.io/griffe/)

@@ -8,6 +8,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Windows and macOS regressions are now caught before release.** A lightweight CI
+  matrix exercises the platform-sensitive runtime paths on the oldest and newest
+  supported Python versions while the full quality, coverage and Redis matrix stays
+  on Ubuntu.
+
 - **Transport integrations can key breakers by logical dependency instead of
   raw host.** Service-discovery suffixes and shared gateway hosts previously
   made the httpx2/httpx transports, aiohttp middleware, and requests adapter
