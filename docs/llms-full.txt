@@ -2777,6 +2777,42 @@ correct than global state — each host's health is observed independently.
 When a host's breaker is open, its requests raise `CircuitOpenError` before
 reaching the network.
 
+## Share one registry across clients
+
+Pass a caller-owned `Registry` when several clients reach the same dependency.
+Requests for the same host then use one breaker instance and one sliding
+window, even when they travel through different transports:
+
+```python
+import httpx2
+
+from interlock import Config, Registry
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport, HttpStatusClassifier
+
+registry = Registry(
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    classifier=HttpStatusClassifier(),
+)
+
+client_a = httpx2.AsyncClient(
+    transport=AsyncCircuitBreakerTransport(httpx2.AsyncHTTPTransport(), registry=registry)
+)
+client_b = httpx2.AsyncClient(
+    transport=AsyncCircuitBreakerTransport(httpx2.AsyncHTTPTransport(), registry=registry)
+)
+```
+
+`Registry` uses exception-only classification by default. Always configure
+`HttpStatusClassifier` as above when you want the integration's normal HTTP
+status policy; otherwise a returned `503` counts as a success. The supplied
+registry owns `config`, `clock`, `initial_state`, `classifier`, and `listener`,
+so none of those options may also be passed to the transport.
+
+Closing either client still closes its wrapped connection pool but leaves the
+shared registry usable by the other client. The application owns the registry
+and must call `await registry.aclose_all()` once during async shutdown (or
+`registry.close_all()` when all guarded clients are synchronous).
+
 ## What counts as a failure
 
 By default the transport uses `HttpStatusClassifier`:
@@ -2900,6 +2936,43 @@ continues normally. An open breaker raises `CircuitOpenError` before the
 wrapped transport performs I/O. A request URL without a host raises
 `ValueError` for the same reason: there is no dependency identity to key on.
 
+## Share one registry across clients
+
+Inject one caller-owned `Registry` when several clients should observe the
+same dependency health. The transports then resolve the same host to the same
+breaker and contribute to one sliding window:
+
+```python
+import httpx
+
+from interlock import Config, Registry
+from interlock.integrations.httpx import AsyncCircuitBreakerTransport, HttpStatusClassifier
+
+registry = Registry(
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    classifier=HttpStatusClassifier(),
+)
+
+client_a = httpx.AsyncClient(
+    transport=AsyncCircuitBreakerTransport(httpx.AsyncHTTPTransport(), registry=registry)
+)
+client_b = httpx.AsyncClient(
+    transport=AsyncCircuitBreakerTransport(httpx.AsyncHTTPTransport(), registry=registry)
+)
+```
+
+The classifier is intentional: a bare `Registry` classifies raised exceptions
+but treats returned responses, including `503`, as successes. Configure
+`HttpStatusClassifier` to retain the transport's default status policy. A
+supplied registry also owns `config`, `clock`, `initial_state`, `classifier`,
+and `listener`; combining `registry` with any of those transport options raises
+`ValueError` instead of silently ignoring one source of configuration.
+
+Closing a client closes its wrapped connection pool, not the injected
+registry. The application must call `await registry.aclose_all()` once during
+async shutdown, or `registry.close_all()` when every guarded client is
+synchronous.
+
 ## What counts as a failure
 
 The default `HttpStatusClassifier` counts these as failures:
@@ -2998,6 +3071,34 @@ made.
 The breaker observes the time to *response headers*; reading the body happens
 outside the guarded call — the same semantics as the
 [httpx2 transport](httpx2.md).
+
+## Share one registry across sessions
+
+Several middleware instances can share one caller-owned registry, so traffic
+to the same host contributes to one breaker and one sliding window:
+
+```python
+from interlock import Config, Registry
+from interlock.integrations.aiohttp import CircuitBreakerMiddleware, HttpStatusClassifier
+
+registry = Registry(
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    classifier=HttpStatusClassifier(),
+)
+
+middleware_a = CircuitBreakerMiddleware(registry=registry)
+middleware_b = CircuitBreakerMiddleware(registry=registry)
+```
+
+Do not omit the classifier when HTTP statuses should affect the breaker. A
+bare `Registry` uses exception-only classification, so a returned `503` counts
+as a success. The registry owns `config`, `clock`, `initial_state`,
+`classifier`, and `listener`; passing any of them to the middleware together
+with `registry` raises `ValueError`.
+
+Calling `aclose()` on middleware that received a registry leaves that registry
+usable by other sessions. The application owns it and must call
+`await registry.aclose_all()` once during shutdown.
 
 ## Safe production rollout
 
@@ -3102,6 +3203,39 @@ Each host gets its own breaker (a failing `api.a` never trips `api.b`),
 created lazily and shared across requests. When a host's circuit is open the
 request raises [`CircuitOpenError`](../reference.md) *before* a connection is
 made.
+
+## Share one registry across sessions
+
+Inject a caller-owned `Registry` when independent sessions should use one
+breaker and one sliding window for the same host:
+
+```python
+import requests
+
+from interlock import Config, Registry
+from interlock.integrations.requests import CircuitBreakerAdapter, HttpStatusClassifier
+
+registry = Registry(
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    classifier=HttpStatusClassifier(),
+)
+
+session_a = requests.Session()
+session_a.mount('https://', CircuitBreakerAdapter(registry=registry))
+
+session_b = requests.Session()
+session_b.mount('https://', CircuitBreakerAdapter(registry=registry))
+```
+
+The explicit classifier preserves the adapter's normal status policy. Without
+it, a bare `Registry` classifies exceptions only and a returned `503` counts
+as a success. The registry owns `config`, `clock`, `initial_state`,
+`classifier`, and `listener`; combining `registry` with any of those adapter
+options raises `ValueError`.
+
+Closing either session still releases its adapter's connection pools, but it
+does not close the injected registry. The application owns the registry and
+must call `registry.close_all()` once during shutdown.
 
 ## Safe production rollout
 

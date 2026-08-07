@@ -31,6 +31,7 @@ from requests import PreparedRequest, Response
 from requests.adapters import HTTPAdapter
 
 from interlock.config import Config
+from interlock.integrations._registry import reject_registry_options, resolve_registry
 from interlock.protocols import Clock, EventListener, FailureClassifier
 from interlock.registry import Registry
 from interlock.state import State
@@ -93,14 +94,18 @@ class CircuitBreakerAdapter(HTTPAdapter):
             Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
+        registry: Caller-owned registry shared with other clients. Mutually
+            exclusive with all breaker-construction options above.
         adapter_kwargs: Passed through to ``HTTPAdapter`` (pool sizes,
             ``max_retries``, ...).
 
     Raises:
-        ValueError: If ``initial_state`` is not a supported stable state.
+        ValueError: If ``initial_state`` is unsupported or ``registry`` is
+            combined with a breaker-construction option.
     """
 
-    def __init__(
+    @reject_registry_options
+    def __init__(  # noqa: PLR0913 - mirrors Registry's breaker collaborators
         self,
         *,
         config: Config | None = None,
@@ -108,15 +113,18 @@ class CircuitBreakerAdapter(HTTPAdapter):
         initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
+        registry: Registry | None = None,
         **adapter_kwargs: object,
     ) -> None:
         super().__init__(**adapter_kwargs)  # type: ignore[arg-type]
-        self._registry = Registry(
+        self._registry, self._owns_registry = resolve_registry(
+            registry=registry,
             config=config,
             clock=clock,
             initial_state=initial_state,
-            classifier=classifier if classifier is not None else HttpStatusClassifier(),
+            classifier=classifier,
             listener=listener,
+            default_classifier=HttpStatusClassifier(),
         )
 
     @property
@@ -125,10 +133,14 @@ class CircuitBreakerAdapter(HTTPAdapter):
         return self._registry
 
     def close(self) -> None:
-        """Release the adapter's connection pools and every per-host breaker."""
+        """Release connection pools and every breaker owned by this adapter."""
         with ExitStack() as stack:
-            stack.callback(self._registry.close_all)
+            stack.callback(self._close_registry)
             super().close()
+
+    def _close_registry(self) -> None:
+        if self._owns_registry:
+            self._registry.close_all()
 
     def send(  # noqa: PLR0913, PLR0917 - mirrors HTTPAdapter.send, the native extension point
         self,

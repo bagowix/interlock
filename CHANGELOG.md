@@ -16,6 +16,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   releases add hooks; structurally complete listeners continue to work without
   inheritance.
 
+- **Transport integrations can share a caller-owned `Registry` across
+  clients.** Previously each httpx2/httpx transport, aiohttp middleware, and
+  requests adapter built an isolated registry, so clients calling the same
+  host accumulated separate windows and could disagree about dependency
+  health. The new `registry=` option gives them one breaker per host and one
+  policy source, rejects conflicting construction options, and leaves teardown
+  to the registry's owner while still closing each wrapped connection pool.
+
 - **Direct-call baseline and threaded-contention benchmarks**, closing out the
   two gaps left in #84. The CodSpeed suite reported the absolute cost of every
   protected path but not the number a prospective user actually wants — the

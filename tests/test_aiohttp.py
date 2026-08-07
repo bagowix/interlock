@@ -9,7 +9,7 @@ from pytest_mock import MockerFixture
 from tests.conftest import FakeClock
 from yarl import URL
 
-from interlock import CircuitOpenError, Config, State
+from interlock import CircuitOpenError, Config, Registry, State
 from interlock.integrations.aiohttp import CircuitBreakerMiddleware, HttpStatusClassifier
 
 _TRIP_FAST = Config(minimum_number_of_calls=2, failure_rate_threshold=0.5)
@@ -149,6 +149,49 @@ async def test__middleware__aclose__releases_registry(mocker: MockerFixture) -> 
     await middleware.aclose()
 
     aclose_all.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test__middlewares__shared_registry__merge_window(
+    fake_clock: FakeClock,
+) -> None:
+    registry = Registry(
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        classifier=HttpStatusClassifier(),
+    )
+    first = CircuitBreakerMiddleware(registry=registry)
+    second = CircuitBreakerMiddleware(registry=registry)
+    handler = _handler([503, 503])
+
+    await first(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+    await second(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+    breaker = registry.get_existing('api.a')
+
+    assert first.registry is registry
+    assert second.registry is registry
+    assert breaker is not None
+    assert breaker.snapshot().failed_calls == 2
+    with pytest.raises(CircuitOpenError):
+        await second(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+
+
+@pytest.mark.asyncio
+async def test__middleware__injected_registry__aclose_preserves_registry(
+    mocker: MockerFixture,
+) -> None:
+    registry = Registry()
+    middleware = CircuitBreakerMiddleware(registry=registry)
+    aclose_all = mocker.spy(registry, 'aclose_all')
+
+    await middleware.aclose()
+
+    aclose_all.assert_not_awaited()
+
+
+def test__middleware__registry_with_config__raises_conflict() -> None:
+    with pytest.raises(ValueError, match='config'):
+        CircuitBreakerMiddleware(registry=Registry(), config=_TRIP_FAST)
 
 
 @pytest.mark.asyncio

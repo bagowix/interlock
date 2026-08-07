@@ -51,6 +51,34 @@ The breaker observes the time to *response headers*; reading the body happens
 outside the guarded call — the same semantics as the
 [httpx2 transport](httpx2.md).
 
+## Share one registry across sessions
+
+Several middleware instances can share one caller-owned registry, so traffic
+to the same host contributes to one breaker and one sliding window:
+
+```python
+from interlock import Config, Registry
+from interlock.integrations.aiohttp import CircuitBreakerMiddleware, HttpStatusClassifier
+
+registry = Registry(
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    classifier=HttpStatusClassifier(),
+)
+
+middleware_a = CircuitBreakerMiddleware(registry=registry)
+middleware_b = CircuitBreakerMiddleware(registry=registry)
+```
+
+Do not omit the classifier when HTTP statuses should affect the breaker. A
+bare `Registry` uses exception-only classification, so a returned `503` counts
+as a success. The registry owns `config`, `clock`, `initial_state`,
+`classifier`, and `listener`; passing any of them to the middleware together
+with `registry` raises `ValueError`.
+
+Calling `aclose()` on middleware that received a registry leaves that registry
+usable by other sessions. The application owns it and must call
+`await registry.aclose_all()` once during shutdown.
+
 ## Safe production rollout
 
 Pass `initial_state=State.METRICS_ONLY` to record real outcomes without

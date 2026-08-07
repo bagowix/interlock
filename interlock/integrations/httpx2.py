@@ -29,6 +29,7 @@ from typing import Self, cast
 from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
 
 from interlock.config import Config
+from interlock.integrations._registry import reject_registry_options, resolve_registry
 from interlock.protocols import Clock, EventListener, FailureClassifier
 from interlock.registry import Registry
 from interlock.state import State
@@ -90,23 +91,6 @@ def _host(request: Request) -> str:
     return host
 
 
-def _build_registry(
-    *,
-    config: Config | None,
-    clock: Clock | None,
-    initial_state: State,
-    classifier: FailureClassifier | None,
-    listener: EventListener | None,
-) -> Registry:
-    return Registry(
-        config=config,
-        clock=clock,
-        initial_state=initial_state,
-        classifier=classifier if classifier is not None else HttpStatusClassifier(),
-        listener=listener,
-    )
-
-
 class CircuitBreakerTransport(BaseTransport):
     """A synchronous transport that guards each host with a circuit breaker.
 
@@ -119,11 +103,15 @@ class CircuitBreakerTransport(BaseTransport):
             Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
+        registry: Caller-owned registry shared with other clients. Mutually
+            exclusive with all breaker-construction options above.
 
     Raises:
-        ValueError: If ``initial_state`` is not a supported stable state.
+        ValueError: If ``initial_state`` is unsupported or ``registry`` is
+            combined with a breaker-construction option.
     """
 
+    @reject_registry_options
     def __init__(
         self,
         transport: BaseTransport,
@@ -133,14 +121,17 @@ class CircuitBreakerTransport(BaseTransport):
         initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
+        registry: Registry | None = None,
     ) -> None:
         self._transport = transport
-        self._registry = _build_registry(
+        self._registry, self._owns_registry = resolve_registry(
+            registry=registry,
             config=config,
             clock=clock,
             initial_state=initial_state,
             classifier=classifier,
             listener=listener,
+            default_classifier=HttpStatusClassifier(),
         )
 
     @property
@@ -170,16 +161,20 @@ class CircuitBreakerTransport(BaseTransport):
         exc_value: BaseException | None = None,
         traceback: TracebackType | None = None,
     ) -> None:
-        """Exit the wrapped transport's context and release every breaker."""
+        """Exit the wrapped transport's context and release every owned breaker."""
         with ExitStack() as stack:
-            stack.callback(self._registry.close_all)
+            stack.callback(self._close_registry)
             self._transport.__exit__(exc_type, exc_value, traceback)
 
     def close(self) -> None:
-        """Release the wrapped transport and every per-host breaker."""
+        """Release the wrapped transport and every owned per-host breaker."""
         with ExitStack() as stack:
-            stack.callback(self._registry.close_all)
+            stack.callback(self._close_registry)
             self._transport.close()
+
+    def _close_registry(self) -> None:
+        if self._owns_registry:
+            self._registry.close_all()
 
 
 class AsyncCircuitBreakerTransport(AsyncBaseTransport):
@@ -194,11 +189,15 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
             Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every host's breaker.
+        registry: Caller-owned registry shared with other clients. Mutually
+            exclusive with all breaker-construction options above.
 
     Raises:
-        ValueError: If ``initial_state`` is not a supported stable state.
+        ValueError: If ``initial_state`` is unsupported or ``registry`` is
+            combined with a breaker-construction option.
     """
 
+    @reject_registry_options
     def __init__(
         self,
         transport: AsyncBaseTransport,
@@ -208,14 +207,17 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
+        registry: Registry | None = None,
     ) -> None:
         self._transport = transport
-        self._registry = _build_registry(
+        self._registry, self._owns_registry = resolve_registry(
+            registry=registry,
             config=config,
             clock=clock,
             initial_state=initial_state,
             classifier=classifier,
             listener=listener,
+            default_classifier=HttpStatusClassifier(),
         )
 
     @property
@@ -245,13 +247,17 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         exc_value: BaseException | None = None,
         traceback: TracebackType | None = None,
     ) -> None:
-        """Exit the wrapped transport's context and release every breaker."""
+        """Exit the wrapped transport's context and release every owned breaker."""
         async with AsyncExitStack() as stack:
-            stack.push_async_callback(self._registry.aclose_all)
+            stack.push_async_callback(self._aclose_registry)
             await self._transport.__aexit__(exc_type, exc_value, traceback)
 
     async def aclose(self) -> None:
-        """Release the wrapped transport and every per-host breaker."""
+        """Release the wrapped transport and every owned per-host breaker."""
         async with AsyncExitStack() as stack:
-            stack.push_async_callback(self._registry.aclose_all)
+            stack.push_async_callback(self._aclose_registry)
             await self._transport.aclose()
+
+    async def _aclose_registry(self) -> None:
+        if self._owns_registry:
+            await self._registry.aclose_all()

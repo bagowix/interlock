@@ -9,7 +9,7 @@ from requests import PreparedRequest, Response
 from requests.adapters import HTTPAdapter
 from tests.conftest import FakeClock
 
-from interlock import CircuitOpenError, Config, State
+from interlock import CircuitOpenError, Config, Registry, State
 from interlock.integrations.requests import CircuitBreakerAdapter, HttpStatusClassifier
 
 _TRIP_FAST = Config(minimum_number_of_calls=2, failure_rate_threshold=0.5)
@@ -130,6 +130,51 @@ def test__adapter__close__releases_pools_and_registry(mocker: MockerFixture) -> 
 
     parent_close.assert_called_once_with(adapter)
     close_all.assert_called_once_with()
+
+
+def test__adapters__shared_registry__merge_window(
+    mocker: MockerFixture,
+    fake_clock: FakeClock,
+) -> None:
+    transport = _patch_transport(mocker, [_response(503), _response(503)])
+    registry = Registry(
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        classifier=HttpStatusClassifier(),
+    )
+    first = CircuitBreakerAdapter(registry=registry)
+    second = CircuitBreakerAdapter(registry=registry)
+
+    first.send(_prepared('https://api.a/x'))
+    second.send(_prepared('https://api.a/x'))
+    breaker = registry.get_existing('api.a')
+
+    assert first.registry is registry
+    assert second.registry is registry
+    assert breaker is not None
+    assert breaker.snapshot().failed_calls == 2
+    with pytest.raises(CircuitOpenError):
+        second.send(_prepared('https://api.a/x'))
+    assert transport.call_count == 2
+
+
+def test__adapter__injected_registry__closes_only_connection_pools(
+    mocker: MockerFixture,
+) -> None:
+    parent_close = mocker.patch.object(HTTPAdapter, 'close', autospec=True)
+    registry = Registry()
+    adapter = CircuitBreakerAdapter(registry=registry)
+    close_all = mocker.spy(registry, 'close_all')
+
+    adapter.close()
+
+    close_all.assert_not_called()
+    parent_close.assert_called_once_with(adapter)
+
+
+def test__adapter__registry_with_initial_state__raises_conflict() -> None:
+    with pytest.raises(ValueError, match='initial_state'):
+        CircuitBreakerAdapter(registry=Registry(), initial_state=State.CLOSED)
 
 
 def test__adapter__transport_exception__counts_as_failure(
