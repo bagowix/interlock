@@ -10,8 +10,8 @@ This module imports ``httpx`` and is deliberately not re-exported from
     transport = CircuitBreakerTransport(httpx.HTTPTransport())
     client = httpx.Client(transport=transport)
 
-The wrapper applies one circuit breaker **per host** transparently: no
-decorators in user code. Each host gets its own breaker (a slow or failing
+The wrapper applies one circuit breaker **per host by default** transparently:
+no decorators in user code. Each host gets its own breaker (a slow or failing
 ``api.a`` must not trip ``api.b``), created lazily and shared across requests.
 Responses are returned unchanged, preserving httpx's streaming semantics.
 
@@ -22,7 +22,7 @@ a custom ``classifier`` to change that policy.
 """
 
 import http
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import AsyncExitStack, ExitStack
 from types import TracebackType
 from typing import Self, cast
@@ -92,19 +92,36 @@ def _host(request: Request) -> str:
     return host
 
 
+def _breaker_name(request: Request, name_resolver: Callable[[Request], str]) -> str:
+    """Resolve and validate the dependency identity before registry access."""
+    name = cast('object', name_resolver(request))
+    if not isinstance(name, str):
+        raise ValueError(  # noqa: TRY004 - resolver contract uses ValueError
+            f'Name resolver returned a non-string breaker name for request URL: {request.url!s}'
+        )
+    if not name.strip():
+        raise ValueError(
+            f'Name resolver returned an empty breaker name for request URL: {request.url!s}'
+        )
+
+    return name
+
+
 class CircuitBreakerTransport(BaseTransport):
-    """Guard every host reached by a synchronous httpx transport.
+    """Guard every dependency reached by a synchronous httpx transport.
 
     Args:
         transport: Wrapped transport that performs requests.
-        config: Thresholds, window and timing for every host's breaker.
+        config: Thresholds, window and timing for every breaker.
         clock: Time source for the breakers.
-        initial_state: Stable state assigned before a host's first request.
+        initial_state: Stable state assigned before a breaker's first request.
             Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
-        listener: Observability hooks shared by every host's breaker.
+        listener: Observability hooks shared by every breaker.
         registry: Caller-owned registry shared with other clients. Mutually
             exclusive with all breaker-construction options above.
+        name_resolver: Maps each request to its breaker name. Defaults to the
+            request host.
 
     Raises:
         ValueError: If ``initial_state`` is unsupported or ``registry`` is
@@ -122,8 +139,10 @@ class CircuitBreakerTransport(BaseTransport):
         classifier: FailureClassifier | None = None,
         listener: CoreEventListener | StorageEventListener | None = None,
         registry: Registry | None = None,
+        name_resolver: Callable[[Request], str] = _host,
     ) -> None:
         self._transport = transport
+        self._name_resolver = name_resolver
         self._registry, self._owns_registry = resolve_registry(
             registry=registry,
             config=config,
@@ -136,17 +155,19 @@ class CircuitBreakerTransport(BaseTransport):
 
     @property
     def registry(self) -> Registry:
-        """The per-host registry, exposed for diagnostics and operator control."""
+        """The breaker registry, exposed for diagnostics and operator control."""
         return self._registry
 
     def handle_request(self, request: Request) -> Response:
-        """Run a request under the breaker for its host.
+        """Run a request under the breaker for its resolved dependency.
 
         Raises:
-            CircuitOpenError: If the host's breaker is open.
-            ValueError: If the request URL has no host.
+            CircuitOpenError: If the resolved dependency's breaker is open.
+            ValueError: If the request URL has no host under the default
+                resolver, or the configured resolver returns a non-string or
+                empty name.
         """
-        breaker = self._registry.get(_host(request))
+        breaker = self._registry.get(_breaker_name(request, self._name_resolver))
         guarded = breaker(self._transport.handle_request)
         return guarded(request)
 
@@ -167,7 +188,7 @@ class CircuitBreakerTransport(BaseTransport):
             self._transport.__exit__(exc_type, exc_value, traceback)
 
     def close(self) -> None:
-        """Release the wrapped transport and every owned per-host breaker."""
+        """Release the wrapped transport and every owned breaker."""
         with ExitStack() as stack:
             stack.callback(self._close_registry)
             self._transport.close()
@@ -178,18 +199,20 @@ class CircuitBreakerTransport(BaseTransport):
 
 
 class AsyncCircuitBreakerTransport(AsyncBaseTransport):
-    """Guard every host reached by an asynchronous httpx transport.
+    """Guard every dependency reached by an asynchronous httpx transport.
 
     Args:
         transport: Wrapped async transport that performs requests.
-        config: Thresholds, window and timing for every host's breaker.
+        config: Thresholds, window and timing for every breaker.
         clock: Time source for the breakers.
-        initial_state: Stable state assigned before a host's first request.
+        initial_state: Stable state assigned before a breaker's first request.
             Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
-        listener: Observability hooks shared by every host's breaker.
+        listener: Observability hooks shared by every breaker.
         registry: Caller-owned registry shared with other clients. Mutually
             exclusive with all breaker-construction options above.
+        name_resolver: Maps each request to its breaker name. Defaults to the
+            request host.
 
     Raises:
         ValueError: If ``initial_state`` is unsupported or ``registry`` is
@@ -207,8 +230,10 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         classifier: FailureClassifier | None = None,
         listener: CoreEventListener | StorageEventListener | None = None,
         registry: Registry | None = None,
+        name_resolver: Callable[[Request], str] = _host,
     ) -> None:
         self._transport = transport
+        self._name_resolver = name_resolver
         self._registry, self._owns_registry = resolve_registry(
             registry=registry,
             config=config,
@@ -221,17 +246,19 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
 
     @property
     def registry(self) -> Registry:
-        """The per-host registry, exposed for diagnostics and operator control."""
+        """The breaker registry, exposed for diagnostics and operator control."""
         return self._registry
 
     async def handle_async_request(self, request: Request) -> Response:
-        """Run a request under the breaker for its host.
+        """Run a request under the breaker for its resolved dependency.
 
         Raises:
-            CircuitOpenError: If the host's breaker is open.
-            ValueError: If the request URL has no host.
+            CircuitOpenError: If the resolved dependency's breaker is open.
+            ValueError: If the request URL has no host under the default
+                resolver, or the configured resolver returns a non-string or
+                empty name.
         """
-        breaker = self._registry.get(_host(request))
+        breaker = self._registry.get(_breaker_name(request, self._name_resolver))
         guarded = breaker(self._transport.handle_async_request)
         return await guarded(request)
 
@@ -252,7 +279,7 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
             await self._transport.__aexit__(exc_type, exc_value, traceback)
 
     async def aclose(self) -> None:
-        """Release the wrapped transport and every owned per-host breaker."""
+        """Release the wrapped transport and every owned breaker."""
         async with AsyncExitStack() as stack:
             stack.push_async_callback(self._aclose_registry)
             await self._transport.aclose()

@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Transport integrations can key breakers by logical dependency instead of
+  raw host.** Service-discovery suffixes and shared gateway hosts previously
+  made the httpx2/httpx transports, aiohttp middleware, and requests adapter
+  merge unrelated dependencies or split one dependency across several
+  breakers. Their new `name_resolver=` callback receives the native request
+  and supplies the single name used by the registry, open-circuit errors, and
+  listener events. Host-based naming remains the default, while empty custom
+  names and non-string results fail before any network I/O.
+
 - **Listener contracts now match the events a component actually emits.**
   `CoreEventListener`, `StorageEventListener` and `PipelineEventListener` let a
   breaker-only, coordination-only or strategy-only sink pass strict type

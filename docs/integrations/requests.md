@@ -48,10 +48,35 @@ created lazily and shared across requests. When a host's circuit is open the
 request raises [`CircuitOpenError`](../reference.md) *before* a connection is
 made.
 
+## Custom breaker keys
+
+Pass `name_resolver` when the request host is not the logical dependency
+identity. The callback receives the native `requests.PreparedRequest` and
+returns the breaker name. For example, the first path segment can separate
+independent upstreams behind one gateway host:
+
+```python
+from interlock.integrations.requests import CircuitBreakerAdapter
+
+adapter = CircuitBreakerAdapter(
+    name_resolver=lambda request: request.path_url.split('/')[1],
+)
+```
+
+Returning one name for several discovery hosts instead makes them share a
+breaker. The result must be a non-empty string containing something other than
+whitespace; invalid results raise `ValueError` with the request URL before the
+adapter performs I/O.
+
+The resolved name is used consistently as the registry key, in
+`CircuitOpenError`, and in every listener event. Resolve the identity here
+instead of rewriting listener labels so metrics remain aligned with breaker
+state.
+
 ## Share one registry across sessions
 
 Inject a caller-owned `Registry` when independent sessions should use one
-breaker and one sliding window for the same host:
+breaker and one sliding window for the same resolved name:
 
 ```python
 import requests

@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from types import TracebackType
-from typing import Self
+from typing import Self, cast
 
 import httpx2
 import pytest
@@ -192,6 +192,56 @@ def test__sync_transport__breakers_isolated_per_host(fake_clock: FakeClock) -> N
     assert transport.handle_request(_request('https://good.example.com/')).status_code == 200
 
 
+def test__sync_transport__name_resolver__uses_custom_breaker_key(fake_clock: FakeClock) -> None:
+    inner = _SyncStub(lambda _request: Response(200))
+    transport = CircuitBreakerTransport(
+        inner,
+        clock=fake_clock,
+        name_resolver=lambda request: request.url.host.removesuffix('.query.consul'),
+    )
+
+    transport.handle_request(_request('https://orders.query.consul/v1'))
+
+    assert transport.registry.get_existing('orders') is not None
+    assert transport.registry.get_existing('orders.query.consul') is None
+
+
+def test__sync_transport__empty_resolved_name__raises_before_io(fake_clock: FakeClock) -> None:
+    inner = _SyncStub(lambda _request: Response(200))
+    transport = CircuitBreakerTransport(
+        inner,
+        clock=fake_clock,
+        name_resolver=lambda _request: ' ',
+    )
+    request = _request('https://api.example.com/v1')
+
+    with pytest.raises(ValueError, match='empty breaker name') as raised:
+        transport.handle_request(request)
+
+    assert str(request.url) in str(raised.value)
+    assert inner.calls == 0
+
+
+@pytest.mark.parametrize('resolved_name', [None, b'orders'])
+def test__sync_transport__non_string_resolved_name__raises_before_io(
+    fake_clock: FakeClock,
+    resolved_name: object,
+) -> None:
+    inner = _SyncStub(lambda _request: Response(200))
+    transport = CircuitBreakerTransport(
+        inner,
+        clock=fake_clock,
+        name_resolver=lambda _request: cast('str', resolved_name),
+    )
+    request = _request('https://api.example.com/v1')
+
+    with pytest.raises(ValueError, match='non-string breaker name') as raised:
+        transport.handle_request(request)
+
+    assert str(request.url) in str(raised.value)
+    assert inner.calls == 0
+
+
 def test__sync_transport__close__releases_wrapped_transport_and_registry(
     mocker: MockerFixture,
 ) -> None:
@@ -242,6 +292,23 @@ async def test__async_transport__success_response__passes_through(fake_clock: Fa
     response = await transport.handle_async_request(_request())
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test__async_transport__name_resolver__uses_custom_breaker_key(
+    fake_clock: FakeClock,
+) -> None:
+    inner = _AsyncStub(lambda _request: Response(200))
+    transport = AsyncCircuitBreakerTransport(
+        inner,
+        clock=fake_clock,
+        name_resolver=lambda request: request.url.path.split('/')[1],
+    )
+
+    await transport.handle_async_request(_request('https://gateway.example.com/orders/1'))
+
+    assert transport.registry.get_existing('orders') is not None
+    assert transport.registry.get_existing('gateway.example.com') is None
 
 
 @pytest.mark.asyncio

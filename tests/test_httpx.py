@@ -1,6 +1,6 @@
 from collections.abc import AsyncIterator, Callable, Iterator
 from types import TracebackType
-from typing import Self
+from typing import Self, cast
 
 import httpx
 import pytest
@@ -239,6 +239,90 @@ def test__sync_transport__breakers_isolated_per_host(fake_clock: FakeClock) -> N
     assert transport.handle_request(_request('https://good.example.com/')).status_code == 200
 
 
+def test__sync_transport__name_resolver__collapses_hosts_onto_one_breaker(
+    fake_clock: FakeClock,
+) -> None:
+    inner = _SyncStub(lambda _request: httpx.Response(503))
+    transport = CircuitBreakerTransport(
+        inner,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        name_resolver=lambda request: request.url.host.removesuffix('.query.consul'),
+    )
+
+    transport.handle_request(_request('https://orders.query.consul/v1'))
+    transport.handle_request(_request('https://orders/v2'))
+
+    with pytest.raises(CircuitOpenError):
+        transport.handle_request(_request('https://orders.query.consul/v3'))
+    breaker = transport.registry.get_existing('orders')
+    assert breaker is not None
+    assert breaker.snapshot().failed_calls == 2
+    assert transport.registry.get_existing('orders.query.consul') is None
+
+
+def test__sync_transport__name_resolver__aligns_listener_name(
+    fake_clock: FakeClock,
+    listener: RecordingListener,
+) -> None:
+    transport = CircuitBreakerTransport(
+        _SyncStub(lambda _request: httpx.Response(200)),
+        clock=fake_clock,
+        listener=listener,
+        name_resolver=lambda _request: 'orders',
+    )
+
+    transport.handle_request(_request())
+
+    assert listener.names == ['orders']
+
+
+@pytest.mark.parametrize('resolved_name', ['', '   '])
+def test__sync_transport__empty_resolved_name__raises_before_io(
+    fake_clock: FakeClock,
+    mocker: MockerFixture,
+    resolved_name: str,
+) -> None:
+    inner = _SyncStub(lambda _request: httpx.Response(200))
+    transport = CircuitBreakerTransport(
+        inner,
+        clock=fake_clock,
+        name_resolver=lambda _request: resolved_name,
+    )
+    registry_get = mocker.spy(transport.registry, 'get')
+    request = _request('https://api.example.com/v1')
+
+    with pytest.raises(ValueError, match='empty breaker name') as raised:
+        transport.handle_request(request)
+
+    assert str(request.url) in str(raised.value)
+    registry_get.assert_not_called()
+    assert inner.calls == 0
+
+
+@pytest.mark.parametrize('resolved_name', [None, b'orders'])
+def test__sync_transport__non_string_resolved_name__raises_before_io(
+    fake_clock: FakeClock,
+    mocker: MockerFixture,
+    resolved_name: object,
+) -> None:
+    inner = _SyncStub(lambda _request: httpx.Response(200))
+    transport = CircuitBreakerTransport(
+        inner,
+        clock=fake_clock,
+        name_resolver=lambda _request: cast('str', resolved_name),
+    )
+    registry_get = mocker.spy(transport.registry, 'get')
+    request = _request('https://api.example.com/v1')
+
+    with pytest.raises(ValueError, match='non-string breaker name') as raised:
+        transport.handle_request(request)
+
+    assert str(request.url) in str(raised.value)
+    registry_get.assert_not_called()
+    assert inner.calls == 0
+
+
 def test__sync_transports__shared_registry__merge_window(
     fake_clock: FakeClock,
 ) -> None:
@@ -469,6 +553,58 @@ async def test__async_transport__breakers_isolated_per_host(fake_clock: FakeCloc
         await transport.handle_async_request(_request('https://bad.example.com/'))
     response = await transport.handle_async_request(_request('https://good.example.com/'))
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test__async_transport__name_resolver__splits_host_by_path(
+    fake_clock: FakeClock,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return (
+            httpx.Response(503) if request.url.path.startswith('/orders') else httpx.Response(200)
+        )
+
+    inner = _AsyncStub(handler)
+    transport = AsyncCircuitBreakerTransport(
+        inner,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        name_resolver=lambda request: request.url.path.split('/')[1],
+    )
+
+    await transport.handle_async_request(_request('https://gateway.example.com/orders/1'))
+    await transport.handle_async_request(_request('https://gateway.example.com/orders/2'))
+
+    with pytest.raises(CircuitOpenError):
+        await transport.handle_async_request(_request('https://gateway.example.com/orders/3'))
+    response = await transport.handle_async_request(
+        _request('https://gateway.example.com/payments/1')
+    )
+    orders = transport.registry.get_existing('orders')
+    payments = transport.registry.get_existing('payments')
+    assert response.status_code == 200
+    assert orders is not None
+    assert payments is not None
+    assert orders is not payments
+
+
+@pytest.mark.asyncio
+async def test__async_transport__empty_resolved_name__raises_before_io(
+    fake_clock: FakeClock,
+) -> None:
+    inner = _AsyncStub(lambda _request: httpx.Response(200))
+    transport = AsyncCircuitBreakerTransport(
+        inner,
+        clock=fake_clock,
+        name_resolver=lambda _request: '',
+    )
+    request = _request('https://api.example.com/v1')
+
+    with pytest.raises(ValueError, match='empty breaker name') as raised:
+        await transport.handle_async_request(request)
+
+    assert str(request.url) in str(raised.value)
+    assert inner.calls == 0
 
 
 @pytest.mark.asyncio

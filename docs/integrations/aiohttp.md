@@ -51,10 +51,34 @@ The breaker observes the time to *response headers*; reading the body happens
 outside the guarded call — the same semantics as the
 [httpx2 transport](httpx2.md).
 
+## Custom breaker keys
+
+Pass `name_resolver` when host-based isolation does not match the logical
+dependencies. The callback receives the native `aiohttp.ClientRequest` and
+returns the breaker name:
+
+```python
+from interlock.integrations.aiohttp import CircuitBreakerMiddleware
+
+middleware = CircuitBreakerMiddleware(
+    name_resolver=lambda request: request.url.host.removesuffix('.query.consul'),
+)
+```
+
+A resolver can collapse several discovery hosts onto one breaker or derive a
+name from the request path to separate upstreams behind a shared gateway. It
+must return a non-empty string containing something other than whitespace;
+invalid results raise `ValueError` with the request URL before the handler
+performs I/O.
+
+The resolved name is used by the registry, `CircuitOpenError`, and every
+listener event. Resolve it in the middleware rather than rewriting listener
+labels so observed names always match the breaker whose state they describe.
+
 ## Share one registry across sessions
 
 Several middleware instances can share one caller-owned registry, so traffic
-to the same host contributes to one breaker and one sliding window:
+resolving to the same name contributes to one breaker and one sliding window:
 
 ```python
 from interlock import Config, Registry
@@ -123,8 +147,7 @@ Any custom `FailureClassifier` works too — see
 
 The middleware accepts the same collaborators as `CircuitBreaker` — `config`,
 `clock`, `initial_state`, `classifier`, `listener`. One middleware instance
-holds one registry
-of per-host breakers; reuse the instance across sessions to share breaker
-state, or create separate instances to isolate them. For application-level
-retries combine with the [tenacity integration](tenacity.md) and read
-[Retries and circuit breakers](../guides/retries.md) first.
+holds one registry of resolved breakers; reuse the instance across sessions to
+share breaker state, or create separate instances to isolate them. For
+application-level retries combine with the [tenacity integration](tenacity.md)
+and read [Retries and circuit breakers](../guides/retries.md) first.
