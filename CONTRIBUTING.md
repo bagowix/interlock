@@ -153,6 +153,14 @@ Every pull request runs the same suite through
 Add a benchmark when you touch a hot path: the call paths, the state machine,
 the sliding windows or the pipeline.
 
+`test_baseline_direct_call` (and its async twin) measure the unwrapped
+callable — divide any call-path result by the matching baseline to read the
+breaker's overhead as a ratio rather than an absolute count. The contention
+benchmark (`benchmarks/test_contention.py`) carries a caveat: CodSpeed counts
+instructions under Valgrind, which runs threads one at a time, so it tracks
+the work done under the breaker's lock when many threads call through it — not
+the wall-clock cost of real contention.
+
 ## Expectations
 
 - **Tests first.** New behaviour and bug fixes come with tests; the suite keeps

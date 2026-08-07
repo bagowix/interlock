@@ -40,6 +40,25 @@ def runner() -> Iterator[asyncio.Runner]:
         yield loop_runner
 
 
+def test_baseline_direct_call(benchmark: BenchmarkFixture) -> None:
+    """The unwrapped sync callable: the denominator for every overhead ratio."""
+    benchmark(lambda: _work(1, 2))
+
+
+def test_baseline_direct_call_async(benchmark: BenchmarkFixture, runner: asyncio.Runner) -> None:
+    """The unwrapped coroutine, behind the same wrapper frame the guarded paths pay.
+
+    Real callers await the protected work from inside their own coroutine either
+    way, so the baseline wraps ``_async_work`` exactly like ``test_call_async``
+    wraps ``breaker.call`` — the ratio then isolates the breaker, not a frame.
+    """
+
+    async def bare() -> int:
+        return await _async_work(1, 2)
+
+    benchmark(lambda: runner.run(bare()))
+
+
 def test_call_sync(benchmark: BenchmarkFixture) -> None:
     """``call`` on a closed breaker: detect, admit, run, classify, record."""
     breaker = CircuitBreaker(name='bench-call-sync', config=_CLOSED_CONFIG)
