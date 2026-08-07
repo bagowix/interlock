@@ -5,6 +5,9 @@ This keeps the state machine I/O-free and lets storage, windows, clocks,
 classification and observability be swapped without touching it.
 """
 
+# EventListener hooks are deliberately concrete no-ops; their parameters form the public contract.
+# ruff: noqa: ARG002, RET501
+
 from typing import Protocol, runtime_checkable
 
 from interlock.outcome import Outcome
@@ -193,24 +196,26 @@ class EventListener(Protocol):
 
     Every hook is dispatched by name and only if defined, so a listener may
     implement just the ones it needs and one written before a hook existed
-    keeps working unchanged. See ``docs/guides/observability.md``.
+    keeps working unchanged. Inherit this protocol to make a partial listener
+    type-check: its default hook implementations are no-ops. See the partial
+    listener pattern in ``docs/guides/observability.md``.
     """
 
     def on_state_change(self, *, name: str, old: State, new: State) -> None:
         """Called after the breaker transitions between states."""
-        ...
+        return None
 
     def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
         """Called after a protected call completes, success or failure."""
-        ...
+        return None
 
     def on_rejected(self, *, name: str) -> None:
         """Called when a call is rejected because the circuit is open."""
-        ...
+        return None
 
     def on_reset(self, *, name: str) -> None:
         """Called when the breaker is manually reset."""
-        ...
+        return None
 
     def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
         """Called when the shared storage backend becomes unavailable.
@@ -220,11 +225,11 @@ class EventListener(Protocol):
         only — a listener of your own that raises is logged, never reported
         here.
         """
-        ...
+        return None
 
     def on_storage_recovered(self, *, name: str) -> None:
         """Called when the shared storage backend becomes reachable again."""
-        ...
+        return None
 
     def on_storage_write_dropped(self, *, name: str) -> None:
         """Called when a coordinated write is dropped by a full write queue.
@@ -234,7 +239,7 @@ class EventListener(Protocol):
         keeps protecting the process locally. The shared state is reconciled
         by the next successful poll and by ``state_ttl``.
         """
-        ...
+        return None
 
     def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
         """Called by a pipeline retry layer before it sleeps between attempts.
@@ -242,12 +247,12 @@ class EventListener(Protocol):
         ``attempt`` is the number of the attempt that just failed; ``delay``
         is the upcoming backoff in seconds.
         """
-        ...
+        return None
 
     def on_bulkhead_rejected(self, *, name: str) -> None:
         """Called when a pipeline bulkhead rejects a call (no free slot)."""
-        ...
+        return None
 
     def on_fallback(self, *, name: str, error: BaseException) -> None:
         """Called when a pipeline fallback substitutes a value for ``error``."""
-        ...
+        return None

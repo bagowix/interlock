@@ -24,9 +24,10 @@ returns, so a slow listener never serialises throughput.
 
 The three storage hooks fire only for breakers coordinated through a shared
 [storage](../integrations/redis.md); the three pipeline hooks fire from
-[pipeline strategies](pipeline.md) given a `listener=`. Every hook is
-dispatched only if present — a listener that defines just the ones it cares
-about keeps working.
+[pipeline strategies](pipeline.md) given a `listener=`. Every hook is dispatched
+only if present, and the protocol supplies no-op implementations for subclasses.
+A listener can therefore override just the hooks it cares about and keeps
+working when a later interlock version adds a new hook.
 
 ## Listener failures are isolated
 
@@ -119,11 +120,15 @@ It records five instruments on the `interlock` meter (or a meter you pass in):
 
 ## Custom listeners
 
-Any object with the hooks you care about satisfies the protocol — no base class
-to inherit, and no need to stub out the rest:
+For a partial listener that strict type checkers can verify, inherit
+`EventListener` and override only the hooks you need. Every inherited hook is a
+no-op:
 
 ```python
-class RejectionCounter:
+from interlock import EventListener
+
+
+class RejectionCounter(EventListener):
     def __init__(self) -> None:
         self.rejected = 0
 
@@ -131,5 +136,7 @@ class RejectionCounter:
         self.rejected += 1
 ```
 
-Implement the full protocol when you want static checking to catch a typo in a
-hook name; a misspelled hook is simply never called, since dispatch is by name.
+Inheritance is optional for a listener that implements the complete protocol:
+structural typing continues to accept it. At runtime, dispatch is still by name
+and skips any missing hook, including on older listener objects that do not
+inherit `EventListener`.

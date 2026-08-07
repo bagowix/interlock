@@ -10,7 +10,34 @@ suite cannot observe it.
 
 from typing import assert_type
 
-from interlock import CircuitBreaker, Pipeline, Registry, State
+from interlock import (
+    BulkheadStrategy,
+    CircuitBreaker,
+    EventListener,
+    FallbackStrategy,
+    LoggingEventListener,
+    Outcome,
+    Pipeline,
+    Registry,
+    State,
+)
+from interlock.integrations.tenacity import RetryStrategy
+
+
+class _CallListener(EventListener):
+    def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
+        return None
+
+
+partial_listener = _CallListener()
+partial_breaker = CircuitBreaker(name='partial-listener', listener=partial_listener)
+partial_registry = Registry(listener=partial_listener)
+partial_bulkhead = BulkheadStrategy(1, listener=partial_listener)
+partial_fallback = FallbackStrategy(lambda _error: None, listener=partial_listener)
+partial_retry = RetryStrategy(listener=partial_listener)
+complete_listener_breaker = CircuitBreaker(
+    name='complete-listener', listener=LoggingEventListener()
+)
 
 breaker = CircuitBreaker(name='typing-surface')
 shadow_breaker = CircuitBreaker(name='shadow', initial_state=State.METRICS_ONLY)

@@ -15,7 +15,7 @@ import pytest
 
 from conftest import ExplodingListener, FakeClock, RecordingListener
 from inmemory_storage import AsyncInMemoryStorage, InMemoryStorage
-from interlock import CircuitBreaker, CircuitOpenError, Config, State
+from interlock import CircuitBreaker, CircuitOpenError, Config, Outcome, State
 from interlock._coordination import (
     AsyncCoordinator,
     SyncCoordinator,
@@ -28,6 +28,38 @@ from interlock.shared import SharedState
 
 NAME = 'svc'
 WAIT = 5.0
+
+
+class _CallListener(EventListener):
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Outcome]] = []
+
+    def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
+        self.calls.append((name, outcome))
+
+
+class _RejectionListener(EventListener):
+    def __init__(self) -> None:
+        self.names: list[str] = []
+
+    def on_rejected(self, *, name: str) -> None:
+        self.names.append(name)
+
+
+def _notify_inherited_hooks(listener: EventListener) -> None:
+    hooks: tuple[tuple[str, dict[str, object]], ...] = (
+        ('on_state_change', {'old': State.CLOSED, 'new': State.OPEN}),
+        ('on_rejected', {}),
+        ('on_reset', {}),
+        ('on_storage_degraded', {'error': ValueError('storage')}),
+        ('on_storage_recovered', {}),
+        ('on_storage_write_dropped', {}),
+        ('on_retry', {'attempt': 1, 'delay': 0.1}),
+        ('on_bulkhead_rejected', {}),
+        ('on_fallback', {'error': ValueError('fallback')}),
+    )
+    for hook, kwargs in hooks:
+        notify(listener, hook, name=NAME, **kwargs)
 
 
 @pytest.fixture
@@ -85,6 +117,22 @@ def test__notify__listener_without_the_hook__skips_dispatch() -> None:
     pre_v2 = cast('EventListener', RecordingListener())
 
     notify(pre_v2, 'on_fallback', name=NAME, error=ValueError('x'))
+
+
+def test__partial_listeners__own_hooks_and_inherited_hooks__only_own_hooks_have_effect() -> None:
+    call_listener = _CallListener()
+    rejection_listener = _RejectionListener()
+    breaker = CircuitBreaker(name=NAME, listener=call_listener)
+    rejection_breaker = CircuitBreaker(name=NAME, listener=rejection_listener)
+
+    assert isinstance(call_listener, EventListener)
+    assert breaker.call(lambda: 'ok') == 'ok'
+    assert rejection_breaker.call(lambda: 'ok') == 'ok'
+    notify(rejection_listener, 'on_rejected', name=NAME)
+    _notify_inherited_hooks(call_listener)
+
+    assert call_listener.calls == [(NAME, Outcome.SUCCESS)]
+    assert rejection_listener.names == [NAME]
 
 
 def test__notify__raising_hook__is_logged_with_context(
