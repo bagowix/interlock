@@ -171,6 +171,13 @@ the wall-clock cost of real contention.
 - **Keep the core dependency-free.** Anything external belongs in an extra
   (e.g. `interlock-cb[httpx2]`, `interlock-cb[tenacity]`, `interlock-cb[redis]`),
   imported lazily.
+- **An extra's floor is a compatibility statement, not a dev pin.** It says the
+  oldest host-library version the integration works on, and only an API the
+  code actually needs justifies raising it. A routine Dependabot bump lands on
+  the `dependency-groups.dev` pin (what we develop against) — never let it
+  carry the `[project.optional-dependencies]` floor along with it. Raising a
+  floor on purpose means updating the matching pin in the `extras-min` job in
+  `.github/workflows/ci.yml` too.
 - **Conventional commits.** Use `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
   `chore:`, `perf:`, `ci:` prefixes.
 - **Update the docs and CHANGELOG.** User-facing changes update the relevant

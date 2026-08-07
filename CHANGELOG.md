@@ -19,6 +19,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   threads one at a time, so the number is lock-path work, not wall-clock
   contention.
 
+### Changed
+
+- **Lowered the `otel` extra's floor from `opentelemetry-api>=1.43.0` back to
+  `>=1.20.0`.** The higher floor was never a requirement of `OTelEventListener`
+  — it arrived as a side effect of a routine Dependabot bump that moved the dev
+  pin and the extra's floor together. `opentelemetry-distro`/SDK releases pin
+  the whole OTel stack to one API version, so the stale floor forced adopters
+  on an older distro to choose between upgrading their entire OTel stack and
+  dropping `interlock-cb[otel]` — for a listener whose calls
+  (`get_meter`, `create_histogram`, `create_counter`) have been stable across
+  that range. `.github/workflows/ci.yml`'s `extras-min` job now pins and tests
+  against `opentelemetry-api==1.20.0`; the dev dependency group stays on the
+  current version.
+
 ## [2.4.0] - 2026-08-06
 
 ### Added

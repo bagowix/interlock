@@ -1008,7 +1008,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'httpx'", specifier = ">=0.27.0" },
     { name = "httpx2", marker = "extra == 'httpx2'", specifier = ">=2.4.0" },
     { name = "litestar", marker = "extra == 'litestar'", specifier = ">=2.23.0" },
-    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.43.0" },
+    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.0" },
     { name = "requests", marker = "extra == 'requests'", specifier = ">=2.31.0" },
     { name = "tenacity", marker = "extra == 'tenacity'", specifier = ">=9.0.0" },
