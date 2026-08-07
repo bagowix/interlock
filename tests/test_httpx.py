@@ -280,6 +280,7 @@ def test__sync_transport__name_resolver__aligns_listener_name(
 @pytest.mark.parametrize('resolved_name', ['', '   '])
 def test__sync_transport__empty_resolved_name__raises_before_io(
     fake_clock: FakeClock,
+    mocker: MockerFixture,
     resolved_name: str,
 ) -> None:
     inner = _SyncStub(lambda _request: httpx.Response(200))
@@ -288,18 +289,21 @@ def test__sync_transport__empty_resolved_name__raises_before_io(
         clock=fake_clock,
         name_resolver=lambda _request: resolved_name,
     )
+    registry_get = mocker.spy(transport.registry, 'get')
     request = _request('https://api.example.com/v1')
 
     with pytest.raises(ValueError, match='empty breaker name') as raised:
         transport.handle_request(request)
 
     assert str(request.url) in str(raised.value)
+    registry_get.assert_not_called()
     assert inner.calls == 0
 
 
 @pytest.mark.parametrize('resolved_name', [None, b'orders'])
 def test__sync_transport__non_string_resolved_name__raises_before_io(
     fake_clock: FakeClock,
+    mocker: MockerFixture,
     resolved_name: object,
 ) -> None:
     inner = _SyncStub(lambda _request: httpx.Response(200))
@@ -308,12 +312,14 @@ def test__sync_transport__non_string_resolved_name__raises_before_io(
         clock=fake_clock,
         name_resolver=lambda _request: cast('str', resolved_name),
     )
+    registry_get = mocker.spy(transport.registry, 'get')
     request = _request('https://api.example.com/v1')
 
     with pytest.raises(ValueError, match='non-string breaker name') as raised:
         transport.handle_request(request)
 
     assert str(request.url) in str(raised.value)
+    registry_get.assert_not_called()
     assert inner.calls == 0
 
 
