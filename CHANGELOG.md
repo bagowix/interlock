@@ -19,6 +19,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   threads one at a time, so the number is lock-path work, not wall-clock
   contention.
 
+## [2.4.0] - 2026-08-06
+
+### Added
+
+- **Breakers can now start in a safe operator state before serving traffic.**
+  `CircuitBreaker` and `Registry` accept `initial_state`; `CLOSED`, `FORCED_OPEN`,
+  `DISABLED` and `METRICS_ONLY` are valid, while transitional `OPEN` / `HALF_OPEN`
+  fail fast. Lazy registry creation applies the state before publishing a breaker,
+  so per-host HTTP integrations can deploy in shadow mode without a first-call race.
+  The httpx2 and httpx transports, aiohttp middleware and requests adapter expose
+  their registry for diagnostics and accept the same option.
+
+- **httpx now has a first-class transport integration (#82).** Install
+  `interlock-cb[httpx]` and wrap `httpx.HTTPTransport` or
+  `httpx.AsyncHTTPTransport` to apply one breaker per request host without
+  decorators. The sync and async wrappers preserve streaming responses,
+  delegate the wrapped transport's full lifecycle (context entry and exit,
+  `close()` / `aclose()`), reject host-less URLs before I/O, and use the same
+  configurable `429, 500, 502, 503, 504` failure policy as the existing HTTP
+  integrations. Unit and real-loopback tests run against both the minimum
+  supported httpx 0.27.0 and the locked latest version in CI.
+
+### Changed
+
+- **The README now gets readers from installation to their first guarded call faster.** The core
+  API appears before project comparisons, the feature language is less brittle, and optional
+  integrations are presented in one compact, linked overview instead of several partial examples.
+
+### Fixed
+
+- **The httpx2 transports now delegate context-manager entry and exit to the
+  wrapped transport.** Entering `with client:` (or `async with client:`)
+  previously never entered the wrapped transport, so a custom transport that
+  acquires resources in `__enter__` / `__aenter__` was not ready before its
+  first request. Exit now also releases every per-host breaker, matching
+  `close()` / `aclose()`.
+
+- **Closing an HTTP integration now also releases its per-host breakers.** The httpx2
+  transports and requests adapter close both their native connection resources and
+  the registry; the aiohttp middleware exposes `aclose()` for application shutdown.
+
 ## [2.3.0] - 2026-08-05
 
 ### Added
@@ -588,7 +629,8 @@ The major version marks the scope of what is added, not a migration burden.
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/bagowix/interlock/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/bagowix/interlock/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/bagowix/interlock/compare/v2.1.4...v2.2.0
 [2.1.4]: https://github.com/bagowix/interlock/compare/v2.1.3...v2.1.4

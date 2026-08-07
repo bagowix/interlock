@@ -4,6 +4,9 @@ The `interlock-cb[httpx2]` extra wraps an [httpx2](https://pypi.org/project/http
 transport so a circuit breaker is applied **per host** transparently — no
 decorators or `call` wrappers in your request code.
 
+`interlock-cb` is listed in httpx2's official
+[third-party packages directory](https://github.com/pydantic/httpx2/blob/main/docs/third_party_packages.md#interlock-cb).
+
 === "uv"
 
     ```bash
@@ -45,6 +48,39 @@ client = httpx2.AsyncClient(transport=transport)
 
 response = await client.get('https://api.example.com/v1/users')
 ```
+
+Use the client as a context manager. Context entry and exit are delegated to
+the wrapped transport, including for custom transports that acquire resources
+in `__enter__` or `__aenter__`. Closing the client closes both the wrapped
+connection pool and every breaker created by the transport.
+
+## Safe production rollout
+
+Start in shadow mode when introducing the integration to existing traffic:
+
+```python
+import httpx2
+
+from interlock import State
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(
+    httpx2.AsyncHTTPTransport(),
+    initial_state=State.METRICS_ONLY,
+    listener=metrics_listener,
+)
+```
+
+Every host created later starts in `METRICS_ONLY` before its first request: it
+records outcomes but never raises `CircuitOpenError`. Use the listener for
+production metrics. For local diagnosis,
+`transport.registry.get_existing(host)` returns an existing breaker without
+creating one; inspect its `state` and `snapshot()`.
+
+After tuning thresholds, deploy a new transport with the default
+`initial_state=State.CLOSED`. Do not reset only the currently known hosts: a
+transport configured for shadow mode would still create future hosts in
+`METRICS_ONLY`. See the complete [safe-rollout guide](../guides/states.md#safe-rollout).
 
 ## Per-host isolation
 

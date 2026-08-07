@@ -6,11 +6,14 @@ default ``Config`` unless a per-name override is supplied at creation.
 """
 
 import threading
+from contextlib import AsyncExitStack, ExitStack
 
 from interlock._clock import SystemClock
+from interlock._initial_state import validate_initial_state
 from interlock.breaker import CircuitBreaker
 from interlock.config import Config
 from interlock.protocols import AsyncStorage, Clock, EventListener, FailureClassifier, Storage
+from interlock.state import State
 
 __all__ = ('Registry',)
 
@@ -22,12 +25,18 @@ class Registry:
         config: Default config shared by breakers without an override.
             Defaults to ``Config()``.
         clock: Time source shared by all breakers. Defaults to ``SystemClock``.
+        initial_state: Stable state assigned to every breaker before it is
+            published from the registry. Use ``State.METRICS_ONLY`` for a
+            shadow rollout. Defaults to ``State.CLOSED``.
         classifier: Failure policy shared by every breaker. Defaults to the
             breaker's own default (any raised exception is a failure).
         listener: Observability hooks shared by every breaker. Defaults to
             no observation.
         storage: Shared backend for coordinated state, handed to every breaker
             (each coordinates under its own name). Defaults to local state.
+
+    Raises:
+        ValueError: If ``initial_state`` is not a supported stable state.
     """
 
     def __init__(
@@ -35,12 +44,15 @@ class Registry:
         *,
         config: Config | None = None,
         clock: Clock | None = None,
+        initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
         storage: Storage | AsyncStorage | None = None,
     ) -> None:
+        validate_initial_state(initial_state)
         self._config = config if config is not None else Config()
         self._clock = clock if clock is not None else SystemClock()
+        self._initial_state = initial_state
         self._classifier = classifier
         self._listener = listener
         self._storage = storage
@@ -65,6 +77,7 @@ class Registry:
                     name=name,
                     config=config if config is not None else self._config,
                     clock=self._clock,
+                    initial_state=self._initial_state,
                     classifier=self._classifier,
                     listener=self._listener,
                     storage=self._storage,
@@ -72,6 +85,11 @@ class Registry:
                 self._breakers[name] = breaker
 
             return breaker
+
+    def get_existing(self, name: str) -> CircuitBreaker | None:
+        """Return a cached breaker without creating one for a missing name."""
+        with self._lock:
+            return self._breakers.get(name)
 
     def close_all(self) -> None:
         """Release the background resources of every breaker created so far.
@@ -83,8 +101,9 @@ class Registry:
             InterlockError: If the registry's storage is asynchronous; use
                 ``aclose_all`` there.
         """
-        for breaker in self._snapshot():
-            breaker.close()
+        with ExitStack() as stack:
+            for breaker in self._snapshot():
+                stack.callback(breaker.close)
 
     async def aclose_all(self) -> None:
         """Release every breaker's background resources; the async mirror.
@@ -93,8 +112,9 @@ class Registry:
             InterlockError: If the registry's storage is synchronous; use
                 ``close_all`` there.
         """
-        for breaker in self._snapshot():
-            await breaker.aclose()
+        async with AsyncExitStack() as stack:
+            for breaker in self._snapshot():
+                stack.push_async_callback(breaker.aclose)
 
     def _snapshot(self) -> tuple[CircuitBreaker, ...]:
         """The breakers created so far; taken under the lock, closed outside it."""

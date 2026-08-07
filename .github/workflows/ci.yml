@@ -98,6 +98,7 @@ jobs:
       - name: Pin extras to minimum supported versions
         run: >-
           uv pip install
+          'httpx==0.27.0'
           'httpx2==2.4.0'
           'fastapi==0.128.0'
           'redis==5.0.0'
@@ -110,6 +111,8 @@ jobs:
       - name: Integration tests against minimum versions
         run: >-
           uv run --no-sync pytest
+          tests/test_httpx.py
+          tests/test_httpx_e2e.py
           tests/test_httpx2.py
           tests/test_httpx2_e2e.py
           tests/test_fastapi.py

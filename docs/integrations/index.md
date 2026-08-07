@@ -11,6 +11,7 @@ per named dependency) with no decorators in call sites.
 | [FastAPI](fastapi.md) | `interlock-cb[fastapi]` | `Depends`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler |
 | [Litestar](litestar.md) | `interlock-cb[litestar]` | `Provide`-injected breakers and a `CircuitOpenError → 503 + Retry-After` handler (Litestar ≥ 2.23) |
 | [httpx2](httpx2.md) | `interlock-cb[httpx2]` | `CircuitBreakerTransport` / `AsyncCircuitBreakerTransport` — per-host breaker at the transport level |
+| [httpx](httpx.md) | `interlock-cb[httpx]` | `CircuitBreakerTransport` / `AsyncCircuitBreakerTransport` — per-host transport for httpx clients |
 | [aiohttp](aiohttp.md) | `interlock-cb[aiohttp]` | `CircuitBreakerMiddleware` — per-host breaker as a client middleware (aiohttp ≥ 3.12) |
 | [requests](requests.md) | `interlock-cb[requests]` | `CircuitBreakerAdapter` — per-host breaker mounted on a `Session` |
 | [LLM SDKs](llm.md) | — (recipe) | Guard OpenAI / Anthropic SDK calls with a breaker + bounded retries |
@@ -22,13 +23,17 @@ per named dependency) with no decorators in call sites.
 
 Every integration follows the same rules, so learning one means knowing all:
 
-- **Native extension points only.** A transport (httpx2), a client middleware
+- **Native extension points only.** A transport (httpx2/httpx), a client middleware
   (aiohttp), an adapter (requests), an exception handler (FastAPI). No
   monkey-patching, no private APIs — an integration survives minor releases
   of its host library.
 - **One breaker per host.** HTTP integrations key breakers by request host:
   a failing `api.a` never trips `api.b`. Breakers are created lazily in a
   shared [`Registry`](../reference.md).
+- **Safe rollout before enforcement.** Pass
+  `initial_state=State.METRICS_ONLY` to record real traffic without rejecting
+  it. The state is applied before each lazy breaker serves its first request;
+  deploy a new integration with `CLOSED` after tuning thresholds.
 - **One classification model.** Responses are classified by an
   `HttpStatusClassifier` — by default the canonical retryable set
   (`429, 500, 502, 503, 504`) plus any transport exception counts as a
@@ -42,6 +47,10 @@ Every integration follows the same rules, so learning one means knowing all:
 - **Zero-dependency core.** Integrations live in `interlock.integrations.*`
   as optional extras; `import interlock` itself never pulls anything beyond
   the standard library.
+- **Explicit ownership and teardown.** Transports and adapters close their
+  native connection resources together with their breaker registry. The
+  aiohttp middleware exposes `aclose()` because `ClientSession` does not own
+  middleware resources.
 
 ## Support tiers
 

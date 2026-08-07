@@ -23,7 +23,7 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
   below the usual 3.12 default: a foundational library values reach.
 - **Zero-dependency core** — stdlib only. A fault-tolerance tool must not depend on someone
   else's reliability. Everything external goes through optional extras
-  (`interlock-cb[httpx2]`, `[aiohttp]`, `[requests]`, `[tenacity]`, `[fastapi]`, `[litestar]`, `[redis]`, `[otel]`).
+  (`interlock-cb[httpx2]`, `[httpx]`, `[aiohttp]`, `[requests]`, `[tenacity]`, `[fastapi]`, `[litestar]`, `[redis]`, `[otel]`).
 - **Pydantic ≥ 2.0 — extras only, NEVER in the core.** The core config is a frozen dataclass with
   eager validation. Pydantic is acceptable only where it is optional.
 - **uv** — package manager.
@@ -101,10 +101,10 @@ With 3+ arguments, keyword arguments only.
 
 ```python
 # bad
-breaker = CircuitBreaker('payments', 5, 60, True)
+config = Config(0.5, 10, 60.0)
 
 # good
-breaker = CircuitBreaker(name='payments', failure_threshold=5, reset_timeout=60, half_open=True)
+config = Config(failure_rate_threshold=0.5, minimum_number_of_calls=10, wait_duration_in_open=60.0)
 ```
 
 ### Functions
@@ -151,7 +151,7 @@ def get_state(name: str) -> State:
 
 - pytest, functions only (no test classes).
 - Naming: `test__unit_of_work__state_under_test__expected_behavior` (lower case).
-  Example: `test__sliding_window__failure_rate_above_threshold__opens_circuit`.
+  Example: `test__closed__failure_rate_at_threshold__opens`.
 - Test files mirror the package layout: `interlock/window.py` → `tests/test_window.py`.
 - One test — one behaviour. Arrange-Act-Assert structure.
 - Fixtures for repeated setup. `pytest-mock` to isolate external dependencies.
@@ -161,14 +161,12 @@ def get_state(name: str) -> State:
   and races.
 
 ```python
-def test__sliding_window__failure_rate_above_threshold__opens_circuit(
-    fake_clock: Clock,
-) -> None:
-    window = CountBasedWindow(size=10, clock=fake_clock)
+def test__count_based__majority_failures__failure_rate_above_threshold() -> None:
+    window = CountBasedSlidingWindow(size=10)
     for _ in range(6):
         window.record(Outcome.FAILURE)
 
-    assert window.failure_rate() >= 0.5
+    assert window.snapshot().failure_rate >= 0.5
 ```
 
 ## Documentation and naming

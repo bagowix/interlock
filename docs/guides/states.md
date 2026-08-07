@@ -74,12 +74,46 @@ breaker.metrics_only()  # observe in production without enforcing
 breaker.reset()  # start enforcing with a clean window
 ```
 
-### `METRICS_ONLY` — safe rollout
+### Safe rollout
 
 Shadow mode is the key to introducing a breaker without risk: it records the
 exact failure and slow-call rates real traffic produces, so you can tune
 thresholds against live data before letting the breaker reject anything. It
 costs almost nothing to leave on.
+
+Set the mode at construction when no call may be admitted first:
+
+```python
+from interlock import CircuitBreaker, Registry, State
+
+breaker = CircuitBreaker(name='payments', initial_state=State.METRICS_ONLY)
+registry = Registry(initial_state=State.METRICS_ONLY)
+```
+
+`Registry` applies the state while holding its creation lock and publishes the
+breaker only afterwards. Every name created later therefore starts in shadow
+mode too. Construction is not a state transition, so it does not emit a
+synthetic `CLOSED → METRICS_ONLY` listener event.
+
+Only stable states are valid at construction: `CLOSED`, `FORCED_OPEN`,
+`DISABLED` and `METRICS_ONLY`. `OPEN` and `HALF_OPEN` require timing, probe and
+failure history, so passing either as `initial_state` raises `ValueError`.
+
+For a production rollout:
+
+1. Deploy with `initial_state=State.METRICS_ONLY` and an `EventListener` that
+   exports call outcomes.
+2. Observe failure and slow-call rates, then tune `Config` against real traffic.
+3. Deploy a new breaker, registry or transport with `initial_state=State.CLOSED`
+   (the default). The enforcing instance starts with a fresh window.
+
+Prefer a new deployment for step 3. Calling `reset()` enforces immediately for
+an existing breaker, but a registry configured with `METRICS_ONLY` would still
+apply that original initial state to hosts first seen later.
+
+For local diagnosis, `registry.get_existing(name)` returns a cached breaker or
+`None` without creating one. Inspect its `state` and `snapshot()`; use listeners
+rather than polling snapshots for production metrics.
 
 ## Coordinated state (optional)
 

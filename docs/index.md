@@ -16,6 +16,8 @@ integrations at the transport level.
   ships `py.typed` and passes mypy in strict mode.
 - **Zero-dependency core.** Standard library only; everything external lives in
   optional extras.
+- **Safe production rollout.** Start in `METRICS_ONLY` to observe real traffic
+  without rejecting it, then enable enforcement with tuned thresholds.
 - **Thread-safe, and checked.** One `threading.Lock` guards the critical
   sections; your callable runs outside it. CI drives a single breaker from many
   threads at once — on free-threaded CPython (3.14t) as well as the GIL builds —

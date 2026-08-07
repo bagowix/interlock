@@ -34,7 +34,13 @@ middleware = CircuitBreakerMiddleware()
 async with aiohttp.ClientSession(middlewares=(middleware,)) as session:
     async with session.get('https://api.example.com/orders') as response:
         orders = await response.json()
+
+await middleware.aclose()
 ```
+
+`ClientSession` does not own middleware resources. Call `middleware.aclose()`
+during application shutdown; it releases every per-host breaker and is
+idempotent.
 
 Each host gets its own breaker (a failing `api.a` never trips `api.b`),
 created lazily and shared across requests. When a host's circuit is open the
@@ -44,6 +50,26 @@ made.
 The breaker observes the time to *response headers*; reading the body happens
 outside the guarded call — the same semantics as the
 [httpx2 transport](httpx2.md).
+
+## Safe production rollout
+
+Pass `initial_state=State.METRICS_ONLY` to record real outcomes without
+rejecting requests. The state is applied to every lazily created host before
+its first request:
+
+```python
+from interlock import State
+
+middleware = CircuitBreakerMiddleware(
+    initial_state=State.METRICS_ONLY,
+    listener=metrics_listener,
+)
+```
+
+The public `middleware.registry` supports local diagnosis with
+`get_existing(host)`, `state` and `snapshot()`. Use an `EventListener` for
+production metrics, then deploy a new middleware with the default `CLOSED`
+state to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 
 ## Failure policy
 
@@ -68,7 +94,8 @@ Any custom `FailureClassifier` works too — see
 ## Tuning and observability
 
 The middleware accepts the same collaborators as `CircuitBreaker` — `config`,
-`clock`, `classifier`, `listener`. One middleware instance holds one registry
+`clock`, `initial_state`, `classifier`, `listener`. One middleware instance
+holds one registry
 of per-host breakers; reuse the instance across sessions to share breaker
 state, or create separate instances to isolate them. For application-level
 retries combine with the [tenacity integration](tenacity.md) and read

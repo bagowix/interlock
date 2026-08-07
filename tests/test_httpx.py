@@ -1,15 +1,14 @@
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from types import TracebackType
 from typing import Self
 
-import httpx2
+import httpx
 import pytest
-from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
 from pytest_mock import MockerFixture
 from tests.conftest import FakeClock, RecordingListener
 
 from interlock import CircuitOpenError, Config, Outcome, State
-from interlock.integrations.httpx2 import (
+from interlock.integrations.httpx import (
     AsyncCircuitBreakerTransport,
     CircuitBreakerTransport,
     HttpStatusClassifier,
@@ -18,13 +17,23 @@ from interlock.integrations.httpx2 import (
 _TRIP_FAST = Config(minimum_number_of_calls=2, failure_rate_threshold=0.5)
 
 
-class _SyncStub(BaseTransport):
-    def __init__(self, handler: Callable[[Request], Response]) -> None:
+class _SyncStream(httpx.SyncByteStream):
+    def __iter__(self) -> Iterator[bytes]:
+        yield b'streamed'
+
+
+class _AsyncStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b'streamed'
+
+
+class _SyncStub(httpx.BaseTransport):
+    def __init__(self, handler: Callable[[httpx.Request], httpx.Response]) -> None:
         self._handler = handler
         self.calls = 0
         self.closed = False
 
-    def handle_request(self, request: Request) -> Response:
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
         self.calls += 1
         return self._handler(request)
 
@@ -32,13 +41,13 @@ class _SyncStub(BaseTransport):
         self.closed = True
 
 
-class _AsyncStub(AsyncBaseTransport):
-    def __init__(self, handler: Callable[[Request], Response]) -> None:
+class _AsyncStub(httpx.AsyncBaseTransport):
+    def __init__(self, handler: Callable[[httpx.Request], httpx.Response]) -> None:
         self._handler = handler
         self.calls = 0
         self.closed = False
 
-    async def handle_async_request(self, request: Request) -> Response:
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.calls += 1
         return self._handler(request)
 
@@ -65,10 +74,10 @@ class _SyncLifecycleStub(_SyncStub):
         self.exited = True
         super().__exit__(exc_type, exc_value, traceback)
 
-    def _handle(self, _request: Request) -> Response:
+    def _handle(self, _request: httpx.Request) -> httpx.Response:
         if not self.entered:
             raise RuntimeError('transport was not entered')
-        return Response(200)
+        return httpx.Response(200)
 
 
 class _AsyncLifecycleStub(_AsyncStub):
@@ -90,38 +99,46 @@ class _AsyncLifecycleStub(_AsyncStub):
         self.exited = True
         await super().__aexit__(exc_type, exc_value, traceback)
 
-    def _handle(self, _request: Request) -> Response:
+    def _handle(self, _request: httpx.Request) -> httpx.Response:
         if not self.entered:
             raise RuntimeError('transport was not entered')
-        return Response(200)
+        return httpx.Response(200)
 
 
-def _request(url: str = 'https://api.example.com/v1') -> Request:
-    return Request('GET', url)
+def _request(url: str = 'https://api.example.com/v1') -> httpx.Request:
+    return httpx.Request('GET', url)
 
 
 def test__http_status_classifier__exception__is_failure() -> None:
     classifier = HttpStatusClassifier()
 
-    assert classifier.is_failure(result=None, exception=httpx2.ConnectError('boom'))
+    assert classifier.is_failure(result=None, exception=httpx.ConnectError('boom'))
 
 
 @pytest.mark.parametrize('status', [429, 500, 502, 503, 504])
 def test__http_status_classifier__retryable_status__is_failure(status: int) -> None:
     classifier = HttpStatusClassifier()
 
-    assert classifier.is_failure(result=Response(status), exception=None)
+    assert classifier.is_failure(result=httpx.Response(status), exception=None)
 
 
 @pytest.mark.parametrize('status', [200, 301, 400, 404, 418, 501, 505])
 def test__http_status_classifier__healthy_or_permanent_status__is_success(status: int) -> None:
     classifier = HttpStatusClassifier()
 
-    assert not classifier.is_failure(result=Response(status), exception=None)
+    assert not classifier.is_failure(result=httpx.Response(status), exception=None)
+
+
+def test__http_status_classifier__custom_statuses__override_default_set() -> None:
+    classifier = HttpStatusClassifier(failure_statuses={404, 408})
+
+    assert classifier.is_failure(result=httpx.Response(404), exception=None)
+    assert classifier.is_failure(result=httpx.Response(408), exception=None)
+    assert not classifier.is_failure(result=httpx.Response(500), exception=None)
 
 
 def test__sync_transport__success_response__passes_through(fake_clock: FakeClock) -> None:
-    inner = _SyncStub(lambda _request: Response(200))
+    inner = _SyncStub(lambda _request: httpx.Response(200))
     transport = CircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
 
     response = transport.handle_request(_request())
@@ -142,8 +159,19 @@ def test__sync_transport__context_manager__delegates_wrapped_lifecycle() -> None
     assert inner.closed
 
 
+def test__sync_transport__streaming_response__preserves_stream(fake_clock: FakeClock) -> None:
+    response = httpx.Response(200, stream=_SyncStream())
+    inner = _SyncStub(lambda _request: response)
+    transport = CircuitBreakerTransport(inner, clock=fake_clock)
+
+    returned = transport.handle_request(_request())
+
+    assert returned is response
+    assert b''.join(returned.iter_raw()) == b'streamed'
+
+
 def test__sync_transport__server_errors__open_breaker_for_host(fake_clock: FakeClock) -> None:
-    inner = _SyncStub(lambda _request: Response(503))
+    inner = _SyncStub(lambda _request: httpx.Response(503))
     transport = CircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
 
     transport.handle_request(_request())
@@ -151,18 +179,18 @@ def test__sync_transport__server_errors__open_breaker_for_host(fake_clock: FakeC
 
     with pytest.raises(CircuitOpenError):
         transport.handle_request(_request())
-    assert inner.calls == 2  # the rejected request never reached the wrapped transport
+    assert inner.calls == 2
 
 
 def test__sync_transport__transport_exception__opens_breaker(fake_clock: FakeClock) -> None:
-    def boom(_request: Request) -> Response:
-        raise httpx2.ConnectError('down')
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError('down', request=request)
 
     inner = _SyncStub(boom)
     transport = CircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
 
     for _ in range(2):
-        with pytest.raises(httpx2.ConnectError):
+        with pytest.raises(httpx.ConnectError):
             transport.handle_request(_request())
 
     with pytest.raises(CircuitOpenError):
@@ -170,16 +198,35 @@ def test__sync_transport__transport_exception__opens_breaker(fake_clock: FakeClo
 
 
 def test__sync_transport__client_errors__never_open(fake_clock: FakeClock) -> None:
-    inner = _SyncStub(lambda _request: Response(404))
+    inner = _SyncStub(lambda _request: httpx.Response(404))
     transport = CircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
 
     for _ in range(10):
         assert transport.handle_request(_request()).status_code == 404
 
 
+def test__sync_transport__custom_classifier__uses_configured_statuses(
+    fake_clock: FakeClock,
+) -> None:
+    inner = _SyncStub(lambda _request: httpx.Response(404))
+    classifier = HttpStatusClassifier(failure_statuses={404})
+    transport = CircuitBreakerTransport(
+        inner,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        classifier=classifier,
+    )
+
+    transport.handle_request(_request())
+    transport.handle_request(_request())
+
+    with pytest.raises(CircuitOpenError):
+        transport.handle_request(_request())
+
+
 def test__sync_transport__breakers_isolated_per_host(fake_clock: FakeClock) -> None:
-    def handler(request: Request) -> Response:
-        return Response(503) if request.url.host == 'bad.example.com' else Response(200)
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503) if request.url.host == 'bad.example.com' else httpx.Response(200)
 
     inner = _SyncStub(handler)
     transport = CircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
@@ -192,10 +239,20 @@ def test__sync_transport__breakers_isolated_per_host(fake_clock: FakeClock) -> N
     assert transport.handle_request(_request('https://good.example.com/')).status_code == 200
 
 
+def test__sync_transport__url_without_host__raises_value_error(fake_clock: FakeClock) -> None:
+    inner = _SyncStub(lambda _request: httpx.Response(200))
+    transport = CircuitBreakerTransport(inner, clock=fake_clock)
+
+    with pytest.raises(ValueError, match='no host'):
+        transport.handle_request(_request('/relative/path'))
+
+    assert inner.calls == 0
+
+
 def test__sync_transport__close__releases_wrapped_transport_and_registry(
     mocker: MockerFixture,
 ) -> None:
-    inner = _SyncStub(lambda _request: Response(200))
+    inner = _SyncStub(lambda _request: httpx.Response(200))
     transport = CircuitBreakerTransport(inner)
     close_all = mocker.spy(transport.registry, 'close_all')
 
@@ -208,7 +265,7 @@ def test__sync_transport__close__releases_wrapped_transport_and_registry(
 def test__sync_transport__wrapped_close_raises__still_releases_registry(
     mocker: MockerFixture,
 ) -> None:
-    inner = _SyncStub(lambda _request: Response(200))
+    inner = _SyncStub(lambda _request: httpx.Response(200))
     transport = CircuitBreakerTransport(inner)
     mocker.patch.object(inner, 'close', side_effect=RuntimeError('close failed'))
     close_all = mocker.spy(transport.registry, 'close_all')
@@ -219,9 +276,33 @@ def test__sync_transport__wrapped_close_raises__still_releases_registry(
     close_all.assert_called_once_with()
 
 
+def test__sync_transport__metrics_only_server_errors__records_without_rejecting(
+    fake_clock: FakeClock,
+    listener: RecordingListener,
+) -> None:
+    inner = _SyncStub(lambda _request: httpx.Response(503))
+    transport = CircuitBreakerTransport(
+        inner,
+        initial_state=State.METRICS_ONLY,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        listener=listener,
+    )
+
+    for _ in range(5):
+        response = transport.handle_request(_request())
+        assert response.status_code == 503
+
+    breaker = transport.registry.get_existing('api.example.com')
+    assert breaker is not None
+    assert breaker.state is State.METRICS_ONLY
+    assert breaker.snapshot().failed_calls == 5
+    assert [outcome for outcome, _duration in listener.calls] == [Outcome.FAILURE] * 5
+
+
 @pytest.mark.asyncio
 async def test__async_transport__success_response__passes_through(fake_clock: FakeClock) -> None:
-    inner = _AsyncStub(lambda _request: Response(200))
+    inner = _AsyncStub(lambda _request: httpx.Response(200))
     transport = AsyncCircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
 
     response = await transport.handle_async_request(_request())
@@ -244,10 +325,24 @@ async def test__async_transport__context_manager__delegates_wrapped_lifecycle() 
 
 
 @pytest.mark.asyncio
+async def test__async_transport__streaming_response__preserves_stream(
+    fake_clock: FakeClock,
+) -> None:
+    response = httpx.Response(200, stream=_AsyncStream())
+    inner = _AsyncStub(lambda _request: response)
+    transport = AsyncCircuitBreakerTransport(inner, clock=fake_clock)
+
+    returned = await transport.handle_async_request(_request())
+
+    assert returned is response
+    assert b''.join([chunk async for chunk in returned.aiter_raw()]) == b'streamed'
+
+
+@pytest.mark.asyncio
 async def test__async_transport__server_errors__open_breaker_for_host(
     fake_clock: FakeClock,
 ) -> None:
-    inner = _AsyncStub(lambda _request: Response(500))
+    inner = _AsyncStub(lambda _request: httpx.Response(500))
     transport = AsyncCircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
 
     await transport.handle_async_request(_request())
@@ -259,10 +354,78 @@ async def test__async_transport__server_errors__open_breaker_for_host(
 
 
 @pytest.mark.asyncio
+async def test__async_transport__transport_exception__opens_breaker(
+    fake_clock: FakeClock,
+) -> None:
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError('down', request=request)
+
+    inner = _AsyncStub(boom)
+    transport = AsyncCircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
+
+    for _ in range(2):
+        with pytest.raises(httpx.ConnectError):
+            await transport.handle_async_request(_request())
+
+    with pytest.raises(CircuitOpenError):
+        await transport.handle_async_request(_request())
+
+
+@pytest.mark.asyncio
+async def test__async_transport__custom_classifier__uses_configured_statuses(
+    fake_clock: FakeClock,
+) -> None:
+    inner = _AsyncStub(lambda _request: httpx.Response(404))
+    classifier = HttpStatusClassifier(failure_statuses={404})
+    transport = AsyncCircuitBreakerTransport(
+        inner,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        classifier=classifier,
+    )
+
+    await transport.handle_async_request(_request())
+    await transport.handle_async_request(_request())
+
+    with pytest.raises(CircuitOpenError):
+        await transport.handle_async_request(_request())
+
+
+@pytest.mark.asyncio
+async def test__async_transport__breakers_isolated_per_host(fake_clock: FakeClock) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503) if request.url.host == 'bad.example.com' else httpx.Response(200)
+
+    inner = _AsyncStub(handler)
+    transport = AsyncCircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
+
+    await transport.handle_async_request(_request('https://bad.example.com/'))
+    await transport.handle_async_request(_request('https://bad.example.com/'))
+
+    with pytest.raises(CircuitOpenError):
+        await transport.handle_async_request(_request('https://bad.example.com/'))
+    response = await transport.handle_async_request(_request('https://good.example.com/'))
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test__async_transport__url_without_host__raises_value_error(
+    fake_clock: FakeClock,
+) -> None:
+    inner = _AsyncStub(lambda _request: httpx.Response(200))
+    transport = AsyncCircuitBreakerTransport(inner, clock=fake_clock)
+
+    with pytest.raises(ValueError, match='no host'):
+        await transport.handle_async_request(_request('/relative/path'))
+
+    assert inner.calls == 0
+
+
+@pytest.mark.asyncio
 async def test__async_transport__aclose__releases_wrapped_transport_and_registry(
     mocker: MockerFixture,
 ) -> None:
-    inner = _AsyncStub(lambda _request: Response(200))
+    inner = _AsyncStub(lambda _request: httpx.Response(200))
     transport = AsyncCircuitBreakerTransport(inner)
     aclose_all = mocker.spy(transport.registry, 'aclose_all')
 
@@ -276,7 +439,7 @@ async def test__async_transport__aclose__releases_wrapped_transport_and_registry
 async def test__async_transport__wrapped_aclose_raises__still_releases_registry(
     mocker: MockerFixture,
 ) -> None:
-    inner = _AsyncStub(lambda _request: Response(200))
+    inner = _AsyncStub(lambda _request: httpx.Response(200))
     transport = AsyncCircuitBreakerTransport(inner)
     mocker.patch.object(inner, 'aclose', side_effect=RuntimeError('close failed'))
     aclose_all = mocker.spy(transport.registry, 'aclose_all')
@@ -288,36 +451,11 @@ async def test__async_transport__wrapped_aclose_raises__still_releases_registry(
 
 
 @pytest.mark.asyncio
-async def test__async_transport__metrics_only_server_errors__records_without_rejecting(
-    fake_clock: FakeClock,
-    listener: RecordingListener,
-) -> None:
-    inner = _AsyncStub(lambda _request: Response(503))
-    transport = AsyncCircuitBreakerTransport(
-        inner,
-        initial_state=State.METRICS_ONLY,
-        config=_TRIP_FAST,
-        clock=fake_clock,
-        listener=listener,
-    )
-
-    for _ in range(5):
-        response = await transport.handle_async_request(_request())
-        assert response.status_code == 503
-
-    breaker = transport.registry.get_existing('api.example.com')
-    assert breaker is not None
-    assert breaker.state is State.METRICS_ONLY
-    assert breaker.snapshot().failed_calls == 5
-    assert [outcome for outcome, _duration in listener.calls] == [Outcome.FAILURE] * 5
-
-
-@pytest.mark.asyncio
 async def test__async_transport__metrics_only_transport_exception__propagates_and_records(
     fake_clock: FakeClock,
 ) -> None:
-    def boom(_request: Request) -> Response:
-        raise httpx2.ConnectError('down')
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError('down', request=request)
 
     transport = AsyncCircuitBreakerTransport(
         _AsyncStub(boom),
@@ -326,11 +464,12 @@ async def test__async_transport__metrics_only_transport_exception__propagates_an
         clock=fake_clock,
     )
 
-    with pytest.raises(httpx2.ConnectError, match='down'):
+    with pytest.raises(httpx.ConnectError, match='down'):
         await transport.handle_async_request(_request())
 
     breaker = transport.registry.get_existing('api.example.com')
     assert breaker is not None
+    assert breaker.state is State.METRICS_ONLY
     assert breaker.snapshot().failed_calls == 1
 
 
@@ -338,7 +477,7 @@ async def test__async_transport__metrics_only_transport_exception__propagates_an
 async def test__async_transport__metrics_only_new_hosts__all_start_in_shadow_mode(
     fake_clock: FakeClock,
 ) -> None:
-    inner = _AsyncStub(lambda _request: Response(503))
+    inner = _AsyncStub(lambda _request: httpx.Response(503))
     transport = AsyncCircuitBreakerTransport(
         inner,
         initial_state=State.METRICS_ONLY,
@@ -354,34 +493,3 @@ async def test__async_transport__metrics_only_new_hosts__all_start_in_shadow_mod
         breaker = transport.registry.get_existing(host)
         assert breaker is not None
         assert breaker.state is State.METRICS_ONLY
-
-
-def test__http_status_classifier__custom_statuses__override_default_set() -> None:
-    classifier = HttpStatusClassifier(failure_statuses={404, 408})
-
-    assert classifier.is_failure(result=Response(404), exception=None)
-    assert classifier.is_failure(result=Response(408), exception=None)
-    assert not classifier.is_failure(result=Response(500), exception=None)
-
-
-def test__sync_transport__url_without_host__raises_value_error(fake_clock: FakeClock) -> None:
-    stub = _SyncStub(lambda _request: Response(200))
-    transport = CircuitBreakerTransport(stub, clock=fake_clock)
-
-    with pytest.raises(ValueError, match='no host'):
-        transport.handle_request(_request('/relative/path'))
-
-    assert stub.calls == 0
-
-
-@pytest.mark.asyncio
-async def test__async_transport__url_without_host__raises_value_error(
-    fake_clock: FakeClock,
-) -> None:
-    stub = _AsyncStub(lambda _request: Response(200))
-    transport = AsyncCircuitBreakerTransport(stub, clock=fake_clock)
-
-    with pytest.raises(ValueError, match='no host'):
-        await transport.handle_async_request(_request('/relative/path'))
-
-    assert stub.calls == 0

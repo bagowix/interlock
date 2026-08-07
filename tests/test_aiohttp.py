@@ -5,10 +5,11 @@ from typing import cast
 import pytest
 from aiohttp import ClientHandlerType, ClientRequest, ClientResponse, ClientSession, web
 from aiohttp.test_utils import TestServer
+from pytest_mock import MockerFixture
 from tests.conftest import FakeClock
 from yarl import URL
 
-from interlock import CircuitOpenError, Config
+from interlock import CircuitOpenError, Config, State
 from interlock.integrations.aiohttp import CircuitBreakerMiddleware, HttpStatusClassifier
 
 _TRIP_FAST = Config(minimum_number_of_calls=2, failure_rate_threshold=0.5)
@@ -114,6 +115,40 @@ async def test__middleware__client_errors__do_not_trip(fake_clock: FakeClock) ->
         assert response.status == 404
 
     assert handler.calls == 5
+
+
+@pytest.mark.asyncio
+async def test__middleware__metrics_only_failures__record_without_rejecting(
+    fake_clock: FakeClock,
+) -> None:
+    middleware = CircuitBreakerMiddleware(
+        initial_state=State.METRICS_ONLY,
+        config=_TRIP_FAST,
+        clock=fake_clock,
+    )
+    handler = _handler([503] * 5)
+
+    for _ in range(5):
+        response = await middleware(
+            _request('https://api.a/x'),
+            cast('ClientHandlerType', handler),
+        )
+        assert response.status == 503
+
+    breaker = middleware.registry.get_existing('api.a')
+    assert breaker is not None
+    assert breaker.state is State.METRICS_ONLY
+    assert breaker.snapshot().failed_calls == 5
+
+
+@pytest.mark.asyncio
+async def test__middleware__aclose__releases_registry(mocker: MockerFixture) -> None:
+    middleware = CircuitBreakerMiddleware()
+    aclose_all = mocker.spy(middleware.registry, 'aclose_all')
+
+    await middleware.aclose()
+
+    aclose_all.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

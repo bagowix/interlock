@@ -41,6 +41,10 @@ class CircuitBreaker:
         config: Thresholds, window and timing. Defaults to ``Config()``.
         clock: Time source. Defaults to ``SystemClock`` (real monotonic time);
             inject a fake for deterministic tests.
+        initial_state: Stable state in which the breaker starts. Use
+            ``State.METRICS_ONLY`` for a shadow rollout that records real
+            traffic without rejecting calls. ``OPEN`` and ``HALF_OPEN`` are
+            transitional and rejected as initial states.
         classifier: Decides which outcomes count as failures. Defaults to any
             raised exception being a failure.
         listener: Observability hooks (state changes, calls, rejections,
@@ -50,6 +54,9 @@ class CircuitBreaker:
             state. A coordinated breaker matches its storage's runtime: a sync
             ``Storage`` serves only the sync API, an ``AsyncStorage`` only the
             async one; without a storage the breaker stays fully dual.
+
+    Raises:
+        ValueError: If ``initial_state`` is not a supported stable state.
     """
 
     def __init__(
@@ -58,6 +65,7 @@ class CircuitBreaker:
         name: str,
         config: Config | None = None,
         clock: Clock | None = None,
+        initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
         listener: EventListener | None = None,
         storage: Storage | AsyncStorage | None = None,
@@ -67,6 +75,7 @@ class CircuitBreaker:
             name=name,
             config=config if config is not None else Config(),
             clock=clock if clock is not None else SystemClock(),
+            initial_state=initial_state,
             classifier=classifier,
             listener=listener,
             storage=storage,

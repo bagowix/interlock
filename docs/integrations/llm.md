@@ -5,8 +5,9 @@ LLM APIs fail in exactly the ways circuit breakers exist for: rate limits
 LLM calls stops a degraded provider from stalling every request thread, and
 bounded retries recover from blips without amplifying an outage.
 
-This is a **recipe** — no extra needed beyond `interlock-cb[tenacity]`; the
-SDKs raise typed exceptions, which is all the breaker needs.
+You can protect an SDK at either its call boundary, which enables SDK-specific
+classification and slow-call detection, or at the httpx transport,
+which applies transparently to every request made by that client.
 
 ## Classify SDK errors
 
@@ -98,8 +99,33 @@ Give each provider its own breaker name (`anthropic`, `openai`, ...) via a
 shared `Registry` and check `breaker.state` to route around an open provider.
 The [states guide](../guides/states.md) covers manual failover controls.
 
-!!! note "Transport-level alternative"
-    The SDKs are built on classic httpx, which does not take httpx2
-    transports; once they migrate to httpx2 you will be able to drop the
-    decorator entirely and pass a client wrapped with the
-    [httpx2 transport](httpx2.md) instead.
+## Transport-level protection
+
+OpenAI and Anthropic clients accept an httpx client. Install
+`interlock-cb[httpx]`, wrap the SDK's underlying transport, and every endpoint
+on the provider host shares the same breaker:
+
+```python
+import httpx
+from openai import DefaultHttpxClient, OpenAI
+
+from interlock.integrations.httpx import CircuitBreakerTransport
+
+transport = CircuitBreakerTransport(httpx.HTTPTransport())
+
+with OpenAI(
+    http_client=DefaultHttpxClient(transport=transport),
+    max_retries=0,
+) as client:
+    response = client.responses.create(model='gpt-5.5', input='Summarise this document...')
+```
+
+Use `AsyncCircuitBreakerTransport`, `httpx.AsyncHTTPTransport`, and the SDK's
+async client for async applications. `max_retries=0` gives the breaker one
+observable attempt per SDK call; if retries are required, keep one explicit,
+bounded retry owner instead of stacking SDK and application retries.
+
+The transport classifier sees HTTP statuses directly, so no SDK exception
+classifier is needed. Choose the call-boundary recipe above when you also need
+to classify SDK-specific exceptions, measure the complete SDK operation as a
+slow call, or use a breaker name that is not derived from the request host.

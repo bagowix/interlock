@@ -17,95 +17,21 @@ A modern circuit breaker for Python — sync and async in a single class,
 sliding-window rate and slow-call detection, a type-safe API, and transparent
 integrations at the transport level.
 
-## Why interlock
-
-- **Sync and async, one class.** A single `CircuitBreaker` detects coroutine
-  callables and dispatches to the right path — no `Sync*`/`Async*` twins.
-- **Sliding windows by rate.** Both count-based and time-based windows, not the
-  naive consecutive-failure counter found elsewhere in the ecosystem.
-- **Slow-call detection.** Treat calls slower than a threshold as failures —
-  not available in any other Python circuit breaker.
-- **Type-safe.** `ParamSpec` + `TypeVar` decorators preserve the wrapped
-  signature *and* its sync/async nature; ships `py.typed`, passes mypy,
-  pyright and pyrefly in strict mode.
-- **Zero-dependency core.** Standard library only; everything external lives in
-  optional extras (`httpx2`, `aiohttp`, `requests`, `tenacity`, `fastapi`,
-  `litestar`, `redis`, `otel`).
-- **Composable pipeline (v2).** Timeout, bulkhead, breaker, retry and fallback
-  as strategies applied in an explicit order — Polly-style, with the
-  standalone breaker untouched.
-
-## How it compares
-
-interlock-cb is young (first released in 2026). [pybreaker][pybreaker] and
-[circuitbreaker][circuitbreaker] are mature, well-documented and proven in
-production for years — for many projects they are exactly the right choice. Each
-library is strong in different places:
-
-| Feature | interlock-cb | pybreaker | circuitbreaker |
-|---|:---:|:---:|:---:|
-| Core states (closed / open / half-open) | ✅ | ✅ | ✅ |
-| Choose which exceptions count as failures | ✅ | ✅ | ✅ |
-| Zero-dependency core | ✅ | ✅ | ✅ |
-| `async` / `await` (asyncio) | ✅ | Tornado | ✅ |
-| Event / state-change listeners | ✅ | ✅ | — |
-| Shared state across processes (Redis) | ✅ | ✅ | — |
-| Fallback function | ✅ | — | ✅ |
-| Composable resilience pipeline | ✅ | — | — |
-| Years of production use | new | ✅ | ✅ |
-| Failure-**rate** sliding window | ✅ | — | — |
-| Time-based window | ✅ | — | — |
-| Slow-call detection | ✅ | — | — |
-| Result-based failure classification | ✅ | — | — |
-| Type-safe decorator (preserves signature) | ✅ | — | — |
-| Built-in httpx transport | ✅ | — | — |
-| OpenTelemetry metrics | ✅ | — | — |
-
-<sub>Compared against pybreaker 1.x and circuitbreaker 2.1 as documented in mid-2026.
-pybreaker's async support is Tornado-based, not asyncio. Both established
-libraries trip on a consecutive-failure count rather than a rate window.
-Something out of date? Please open a PR.</sub>
-
-Reach for an established library if you want a small, proven breaker today or a
-built-in fallback. Choose interlock-cb when you want rate-based windows,
-slow-call detection, coordinated state with graceful degradation and a fully
-typed API. The [full comparison](docs/comparison.md) also covers **aiobreaker**
-and **purgatory**.
-
-What interlock-cb offers in place of years in production: 100% branch
-coverage, three strict type checkers, mutation testing on the state machine
-and engine, property- and model-based tests, and CI on free-threaded CPython —
-see [Correctness and testing](docs/correctness.md) for what is verified, how,
-and where the limits are.
-
-[pybreaker]: https://github.com/danielfm/pybreaker
-[circuitbreaker]: https://github.com/fabfuel/circuitbreaker
-
 ## Installation
 
 ```bash
 uv add interlock-cb          # or: pip install interlock-cb
 ```
 
-Optional extras:
-
-```bash
-uv add 'interlock-cb[fastapi]'  # FastAPI dependency + 503 Retry-After handler
-uv add 'interlock-cb[litestar]' # Litestar dependency + 503 Retry-After handler
-uv add 'interlock-cb[httpx2]'   # per-host httpx2 transport
-uv add 'interlock-cb[aiohttp]'  # per-host aiohttp client middleware
-uv add 'interlock-cb[requests]' # per-host requests session adapter
-uv add 'interlock-cb[tenacity]' # retry × breaker composition helpers
-uv add 'interlock-cb[redis]'    # shared breaker state across processes
-uv add 'interlock-cb[otel]'     # OpenTelemetry metrics listener
-```
+interlock-cb supports Python 3.11 and newer. The core uses only the standard
+library; external integrations are installed as [optional extras](#integrations).
 
 ## Quickstart
 
-Protect a callable three ways over the one `call()` primitive.
+Create one named breaker and reuse it around calls to the same dependency:
 
 ```python
-from interlock import CircuitBreaker, Config
+from interlock import CircuitBreaker, CircuitOpenError, Config
 
 breaker = CircuitBreaker(
     name='payments',
@@ -113,55 +39,69 @@ breaker = CircuitBreaker(
 )
 
 
-# 1. Decorator — preserves the signature and sync/async nature.
 @breaker
 def charge(amount: int) -> str:
     return gateway.charge(amount)
 
 
-# 2. breaker.call — the breaker runs the callable.
-result = breaker.call(gateway.charge, 100)
-
-# 3. Context manager — guards a block (exceptions + duration only).
-with breaker:
-    gateway.charge(100)
-```
-
-The same instance works for async — the decorator and `call` detect a coroutine
-function, and the instance is also an async context manager:
-
-```python
-@breaker
-async def fetch(url: str) -> bytes:
-    return await client.get(url)
-
-
-async with breaker:
-    await client.get(url)
-```
-
-When the circuit is open, the call is rejected with `CircuitOpenError`, which
-carries the breaker name, an estimate of when the next probe is allowed, and the
-last recorded failure:
-
-```python
-from interlock import CircuitOpenError
-
 try:
-    breaker.call(gateway.charge, 100)
+    receipt = charge(100)
 except CircuitOpenError as exc:
-    print(exc.breaker_name, exc.retry_after, exc.last_failure)
+    print(exc)
 ```
 
-Want to watch a breaker trip and recover? Run the
-[examples](examples/) — deterministic output, no network, every transition
-narrated ([walkthrough](docs/demo.md)).
+The decorator preserves the function's signature and whether it is sync or
+async. The same breaker also supports `breaker.call(fn, ...)`, `with breaker`,
+and `async with breaker`. See [Getting started](docs/getting-started.md) for all
+calling styles and [Configuration](docs/guides/configuration.md) for every
+threshold.
+
+## Why interlock
+
+- **Sync and async, one class.** `CircuitBreaker` dispatches to separate sync
+  and async paths without duplicating the public API.
+- **Failure rates over sliding windows.** Choose count- or time-based windows
+  instead of relying only on consecutive failures.
+- **Slow calls and returned values count.** Detect latency degradation and
+  classify unsuccessful results even when no exception is raised.
+- **Type-safe decorators.** Wrapped signatures and their sync/async nature are
+  preserved; the package ships `py.typed` and passes three strict type checkers.
+- **Zero-dependency core.** Optional clients, frameworks, storage and
+  observability integrations never leak into the core package.
+- **Composable resilience.** Combine timeout, bulkhead, breaker, retry and
+  fallback explicitly, or coordinate breaker state across instances with Redis.
+
+## Safe production rollout
+
+Start a new integration in `METRICS_ONLY` to observe real failure and slow-call
+rates without rejecting traffic. The initial state is applied before a lazy
+per-host breaker can admit its first request:
+
+```python
+import httpx2
+
+from interlock import Config, State
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(
+    httpx2.AsyncHTTPTransport(),
+    initial_state=State.METRICS_ONLY,
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    listener=metrics_listener,
+)
+```
+
+Use an `EventListener` for production metrics. For local diagnostics,
+`transport.registry.get_existing(host)` returns an already-created breaker
+without creating one, so its `state` and `snapshot()` can be inspected safely.
+After tuning thresholds, deploy a new transport with the default
+`initial_state=State.CLOSED`; the enforcing instance starts with a fresh window.
+See [States and manual control](docs/guides/states.md#safe-rollout).
 
 ## Resilience pipeline
 
-When one concern is not enough, compose strategies around a call in an
-explicit order (first = outermost) — the breaker stays a first-class
-standalone primitive:
+Compose strategies in an explicit order (first is outermost) while keeping the
+breaker useful as a standalone primitive:
 
 ```python
 from interlock import CircuitBreaker, CircuitOpenError, Pipeline
@@ -188,9 +128,10 @@ Retries never hammer an open circuit, one hung attempt cannot eat the retry
 budget, and every decision is observable — see the
 [pipeline guide](docs/guides/pipeline.md).
 
-## httpx2 integration
+## Integrations
 
-Apply a breaker **per host** transparently, with no decorators in call sites:
+The `httpx2` transport applies one breaker per host with no decorators at call
+sites:
 
 ```python
 import httpx2
@@ -203,78 +144,63 @@ client = httpx2.Client(transport=transport)
 By default, transport exceptions and the canonical retryable statuses
 (`429, 500, 502, 503, 504`) count as failures; `4xx` client errors do not.
 
-## FastAPI integration
+| Integration | Install | Documentation |
+|---|---|---|
+| httpx2 | `interlock-cb[httpx2]` | [Per-host transport](docs/integrations/httpx2.md) |
+| httpx | `interlock-cb[httpx]` | [Per-host transport](docs/integrations/httpx.md) |
+| aiohttp | `interlock-cb[aiohttp]` | [Client middleware](docs/integrations/aiohttp.md) |
+| requests | `interlock-cb[requests]` | [Session adapter](docs/integrations/requests.md) |
+| FastAPI | `interlock-cb[fastapi]` | [`503 + Retry-After` handler](docs/integrations/fastapi.md) |
+| Litestar | `interlock-cb[litestar]` | [`503 + Retry-After` handler](docs/integrations/litestar.md) |
+| tenacity | `interlock-cb[tenacity]` | [Retry composition](docs/integrations/tenacity.md) |
+| Redis | `interlock-cb[redis]` | [Shared state](docs/integrations/redis.md) |
+| OpenTelemetry | `interlock-cb[otel]` | [Metrics listener](docs/guides/observability.md) |
 
-Inject a per-name breaker with `Depends` and map an open circuit to a clean
-`503` with `Retry-After`:
+The [integrations overview](docs/integrations/index.md) also includes recipes
+for LLM SDKs and Flask/Django.
 
-```python
-from typing import Annotated
+## How it compares
 
-from fastapi import Depends, FastAPI
-from interlock import CircuitBreaker, Registry
-from interlock.integrations.fastapi import breaker_dependency, install_exception_handler
+interlock-cb is young: its first release was in 2026. Established libraries
+such as [pybreaker](https://github.com/danielfm/pybreaker) and
+[circuitbreaker](https://github.com/fabfuel/circuitbreaker) have carried
+production traffic for years and remain a better fit when maturity matters
+more than the feature differences.
 
-app = FastAPI()
-registry = Registry()
-install_exception_handler(app)
+| Feature | interlock-cb | pybreaker | circuitbreaker |
+|---|:---:|:---:|:---:|
+| Core states (closed / open / half-open) | ✅ | ✅ | ✅ |
+| Native asyncio | ✅ | Tornado | ✅ |
+| Trip condition | failure rate | consecutive failures | consecutive failures |
+| Time-based sliding window | ✅ | — | — |
+| Slow-call detection | ✅ | — | — |
+| Shared state across processes | ✅ | ✅ | — |
+| Composable resilience pipeline | ✅ | — | — |
+| Fully typed API (`py.typed`) | ✅ | — | — |
 
-orders_db = breaker_dependency('orders-db', registry=registry)
+The [full comparison](docs/comparison.md) covers more features as well as
+aiobreaker and purgatory. Something out of date or unfair? Please open a PR.
 
-
-@app.get('/orders')
-async def orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
-    return await breaker.call(fetch_orders)
-```
-
-## Redis integration (shared state)
-
-Coordinate breaker state across processes and machines: when one instance
-trips, every instance backs off, and recovery probes are budgeted globally.
-Redis failures never reach the protected call — the breaker degrades to local
-state and re-syncs when Redis recovers:
-
-```python
-import redis
-from interlock import CircuitBreaker, Registry
-from interlock.integrations.redis import RedisStorage
-
-storage = RedisStorage(redis.Redis(host='redis.internal'))
-breaker = CircuitBreaker(name='payments', storage=storage)
-
-registry = Registry(storage=storage)  # or share one storage across many breakers
-```
-
-Async services use `AsyncRedisStorage` with `redis.asyncio.Redis` the same way.
-
-## More integrations
-
-The same per-host pattern ships for **aiohttp** (client middleware) and
-**requests** (session adapter), and the **tenacity** extra composes retries
-with the breaker correctly (stop retrying once the circuit opens, or wait
-exactly until the next probe). Recipes cover **OpenAI / Anthropic SDK** calls
-and **Flask / Django** handlers — see the
-[integrations overview](docs/integrations/index.md) and the
-[retries guide](docs/guides/retries.md).
+The reliability work compensating for the project's shorter production history
+includes 100% branch coverage, three strict type checkers, mutation testing of
+the state machine and engine, property- and model-based tests, and CI on
+free-threaded CPython. The [correctness and testing](docs/correctness.md) page
+documents what is verified and where the limits are.
 
 ## Documentation
 
 The full documentation is hosted at **<https://bagowix.github.io/interlock/>**.
-The sources live in [`docs/`](docs/):
+Start with:
 
 - [Getting started](docs/getting-started.md)
-- [Runnable demo](docs/demo.md) — the [`examples/`](examples/) scripts explained
-- [Configuration](docs/guides/configuration.md)
-- [States & manual control](docs/guides/states.md)
-- [Failure classification](docs/guides/failure-classification.md)
-- [Observability](docs/guides/observability.md)
-- [Timeout](docs/guides/timeout.md)
-- [Retries and circuit breakers](docs/guides/retries.md)
+- [Configuration](docs/guides/configuration.md) and [states](docs/guides/states.md)
 - [Resilience pipeline](docs/guides/pipeline.md)
-- [Integrations overview](docs/integrations/index.md) — FastAPI, Litestar,
-  httpx2, aiohttp, requests, LLM SDKs, tenacity, Redis, Flask/Django
-- [Comparison](docs/comparison.md) — vs pybreaker, circuitbreaker, aiobreaker, purgatory
+- [Integrations](docs/integrations/index.md)
+- [Correctness and testing](docs/correctness.md)
 - [API reference](docs/reference.md)
+
+For a deterministic, network-free demonstration of every state transition, run
+the [`examples/`](examples/) scripts or follow the [walkthrough](docs/demo.md).
 
 ## Contributing
 

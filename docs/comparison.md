@@ -30,12 +30,12 @@ choice.
 | Composable resilience pipeline (retry × breaker × bulkhead × timeout × fallback) | ✅ | — | — | — | — |
 | Fully typed API (`py.typed`) | ✅ | — | — | — | ✅ |
 | Signature-preserving decorator (`ParamSpec`) | ✅ | — | — | — | — |
-| HTTP client integrations (httpx2 / aiohttp / requests) | ✅ | — | — | — | — |
+| HTTP client integrations (httpx2 / httpx / aiohttp / requests) | ✅ | — | — | — | — |
 | Retry composition helpers (tenacity) | ✅ | — | — | — | — |
 | OpenTelemetry metrics | ✅ | — | — | — | — |
 | Operator overrides (force-open / disable / shadow mode) | ✅ | — | — | — | — |
 | Years of production use | new | ✅ | ✅ | ✅ | ✅ |
-| Latest release (as of July 2026) | 2.3.0 · 2026 | 1.4.1 · 2025 | 2.1.3 | 1.2.0 · 2021 | 3.0.1 · 2024 |
+| Latest release (as of July 2026) | 2.4.0 · 2026 | 1.4.1 · 2025 | 2.1.3 | 1.2.0 · 2021 | 3.0.1 · 2024 |
 | Python | ≥ 3.11 | ≥ 3.9 | ≥ 3.8 | ≥ 3.6 | ≥ 3.9 |
 
 <sub>Compared against pybreaker 1.4.1, circuitbreaker 2.1.3, aiobreaker 1.2.0
@@ -84,9 +84,9 @@ a consecutive-failure threshold with a TTL on the open state.
   atomic across racing instances and half-open probes are budgeted globally,
   with graceful degradation to local state when Redis is down
   ([Redis integration](integrations/redis.md)).
-- **Meets your stack where it is.** Per-host breakers ship for httpx2,
-  aiohttp and requests; tenacity glue composes retries correctly; FastAPI and Litestar
-  map rejections to `503 + Retry-After`
+- **Meets your stack where it is.** Per-host breakers ship for httpx2, httpx,
+  aiohttp and requests; tenacity glue composes retries correctly; FastAPI and
+  Litestar map rejections to `503 + Retry-After`
   ([integrations overview](integrations/index.md)).
 
 The honest trade-off: interlock-cb requires Python ≥ 3.11 and has not had

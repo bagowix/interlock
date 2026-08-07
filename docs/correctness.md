@@ -157,7 +157,8 @@ too slow to run against a real clock.
 ## Lower-bound dependency versions are tested, not guessed
 
 Every optional extra declares a minimum version in `pyproject.toml`
-(`httpx2>=2.4.0`, `redis>=5.0.0`, and so on). The `extras-min` job re-pins each
+(`httpx>=0.27.0`, `httpx2>=2.4.0`, `redis>=5.0.0`, and so on). The
+`extras-min` job re-pins each
 one to exactly that floor and runs the integration suite against it
 ([`ci.yml`](https://github.com/bagowix/interlock/blob/main/.github/workflows/ci.yml)) —
 so a lower bound is a tested claim, not an untested guess about how far back
