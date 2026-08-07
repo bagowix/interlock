@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-08
+
 ### Added
 
 - **Windows and macOS regressions are now caught before release.** A lightweight CI
@@ -682,7 +684,8 @@ The major version marks the scope of what is added, not a migration burden.
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/bagowix/interlock/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/bagowix/interlock/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/bagowix/interlock/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/bagowix/interlock/compare/v2.1.4...v2.2.0
