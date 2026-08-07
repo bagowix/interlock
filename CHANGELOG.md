@@ -15,7 +15,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   breakers. Their new `name_resolver=` callback receives the native request
   and supplies the single name used by the registry, open-circuit errors, and
   listener events. Host-based naming remains the default, while empty custom
-  names fail before any network I/O.
+  names and non-string results fail before any network I/O.
 
 - **Listener contracts now match the events a component actually emits.**
   `CoreEventListener`, `StorageEventListener` and `PipelineEventListener` let a

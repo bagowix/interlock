@@ -64,8 +64,8 @@ adapter = CircuitBreakerAdapter(
 ```
 
 Returning one name for several discovery hosts instead makes them share a
-breaker. The result must be non-empty and contain something other than
-whitespace; invalid names raise `ValueError` with the request URL before the
+breaker. The result must be a non-empty string containing something other than
+whitespace; invalid results raise `ValueError` with the request URL before the
 adapter performs I/O.
 
 The resolved name is used consistently as the registry key, in

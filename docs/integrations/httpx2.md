@@ -111,9 +111,9 @@ transport = AsyncCircuitBreakerTransport(
 
 Returning the same name for several discovery hosts gives them one breaker;
 deriving a name from the path can split independent upstreams behind one
-gateway host. The result must be non-empty and contain something other than
-whitespace. Invalid names raise `ValueError` with the request URL before the
-wrapped transport performs I/O.
+gateway host. The result must be a non-empty string containing something other
+than whitespace. Invalid results raise `ValueError` with the request URL before
+the wrapped transport performs I/O.
 
 The resolved name is used consistently as the registry key, in
 `CircuitOpenError`, and in every listener event. Resolve the name here instead

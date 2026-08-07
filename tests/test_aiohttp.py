@@ -150,6 +150,26 @@ async def test__middleware__empty_resolved_name__raises_before_handler(
     assert handler.calls == 0
 
 
+@pytest.mark.parametrize('resolved_name', [None, b'orders'])
+@pytest.mark.asyncio
+async def test__middleware__non_string_resolved_name__raises_before_handler(
+    fake_clock: FakeClock,
+    resolved_name: object,
+) -> None:
+    middleware = CircuitBreakerMiddleware(
+        clock=fake_clock,
+        name_resolver=lambda _request: cast('str', resolved_name),
+    )
+    handler = _handler([200])
+    request = _request('https://api.example.com/v1')
+
+    with pytest.raises(ValueError, match='non-string breaker name') as raised:
+        await middleware(request, cast('ClientHandlerType', handler))
+
+    assert str(request.url) in str(raised.value)
+    assert handler.calls == 0
+
+
 @pytest.mark.asyncio
 async def test__middleware__client_errors__do_not_trip(fake_clock: FakeClock) -> None:
     middleware = CircuitBreakerMiddleware(config=_TRIP_FAST, clock=fake_clock)

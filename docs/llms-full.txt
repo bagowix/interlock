@@ -2830,9 +2830,9 @@ transport = AsyncCircuitBreakerTransport(
 
 Returning the same name for several discovery hosts gives them one breaker;
 deriving a name from the path can split independent upstreams behind one
-gateway host. The result must be non-empty and contain something other than
-whitespace. Invalid names raise `ValueError` with the request URL before the
-wrapped transport performs I/O.
+gateway host. The result must be a non-empty string containing something other
+than whitespace. Invalid results raise `ValueError` with the request URL before
+the wrapped transport performs I/O.
 
 The resolved name is used consistently as the registry key, in
 `CircuitOpenError`, and in every listener event. Resolve the name here instead
@@ -3019,8 +3019,9 @@ transport = AsyncCircuitBreakerTransport(
 
 The same callback can split one gateway host into independent breakers, for
 example by returning a name derived from the first path segment. It must return
-a non-empty, non-whitespace name; invalid names raise `ValueError` with the
-request URL before the wrapped transport performs I/O.
+a non-empty string containing something other than whitespace; invalid results
+raise `ValueError` with the request URL before the wrapped transport performs
+I/O.
 
 The resolved name is the registry key and the name carried by
 `CircuitOpenError` and every listener event. Use the resolver, rather than
@@ -3180,8 +3181,9 @@ middleware = CircuitBreakerMiddleware(
 
 A resolver can collapse several discovery hosts onto one breaker or derive a
 name from the request path to separate upstreams behind a shared gateway. It
-must return a non-empty, non-whitespace name; invalid names raise `ValueError`
-with the request URL before the handler performs I/O.
+must return a non-empty string containing something other than whitespace;
+invalid results raise `ValueError` with the request URL before the handler
+performs I/O.
 
 The resolved name is used by the registry, `CircuitOpenError`, and every
 listener event. Resolve it in the middleware rather than rewriting listener
@@ -3334,8 +3336,8 @@ adapter = CircuitBreakerAdapter(
 ```
 
 Returning one name for several discovery hosts instead makes them share a
-breaker. The result must be non-empty and contain something other than
-whitespace; invalid names raise `ValueError` with the request URL before the
+breaker. The result must be a non-empty string containing something other than
+whitespace; invalid results raise `ValueError` with the request URL before the
 adapter performs I/O.
 
 The resolved name is used consistently as the registry key, in

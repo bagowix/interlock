@@ -105,8 +105,9 @@ transport = AsyncCircuitBreakerTransport(
 
 The same callback can split one gateway host into independent breakers, for
 example by returning a name derived from the first path segment. It must return
-a non-empty, non-whitespace name; invalid names raise `ValueError` with the
-request URL before the wrapped transport performs I/O.
+a non-empty string containing something other than whitespace; invalid results
+raise `ValueError` with the request URL before the wrapped transport performs
+I/O.
 
 The resolved name is the registry key and the name carried by
 `CircuitOpenError` and every listener event. Use the resolver, rather than

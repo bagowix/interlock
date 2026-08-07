@@ -1,6 +1,7 @@
 """Tests for the requests integration (``interlock.integrations.requests``)."""
 
 from collections.abc import Callable
+from typing import cast
 
 import pytest
 import requests
@@ -134,6 +135,26 @@ def test__adapter__empty_resolved_name__raises_before_transport(
     assert transport.call_count == 0
 
 
+@pytest.mark.parametrize('resolved_name', [None, b'orders'])
+def test__adapter__non_string_resolved_name__raises_before_transport(
+    mocker: MockerFixture,
+    fake_clock: FakeClock,
+    resolved_name: object,
+) -> None:
+    transport = _patch_transport(mocker, [_response(200)])
+    adapter = CircuitBreakerAdapter(
+        clock=fake_clock,
+        name_resolver=lambda _request: cast('str', resolved_name),
+    )
+    request = _prepared('https://api.example.com/v1')
+
+    with pytest.raises(ValueError, match='non-string breaker name') as raised:
+        adapter.send(request)
+
+    assert request.url in str(raised.value)
+    assert transport.call_count == 0
+
+
 def test__adapter__client_errors__do_not_trip(mocker: MockerFixture, fake_clock: FakeClock) -> None:
     transport = _patch_transport(mocker, [_response(404)] * 5)
     adapter = CircuitBreakerAdapter(config=_TRIP_FAST, clock=fake_clock)
@@ -258,6 +279,24 @@ def test__adapter__url_without_host__raises_value_error(fake_clock: FakeClock) -
 
     with pytest.raises(ValueError, match='no host'):
         adapter.send(request)
+
+
+def test__adapter__missing_url__raises_before_url_parsing(
+    mocker: MockerFixture,
+    fake_clock: FakeClock,
+) -> None:
+    adapter = CircuitBreakerAdapter(config=_TRIP_FAST, clock=fake_clock)
+    request = PreparedRequest()
+    request.url = None
+    urlsplit = mocker.patch(
+        'interlock.integrations.requests.urlsplit',
+        side_effect=AssertionError('missing URL must not reach urlsplit'),
+    )
+
+    with pytest.raises(ValueError, match='no host'):
+        adapter.send(request)
+
+    urlsplit.assert_not_called()
 
 
 def test__adapter__send_kwargs__forwarded_to_transport(

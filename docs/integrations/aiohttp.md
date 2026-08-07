@@ -67,8 +67,9 @@ middleware = CircuitBreakerMiddleware(
 
 A resolver can collapse several discovery hosts onto one breaker or derive a
 name from the request path to separate upstreams behind a shared gateway. It
-must return a non-empty, non-whitespace name; invalid names raise `ValueError`
-with the request URL before the handler performs I/O.
+must return a non-empty string containing something other than whitespace;
+invalid results raise `ValueError` with the request URL before the handler
+performs I/O.
 
 The resolved name is used by the registry, `CircuitOpenError`, and every
 listener event. Resolve it in the middleware rather than rewriting listener

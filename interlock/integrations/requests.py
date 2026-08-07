@@ -86,9 +86,13 @@ class HttpStatusClassifier:
 
 def _host(request: PreparedRequest) -> str:
     """Return the host key, rejecting URLs that cannot identify a dependency."""
-    host = urlsplit(request.url or '').hostname
+    url = request.url
+    if url is None:
+        raise ValueError(f'Request URL has no host to key a breaker on: {url!r}')
+
+    host = urlsplit(url).hostname
     if not host:
-        raise ValueError(f'Request URL has no host to key a breaker on: {request.url!r}')
+        raise ValueError(f'Request URL has no host to key a breaker on: {url!r}')
 
     return host
 
@@ -98,7 +102,11 @@ def _breaker_name(
     name_resolver: Callable[[PreparedRequest], str],
 ) -> str:
     """Resolve and validate the dependency identity before registry access."""
-    name = name_resolver(request)
+    name = cast('object', name_resolver(request))
+    if not isinstance(name, str):
+        raise ValueError(  # noqa: TRY004 - resolver contract uses ValueError
+            f'Name resolver returned a non-string breaker name for request URL: {request.url!s}'
+        )
     if not name.strip():
         raise ValueError(
             f'Name resolver returned an empty breaker name for request URL: {request.url!s}'
@@ -184,7 +192,8 @@ class CircuitBreakerAdapter(HTTPAdapter):
         Raises:
             CircuitOpenError: If the resolved dependency's breaker is open.
             ValueError: If the request URL has no host under the default
-                resolver, or the configured resolver returns an empty name.
+                resolver, or the configured resolver returns a non-string or
+                empty name.
         """
         breaker = self._registry.get(_breaker_name(request, self._name_resolver))
         guarded = breaker(super().send)
