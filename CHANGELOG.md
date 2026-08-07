@@ -8,6 +8,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Partial `EventListener` implementations now pass strict type checking.** A
+  listener that only needs one hook previously had to stub all ten before mypy,
+  pyright and pyrefly would accept it, despite runtime dispatch already treating
+  every hook as optional. `EventListener` now provides inherited no-op hooks, so
+  subclasses override only what they observe and remain compatible when later
+  releases add hooks; structurally complete listeners continue to work without
+  inheritance.
+
 - **Direct-call baseline and threaded-contention benchmarks**, closing out the
   two gaps left in #84. The CodSpeed suite reported the absolute cost of every
   protected path but not the number a prospective user actually wants — the
