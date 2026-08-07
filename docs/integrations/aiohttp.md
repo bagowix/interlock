@@ -75,9 +75,9 @@ as a success. The registry owns `config`, `clock`, `initial_state`,
 `classifier`, and `listener`; passing any of them to the middleware together
 with `registry` raises `ValueError`.
 
-Calling `aclose()` on middleware that received a registry leaves that registry
-usable by other sessions. The application owns it and must call
-`await registry.aclose_all()` once during shutdown.
+Calling `aclose()` automatically closes the breakers only when the middleware
+owns the registry. An injected registry remains open until the application
+explicitly calls `await registry.aclose_all()` during shutdown.
 
 ## Safe production rollout
 

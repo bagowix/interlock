@@ -123,10 +123,11 @@ status policy; otherwise a returned `503` counts as a success. The supplied
 registry owns `config`, `clock`, `initial_state`, `classifier`, and `listener`,
 so none of those options may also be passed to the transport.
 
-Closing either client still closes its wrapped connection pool but leaves the
-shared registry usable by the other client. The application owns the registry
-and must call `await registry.aclose_all()` once during async shutdown (or
-`registry.close_all()` when all guarded clients are synchronous).
+Closing a client automatically closes its breakers only when the transport
+owns the registry. An injected registry remains open while the wrapped
+connection pool closes; the application must explicitly call
+`await registry.aclose_all()` during async shutdown (or `registry.close_all()`
+when all guarded clients are synchronous).
 
 ## What counts as a failure
 

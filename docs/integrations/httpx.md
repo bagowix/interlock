@@ -118,10 +118,11 @@ supplied registry also owns `config`, `clock`, `initial_state`, `classifier`,
 and `listener`; combining `registry` with any of those transport options raises
 `ValueError` instead of silently ignoring one source of configuration.
 
-Closing a client closes its wrapped connection pool, not the injected
-registry. The application must call `await registry.aclose_all()` once during
-async shutdown, or `registry.close_all()` when every guarded client is
-synchronous.
+Closing a client automatically closes its breakers only when the transport
+owns the registry. An injected registry remains open while the wrapped
+connection pool closes; the application must explicitly call
+`await registry.aclose_all()` during async shutdown, or `registry.close_all()`
+when every guarded client is synchronous.
 
 ## What counts as a failure
 

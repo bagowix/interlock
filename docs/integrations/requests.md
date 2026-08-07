@@ -77,9 +77,10 @@ as a success. The registry owns `config`, `clock`, `initial_state`,
 `classifier`, and `listener`; combining `registry` with any of those adapter
 options raises `ValueError`.
 
-Closing either session still releases its adapter's connection pools, but it
-does not close the injected registry. The application owns the registry and
-must call `registry.close_all()` once during shutdown.
+Closing a session automatically closes its breakers only when the adapter owns
+the registry. An injected registry remains open while its connection pools
+close; the application must explicitly call `registry.close_all()` during
+shutdown.
 
 ## Safe production rollout
 
