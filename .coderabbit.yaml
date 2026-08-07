@@ -1,0 +1,369 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit review configuration for interlock (interlock-cb on PyPI).
+# The house rules live in AGENTS.md; this file tells the reviewer how to enforce
+# the ones a generic Python reviewer cannot infer from the diff alone.
+
+language: en-US
+tone_instructions: >-
+  Terse and technical. No praise, no restating the diff. Every comment names a
+  concrete failure mode or the AGENTS.md rule it violates. Silence over noise.
+early_access: false
+enable_free_tier: true
+
+reviews:
+  profile: chill
+  # Solo-maintained repo: a blocking review state would only stall merges.
+  request_changes_workflow: false
+
+  high_level_summary: true
+  high_level_summary_instructions: >-
+    Bullet list of user-visible changes, grouped as Added / Fixed / Changed so it
+    can be pasted into CHANGELOG.md. Name public symbols and the extras they
+    belong to. Call out any change to the state machine, the engine lock scope,
+    the public API surface or the supported Python range in its own bullet.
+    No implementation walkthrough — the walkthrough section covers that.
+  high_level_summary_placeholder: '@coderabbitai summary'
+  high_level_summary_in_walkthrough: false
+
+  auto_title_placeholder: '@coderabbitai'
+  auto_title_instructions: >-
+    Conventional Commits, lower case, imperative, no trailing period:
+    `<type>: <summary>` with type in feat / fix / refactor / docs / test / chore /
+    perf / ci. Under 72 characters. PRs are squash-merged, so the title becomes
+    the commit subject.
+
+  review_status: true
+  review_details: true
+  review_progress: true
+  commit_status: false
+  fail_commit_status: false
+
+  collapse_walkthrough: false
+  changed_files_summary: true
+  # State machine and pipeline changes are much easier to verify as a diagram.
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+
+  suggested_labels: true
+  # `breaking-change` disables the griffe public-API gate, so labels stay manual.
+  auto_apply_labels: false
+  labeling_instructions:
+    - label: bug
+      instructions: >-
+        Apply when the PR fixes incorrect runtime behaviour. Requires a test that
+        fails without the fix.
+    - label: enhancement
+      instructions: >-
+        Apply when the PR adds public API, a new integration or a new pipeline
+        strategy.
+    - label: documentation
+      instructions: >-
+        Apply when the PR only touches docs/, README.md, CONTRIBUTING.md or
+        docstrings, with no behaviour change.
+    - label: dependencies
+      instructions: >-
+        Apply when the PR changes pyproject.toml dependencies, optional extras or
+        uv.lock.
+    - label: github_actions
+      instructions: >-
+        Apply when the PR changes files under .github/workflows/ or
+        .github/zizmor.yml.
+
+  # Single-maintainer repo — reviewer suggestions have nothing to draw on.
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+
+  in_progress_fortune: false
+  poem: false
+  # The maintainer drives fixes through agent CLIs; keep the agent prompts.
+  enable_prompt_for_ai_agents: true
+
+  path_filters:
+    - '!uv.lock'
+    - '!dist/**'
+    - '!site/**'
+    - '!mutants/**'
+    - '!**/__pycache__/**'
+
+  path_instructions:
+    - path: 'interlock/**/*.py'
+      instructions: >-
+        Core rules (AGENTS.md is authoritative):
+        (1) Zero-dependency core — anything under interlock/ except
+        interlock/integrations/ may import stdlib only. Flag every third-party
+        import as a blocking issue.
+        (2) No fallbacks, no silent excepts, no `a or b or c` for required config
+        or data, no hidden retries. Invalid input or state raises immediately.
+        interlock/_notify.py is the one sanctioned swallow (listener hooks are
+        observability, logged with traceback, BaseException still propagates) —
+        do not suggest generalising or "fixing" it.
+        (3) Time comes only from the injected Clock protocol; direct
+        time.monotonic()/time.sleep() in library logic is a bug.
+        (4) Style: 100-char lines, single quotes, f-strings, pathlib, full
+        annotations, `X | None` never `Optional[X]`, keyword arguments for calls
+        with 3+ arguments, no magic constants (StrEnum or module constants),
+        functions under ~30 lines.
+        (5) Extension points are Protocols (Clock, SlidingWindow, Storage,
+        FailureClassifier, EventListener) — do not propose inheriting internal
+        classes.
+        (6) Sync and async live in one CircuitBreaker with separate internal
+        paths; never propose Sync*/Async* twins and never mix the two paths in
+        one function.
+        (7) Public API is exported from interlock/__init__.py; everything else is
+        underscore-prefixed. New public symbols need `__all__` and a docstring.
+        (8) Python 3.11 is the floor — no 3.12+ syntax or stdlib.
+
+    - path: 'interlock/{_state_machine,_engine,_coordination}.py'
+      instructions: >-
+        The critical section. Verify: the state machine stays I/O-free and
+        unaware of sync vs async; the threading.Lock covers only the await-free
+        acquire and record sections and is never held across the protected call
+        (a call under the lock is a deadlock and a throughput bug); HALF_OPEN
+        still bounds concurrent probes. Ask whether `uv run mutmut run` was run —
+        AGENTS.md requires it for these files, because 100% coverage here does
+        not prove the new assertions bite.
+
+    - path: 'interlock/integrations/**/*.py'
+      instructions: >-
+        Optional extras. The third-party import must stay inside this package,
+        must never be re-exported from interlock/__init__.py, and a missing extra
+        must fail with a clear install hint rather than a fallback. Wrap the
+        dependency behind the project's own types so its objects do not leak into
+        core signatures. Check that the extra is declared in pyproject.toml
+        `[project.optional-dependencies]` and documented under docs/integrations/.
+
+    - path: 'tests/**/*.py'
+      instructions: >-
+        pytest functions only, never test classes. Names follow
+        `test__unit_of_work__state_under_test__expected_behavior` in lower case.
+        One behaviour per test, Arrange-Act-Assert. Time is the injected fake
+        Clock — any real sleep or wall-clock read is flakiness, flag it. Async
+        tests use @pytest.mark.asyncio; state-machine work carries hypothesis
+        property tests. Coverage must stay at 100%: point out uncovered branches
+        the diff introduces. Tests run under `-n auto`, so anything relying on
+        ordering or shared global state is a bug.
+
+    - path: 'benchmarks/**'
+      instructions: >-
+        CodSpeed hot-path benchmarks, run only by .github/workflows/codspeed.yml
+        and never by `uv run pytest`. Judge them for measurement validity (no
+        setup inside the timed region, no dead code the optimiser can drop), not
+        for test-suite conventions.
+
+    - path: 'examples/**/*.py'
+      instructions: >-
+        Runnable, zero-dependency demos — stdlib only, no extras. They must run
+        top to bottom without arguments and are exercised by
+        tests/test_examples.py. Prefer clarity over cleverness; they double as
+        documentation.
+
+    - path: 'docs/**/*.md'
+      instructions: >-
+        User-facing documentation. Check that code samples match the current
+        public API and would actually run. A new page must also be listed in
+        docs/llms.txt under `## Docs`. Keep the existing voice: short sentences,
+        no marketing.
+
+    - path: 'docs/llms-full.txt'
+      instructions: >-
+        Generated artefact — produced by `uv run python scripts/build_llms_full.py`.
+        Do not review its content or suggest edits; only confirm it was
+        regenerated together with the docs/ changes in the same PR.
+
+    - path: '.github/workflows/**'
+      instructions: >-
+        Actions must be pinned to a full commit SHA with the version in a
+        trailing comment, `permissions:` must be least-privilege and declared
+        per job, and untrusted input must never be interpolated into `run:`.
+        zizmor gates this directory in CI — flag anything it would catch.
+
+    - path: 'pyproject.toml'
+      instructions: >-
+        The core must stay dependency-free: new runtime dependencies belong in
+        `[project.optional-dependencies]` only. requires-python stays `>=3.11`.
+        Version is static in interlock/version.py — flag any attempt to add a
+        dynamic version source. ruff settings (line-length 100, target py311) are
+        configured here, not on the command line.
+
+    - path: 'CHANGELOG.md'
+      instructions: >-
+        Keep a Changelog format. New entries go under `## [Unreleased]` in
+        Added / Fixed / Changed. An entry describes what a user could not do
+        before and can now, not which symbol moved. Only the release commit dates
+        a section and updates the link references.
+
+  abort_on_close: true
+  disable_cache: false
+
+  slop_detection:
+    enabled: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    # Redundant with the default-branch rule, but stated explicitly: right after
+    # installation the bot skipped a PR targeting main as "not the default
+    # branch". An explicit match does not depend on its view of the repository.
+    base_branches:
+      - main
+    ignore_title_keywords:
+      - WIP
+      - DO NOT MERGE
+
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+    autofix:
+      enabled: true
+
+  pre_merge_checks:
+    # Public API carries docstrings; private helpers deliberately do not, so a
+    # blanket coverage percentage would only produce noise.
+    docstrings:
+      mode: 'off'
+    title:
+      mode: warning
+      requirements: >-
+        Conventional Commits: `<type>: <summary>` with type in feat / fix /
+        refactor / docs / test / chore / perf / ci. Lower case, imperative, no
+        trailing period, under 72 characters.
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      - name: Zero-dependency core
+        mode: error
+        instructions: >-
+          FAIL if any file under interlock/ outside interlock/integrations/ gains
+          an import of a module that is neither stdlib nor another interlock
+          module. FAIL if `[project] dependencies` in pyproject.toml is non-empty
+          or gains an entry. FAIL if interlock/__init__.py re-exports anything
+          from interlock.integrations. Otherwise PASS.
+
+      - name: Changelog entry
+        mode: warning
+        instructions: >-
+          PASS if the PR is a release preparation (title matches
+          `chore: prepare the * release`), or touches only .github/, benchmarks/,
+          planning/, test files, or developer tooling configuration that never
+          reaches the published package (dot-files in the repository root such as
+          .coderabbit.yaml, .pre-commit-config.yaml, .gitignore).
+          Otherwise FAIL unless CHANGELOG.md gains at
+          least one bullet under the `## [Unreleased]` heading describing the
+          user-visible effect of the change.
+
+      - name: Docs and LLM mirror
+        mode: warning
+        instructions: >-
+          Determine whether the PR changes user-facing behaviour: public API
+          under interlock/ (non-underscore modules or exported symbols), an
+          integration, or configuration options. If it does not, PASS. If it
+          does, FAIL unless the relevant page under docs/ is updated AND
+          docs/llms-full.txt is regenerated in the same PR. If a new page was
+          added under docs/, also FAIL unless it is listed in docs/llms.txt under
+          `## Docs`.
+
+      - name: Tests accompany behaviour change
+        mode: warning
+        instructions: >-
+          PASS if the PR changes no .py file under interlock/, or changes only
+          docstrings, comments or type annotations. Otherwise FAIL unless
+          tests/ is changed in the same PR. For a bug fix, FAIL unless at least
+          one added test fails without the production change — say which test
+          that is.
+
+      - name: Public API surface
+        mode: warning
+        instructions: >-
+          Identify removals or signature changes to symbols exported from
+          interlock/__init__.py or interlock/pipeline.py (removed parameters,
+          reordered positional parameters, narrowed types, renamed public names).
+          PASS if there are none, or if the PR carries the `breaking-change`
+          label and CHANGELOG.md documents the break with a migration note.
+          Otherwise FAIL and name each broken symbol — `uv run griffe check`
+          gates this in CI.
+
+  tools:
+    ruff:
+      enabled: true
+    # ruff is the single source of lint truth here; pylint would only duplicate
+    # it with a different, unconfigured rule set.
+    pylint:
+      enabled: false
+    # Markdown is already gated by pymarkdown in .pre-commit-config.yaml.
+    markdownlint:
+      enabled: false
+    yamllint:
+      enabled: true
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    osvScanner:
+      enabled: true
+    semgrep:
+      enabled: true
+    shellcheck:
+      enabled: true
+    languagetool:
+      enabled: true
+      level: default
+    github-checks:
+      enabled: true
+
+chat:
+  auto_reply: true
+  art: false
+
+knowledge_base:
+  opt_out: false
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+    # The per-directory CLAUDE.md files are gitignored; AGENTS.md is the
+    # committed source of truth.
+    filePatterns:
+      - AGENTS.md
+      - CONTRIBUTING.md
+  learnings:
+    scope: local
+  issues:
+    scope: local
+  pull_requests:
+    scope: local
+
+code_generation:
+  docstrings:
+    language: en-US
+    path_instructions:
+      - path: 'interlock/**/*.py'
+        instructions: >-
+          Short reStructuredText-flavoured docstrings in English, matching the
+          existing style: a one-line imperative summary, then a blank line and
+          only the context a reader cannot get from the signature — invariants,
+          trade-offs, raised exceptions. Reference symbols with double
+          backticks. Do not restate parameter names or types that are already
+          annotated, and do not add Args/Returns blocks to code that has none.
+  unit_tests:
+    path_instructions:
+      - path: 'tests/**/*.py'
+        instructions: >-
+          Plain pytest functions, never classes, named
+          `test__unit_of_work__state_under_test__expected_behavior` in lower
+          case. One behaviour per test, Arrange-Act-Assert, full type
+          annotations including `-> None`. Use the fake Clock from
+          tests/conftest.py instead of sleeping, @pytest.mark.asyncio for async
+          paths, and faker for data. Never assert on wall-clock time.
