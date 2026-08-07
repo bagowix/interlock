@@ -48,6 +48,40 @@ created lazily and shared across requests. When a host's circuit is open the
 request raises [`CircuitOpenError`](../reference.md) *before* a connection is
 made.
 
+## Share one registry across sessions
+
+Inject a caller-owned `Registry` when independent sessions should use one
+breaker and one sliding window for the same host:
+
+```python
+import requests
+
+from interlock import Config, Registry
+from interlock.integrations.requests import CircuitBreakerAdapter, HttpStatusClassifier
+
+registry = Registry(
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    classifier=HttpStatusClassifier(),
+)
+
+session_a = requests.Session()
+session_a.mount('https://', CircuitBreakerAdapter(registry=registry))
+
+session_b = requests.Session()
+session_b.mount('https://', CircuitBreakerAdapter(registry=registry))
+```
+
+The explicit classifier preserves the adapter's normal status policy. Without
+it, a bare `Registry` classifies exceptions only and a returned `503` counts
+as a success. The registry owns `config`, `clock`, `initial_state`,
+`classifier`, and `listener`; combining `registry` with any of those adapter
+options raises `ValueError`.
+
+Closing a session automatically closes its breakers only when the adapter owns
+the registry. An injected registry remains open while its connection pools
+close; the application must explicitly call `registry.close_all()` during
+shutdown.
+
 ## Safe production rollout
 
 Pass `initial_state=State.METRICS_ONLY` to record real outcomes without

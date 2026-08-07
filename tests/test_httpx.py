@@ -7,7 +7,7 @@ import pytest
 from pytest_mock import MockerFixture
 from tests.conftest import FakeClock, RecordingListener
 
-from interlock import CircuitOpenError, Config, Outcome, State
+from interlock import CircuitOpenError, Config, Outcome, Registry, State
 from interlock.integrations.httpx import (
     AsyncCircuitBreakerTransport,
     CircuitBreakerTransport,
@@ -239,6 +239,69 @@ def test__sync_transport__breakers_isolated_per_host(fake_clock: FakeClock) -> N
     assert transport.handle_request(_request('https://good.example.com/')).status_code == 200
 
 
+def test__sync_transports__shared_registry__merge_window(
+    fake_clock: FakeClock,
+) -> None:
+    registry = Registry(
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        classifier=HttpStatusClassifier(),
+    )
+    first_inner = _SyncStub(lambda _request: httpx.Response(503))
+    second_inner = _SyncStub(lambda _request: httpx.Response(503))
+    first = CircuitBreakerTransport(first_inner, registry=registry)
+    second = CircuitBreakerTransport(second_inner, registry=registry)
+
+    first.handle_request(_request())
+    first_breaker = first.registry.get_existing('api.example.com')
+    second.handle_request(_request())
+    second_breaker = second.registry.get_existing('api.example.com')
+
+    assert first.registry is registry
+    assert second.registry is registry
+    assert first_breaker is not None
+    assert first_breaker is second_breaker
+    assert first_breaker.snapshot().failed_calls == 2
+    with pytest.raises(CircuitOpenError):
+        first.handle_request(_request())
+
+
+def test__sync_transport__injected_registry__closes_only_wrapped_transport(
+    mocker: MockerFixture,
+) -> None:
+    registry = Registry(classifier=HttpStatusClassifier())
+    inner = _SyncStub(lambda _request: httpx.Response(200))
+    transport = CircuitBreakerTransport(inner, registry=registry)
+    close_all = mocker.spy(registry, 'close_all')
+
+    transport.close()
+
+    assert inner.closed
+    close_all.assert_not_called()
+
+
+def test__sync_transport__registry_with_builder_options__raises_all_conflicts(
+    fake_clock: FakeClock,
+    listener: RecordingListener,
+) -> None:
+    registry = Registry()
+
+    with pytest.raises(ValueError, match='registry') as raised:
+        CircuitBreakerTransport(
+            _SyncStub(lambda _request: httpx.Response(200)),
+            registry=registry,
+            config=_TRIP_FAST,
+            clock=fake_clock,
+            initial_state=State.CLOSED,
+            classifier=HttpStatusClassifier(),
+            listener=listener,
+        )
+
+    message = str(raised.value)
+    for name in ('config', 'clock', 'initial_state', 'classifier', 'listener'):
+        assert name in message
+
+
 def test__sync_transport__url_without_host__raises_value_error(fake_clock: FakeClock) -> None:
     inner = _SyncStub(lambda _request: httpx.Response(200))
     transport = CircuitBreakerTransport(inner, clock=fake_clock)
@@ -406,6 +469,30 @@ async def test__async_transport__breakers_isolated_per_host(fake_clock: FakeCloc
         await transport.handle_async_request(_request('https://bad.example.com/'))
     response = await transport.handle_async_request(_request('https://good.example.com/'))
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test__async_transports__shared_registry__survives_one_transport_closing(
+    fake_clock: FakeClock,
+    mocker: MockerFixture,
+) -> None:
+    registry = Registry(clock=fake_clock, classifier=HttpStatusClassifier())
+    first_inner = _AsyncStub(lambda _request: httpx.Response(200))
+    second_inner = _AsyncStub(lambda _request: httpx.Response(200))
+    first = AsyncCircuitBreakerTransport(first_inner, registry=registry)
+    second = AsyncCircuitBreakerTransport(second_inner, registry=registry)
+    aclose_all = mocker.spy(registry, 'aclose_all')
+
+    await first.handle_async_request(_request())
+    await first.aclose()
+    response = await second.handle_async_request(_request())
+
+    assert first_inner.closed
+    assert response.status_code == 200
+    assert second.registry.get_existing('api.example.com') is registry.get_existing(
+        'api.example.com'
+    )
+    aclose_all.assert_not_awaited()
 
 
 @pytest.mark.asyncio

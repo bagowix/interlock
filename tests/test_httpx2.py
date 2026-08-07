@@ -8,7 +8,7 @@ from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
 from pytest_mock import MockerFixture
 from tests.conftest import FakeClock, RecordingListener
 
-from interlock import CircuitOpenError, Config, Outcome, State
+from interlock import CircuitOpenError, Config, Outcome, Registry, State
 from interlock.integrations.httpx2 import (
     AsyncCircuitBreakerTransport,
     CircuitBreakerTransport,
@@ -205,6 +205,21 @@ def test__sync_transport__close__releases_wrapped_transport_and_registry(
     close_all.assert_called_once_with()
 
 
+def test__sync_transport__injected_registry__closes_only_wrapped_transport(
+    mocker: MockerFixture,
+) -> None:
+    registry = Registry(classifier=HttpStatusClassifier())
+    inner = _SyncStub(lambda _request: Response(200))
+    transport = CircuitBreakerTransport(inner, registry=registry)
+    close_all = mocker.spy(registry, 'close_all')
+
+    transport.close()
+
+    assert transport.registry is registry
+    assert inner.closed
+    close_all.assert_not_called()
+
+
 def test__sync_transport__wrapped_close_raises__still_releases_registry(
     mocker: MockerFixture,
 ) -> None:
@@ -270,6 +285,22 @@ async def test__async_transport__aclose__releases_wrapped_transport_and_registry
 
     assert inner.closed
     aclose_all.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test__async_transport__injected_registry__closes_only_wrapped_transport(
+    mocker: MockerFixture,
+) -> None:
+    registry = Registry(classifier=HttpStatusClassifier())
+    inner = _AsyncStub(lambda _request: Response(200))
+    transport = AsyncCircuitBreakerTransport(inner, registry=registry)
+    aclose_all = mocker.spy(registry, 'aclose_all')
+
+    await transport.aclose()
+
+    assert transport.registry is registry
+    assert inner.closed
+    aclose_all.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -92,6 +92,43 @@ correct than global state — each host's health is observed independently.
 When a host's breaker is open, its requests raise `CircuitOpenError` before
 reaching the network.
 
+## Share one registry across clients
+
+Pass a caller-owned `Registry` when several clients reach the same dependency.
+Requests for the same host then use one breaker instance and one sliding
+window, even when they travel through different transports:
+
+```python
+import httpx2
+
+from interlock import Config, Registry
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport, HttpStatusClassifier
+
+registry = Registry(
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    classifier=HttpStatusClassifier(),
+)
+
+client_a = httpx2.AsyncClient(
+    transport=AsyncCircuitBreakerTransport(httpx2.AsyncHTTPTransport(), registry=registry)
+)
+client_b = httpx2.AsyncClient(
+    transport=AsyncCircuitBreakerTransport(httpx2.AsyncHTTPTransport(), registry=registry)
+)
+```
+
+`Registry` uses exception-only classification by default. Always configure
+`HttpStatusClassifier` as above when you want the integration's normal HTTP
+status policy; otherwise a returned `503` counts as a success. The supplied
+registry owns `config`, `clock`, `initial_state`, `classifier`, and `listener`,
+so none of those options may also be passed to the transport.
+
+Closing a client automatically closes its breakers only when the transport
+owns the registry. An injected registry remains open while the wrapped
+connection pool closes; the application must explicitly call
+`await registry.aclose_all()` during async shutdown (or `registry.close_all()`
+when all guarded clients are synchronous).
+
 ## What counts as a failure
 
 By default the transport uses `HttpStatusClassifier`:

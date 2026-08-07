@@ -86,6 +86,44 @@ continues normally. An open breaker raises `CircuitOpenError` before the
 wrapped transport performs I/O. A request URL without a host raises
 `ValueError` for the same reason: there is no dependency identity to key on.
 
+## Share one registry across clients
+
+Inject one caller-owned `Registry` when several clients should observe the
+same dependency health. The transports then resolve the same host to the same
+breaker and contribute to one sliding window:
+
+```python
+import httpx
+
+from interlock import Config, Registry
+from interlock.integrations.httpx import AsyncCircuitBreakerTransport, HttpStatusClassifier
+
+registry = Registry(
+    config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
+    classifier=HttpStatusClassifier(),
+)
+
+client_a = httpx.AsyncClient(
+    transport=AsyncCircuitBreakerTransport(httpx.AsyncHTTPTransport(), registry=registry)
+)
+client_b = httpx.AsyncClient(
+    transport=AsyncCircuitBreakerTransport(httpx.AsyncHTTPTransport(), registry=registry)
+)
+```
+
+The classifier is intentional: a bare `Registry` classifies raised exceptions
+but treats returned responses, including `503`, as successes. Configure
+`HttpStatusClassifier` to retain the transport's default status policy. A
+supplied registry also owns `config`, `clock`, `initial_state`, `classifier`,
+and `listener`; combining `registry` with any of those transport options raises
+`ValueError` instead of silently ignoring one source of configuration.
+
+Closing a client automatically closes its breakers only when the transport
+owns the registry. An injected registry remains open while the wrapped
+connection pool closes; the application must explicitly call
+`await registry.aclose_all()` during async shutdown, or `registry.close_all()`
+when every guarded client is synchronous.
+
 ## What counts as a failure
 
 The default `HttpStatusClassifier` counts these as failures:
