@@ -37,7 +37,7 @@ from interlock._notify import notify
 from interlock._typing import AsyncCallable, P, R, SyncCallable
 from interlock.breaker import CircuitBreaker
 from interlock.errors import BulkheadFullError
-from interlock.protocols import EventListener
+from interlock.protocols import PipelineEventListener
 from interlock.timeout import sync_timeout, timeout
 
 if TYPE_CHECKING:
@@ -289,7 +289,7 @@ class BulkheadStrategy:
         *,
         max_wait: float = 0.0,
         name: str = 'bulkhead',
-        listener: EventListener | None = None,
+        listener: PipelineEventListener | None = None,
     ) -> None:
         if max_concurrent < 1:
             raise ValueError(f'max_concurrent must be >= 1, got {max_concurrent!r}')
@@ -378,7 +378,7 @@ class FallbackStrategy(Generic[F_co]):
         *,
         on: tuple[type[Exception], ...] = (Exception,),
         name: str = 'fallback',
-        listener: EventListener | None = None,
+        listener: PipelineEventListener | None = None,
     ) -> None:
         if not on:
             raise ValueError('on must name at least one exception type')
@@ -447,7 +447,7 @@ class PipelineBuilder:
         *,
         on: tuple[type[Exception], ...] = (Exception,),
         name: str = 'fallback',
-        listener: EventListener | None = None,
+        listener: PipelineEventListener | None = None,
     ) -> Self:
         """Append a :class:`FallbackStrategy` substituting failures listed in ``on``."""
         return self.add(FallbackStrategy(fallback, on=on, name=name, listener=listener))
@@ -462,7 +462,7 @@ class PipelineBuilder:
         async_sleep: Callable[[float], Awaitable[None]] | None = None,
         before_sleep: 'Callable[[RetryCallState], None] | None' = None,
         name: str = 'retry',
-        listener: EventListener | None = None,
+        listener: PipelineEventListener | None = None,
     ) -> Self:
         """Append a ``RetryStrategy`` (requires the ``tenacity`` extra).
 
@@ -498,7 +498,7 @@ class PipelineBuilder:
         *,
         max_wait: float = 0.0,
         name: str = 'bulkhead',
-        listener: EventListener | None = None,
+        listener: PipelineEventListener | None = None,
     ) -> Self:
         """Append a :class:`BulkheadStrategy` capping concurrency."""
         return self.add(

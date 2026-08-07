@@ -5,7 +5,12 @@ from functools import wraps
 from typing import ParamSpec
 
 from interlock.config import Config
-from interlock.protocols import Clock, EventListener, FailureClassifier
+from interlock.protocols import (
+    Clock,
+    CoreEventListener,
+    FailureClassifier,
+    StorageEventListener,
+)
 from interlock.registry import Registry
 from interlock.state import State
 
@@ -35,7 +40,7 @@ def resolve_registry(  # noqa: PLR0913 - mirrors the integration constructors
     clock: Clock | None,
     initial_state: State,
     classifier: FailureClassifier | None,
-    listener: EventListener | None,
+    listener: CoreEventListener | StorageEventListener | None,
     default_classifier: FailureClassifier,
 ) -> tuple[Registry, bool]:
     """Return the effective registry and whether the integration owns it."""

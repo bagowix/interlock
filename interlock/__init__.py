@@ -24,10 +24,13 @@ from interlock.pipeline import (
 from interlock.protocols import (
     AsyncStorage,
     Clock,
+    CoreEventListener,
     EventListener,
     FailureClassifier,
+    PipelineEventListener,
     SlidingWindow,
     Storage,
+    StorageEventListener,
 )
 from interlock.registry import Registry
 from interlock.shared import ProbeLease, SharedState
@@ -51,6 +54,7 @@ __all__ = (
     'CircuitOpenError',
     'Clock',
     'Config',
+    'CoreEventListener',
     'EventListener',
     'FailureClassifier',
     'FallbackStrategy',
@@ -60,12 +64,14 @@ __all__ = (
     'Outcome',
     'Pipeline',
     'PipelineBuilder',
+    'PipelineEventListener',
     'ProbeLease',
     'Registry',
     'SharedState',
     'SlidingWindow',
     'State',
     'Storage',
+    'StorageEventListener',
     'Strategy',
     'SyncCallable',
     'TimeoutStrategy',

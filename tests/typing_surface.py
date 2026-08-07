@@ -13,19 +13,37 @@ from typing import assert_type
 from interlock import (
     BulkheadStrategy,
     CircuitBreaker,
+    CoreEventListener,
     EventListener,
     FallbackStrategy,
     LoggingEventListener,
     Outcome,
     Pipeline,
+    PipelineEventListener,
     Registry,
     State,
+    StorageEventListener,
 )
 from interlock.integrations.tenacity import RetryStrategy
 
 
 class _CallListener(EventListener):
     def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
+        return None
+
+
+class _CoreCallListener(CoreEventListener):
+    def on_call(self, *, name: str, outcome: Outcome, duration: float) -> None:
+        return None
+
+
+class _StorageDegradedListener(StorageEventListener):
+    def on_storage_degraded(self, *, name: str, error: BaseException) -> None:
+        return None
+
+
+class _RetryListener(PipelineEventListener):
+    def on_retry(self, *, name: str, attempt: int, delay: float) -> None:
         return None
 
 
@@ -38,6 +56,16 @@ partial_retry = RetryStrategy(listener=partial_listener)
 complete_listener_breaker = CircuitBreaker(
     name='complete-listener', listener=LoggingEventListener()
 )
+core_listener = _CoreCallListener()
+core_breaker = CircuitBreaker(name='core-listener', listener=core_listener)
+core_registry = Registry(listener=core_listener)
+storage_listener = _StorageDegradedListener()
+storage_breaker = CircuitBreaker(name='storage-listener', listener=storage_listener)
+storage_registry = Registry(listener=storage_listener)
+pipeline_listener = _RetryListener()
+pipeline_bulkhead = BulkheadStrategy(1, listener=pipeline_listener)
+pipeline_fallback = FallbackStrategy(lambda _error: None, listener=pipeline_listener)
+pipeline_retry = RetryStrategy(listener=pipeline_listener)
 
 breaker = CircuitBreaker(name='typing-surface')
 shadow_breaker = CircuitBreaker(name='shadow', initial_state=State.METRICS_ONLY)

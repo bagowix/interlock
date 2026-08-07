@@ -12,7 +12,14 @@ from interlock._clock import SystemClock
 from interlock._initial_state import validate_initial_state
 from interlock.breaker import CircuitBreaker
 from interlock.config import Config
-from interlock.protocols import AsyncStorage, Clock, EventListener, FailureClassifier, Storage
+from interlock.protocols import (
+    AsyncStorage,
+    Clock,
+    CoreEventListener,
+    FailureClassifier,
+    Storage,
+    StorageEventListener,
+)
 from interlock.state import State
 
 __all__ = ('Registry',)
@@ -46,7 +53,7 @@ class Registry:
         clock: Clock | None = None,
         initial_state: State = State.CLOSED,
         classifier: FailureClassifier | None = None,
-        listener: EventListener | None = None,
+        listener: CoreEventListener | StorageEventListener | None = None,
         storage: Storage | AsyncStorage | None = None,
     ) -> None:
         validate_initial_state(initial_state)

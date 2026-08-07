@@ -23,7 +23,14 @@ from interlock._coordination import (
     _sync_lane_tick,
 )
 from interlock._notify import notify
-from interlock.protocols import AsyncStorage, EventListener, Storage
+from interlock.protocols import (
+    AsyncStorage,
+    CoreEventListener,
+    EventListener,
+    PipelineEventListener,
+    Storage,
+    StorageEventListener,
+)
 from interlock.shared import SharedState
 
 NAME = 'svc'
@@ -44,6 +51,18 @@ class _RejectionListener(EventListener):
 
     def on_rejected(self, *, name: str) -> None:
         self.names.append(name)
+
+
+class _CoreOnlyListener(CoreEventListener):
+    pass
+
+
+class _StorageOnlyListener(StorageEventListener):
+    pass
+
+
+class _PipelineOnlyListener(PipelineEventListener):
+    pass
 
 
 def _notify_inherited_hooks(listener: EventListener) -> None:
@@ -133,6 +152,30 @@ def test__partial_listeners__own_hooks_and_inherited_hooks__only_own_hooks_have_
 
     assert call_listener.calls == [(NAME, Outcome.SUCCESS)]
     assert rejection_listener.names == [NAME]
+
+
+def test__listener_protocols__narrow_listeners__satisfy_only_their_event_group() -> None:
+    core_listener = _CoreOnlyListener()
+    storage_listener = _StorageOnlyListener()
+    pipeline_listener = _PipelineOnlyListener()
+
+    assert isinstance(core_listener, CoreEventListener)
+    assert not isinstance(core_listener, StorageEventListener)
+    assert not isinstance(core_listener, PipelineEventListener)
+    assert isinstance(storage_listener, StorageEventListener)
+    assert not isinstance(storage_listener, CoreEventListener)
+    assert not isinstance(storage_listener, PipelineEventListener)
+    assert isinstance(pipeline_listener, PipelineEventListener)
+    assert not isinstance(pipeline_listener, CoreEventListener)
+    assert not isinstance(pipeline_listener, StorageEventListener)
+
+
+def test__event_listener__complete_listener__satisfies_every_event_group() -> None:
+    listener = _CallListener()
+
+    assert isinstance(listener, CoreEventListener)
+    assert isinstance(listener, StorageEventListener)
+    assert isinstance(listener, PipelineEventListener)
 
 
 def test__notify__raising_hook__is_logged_with_context(
