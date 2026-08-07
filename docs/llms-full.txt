@@ -2811,11 +2811,40 @@ correct than global state — each host's health is observed independently.
 When a host's breaker is open, its requests raise `CircuitOpenError` before
 reaching the network.
 
+## Custom breaker keys
+
+Pass `name_resolver` when the request host is not the logical dependency
+identity. The callback receives the native `httpx2.Request` and returns the
+breaker name:
+
+```python
+import httpx2
+
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(
+    httpx2.AsyncHTTPTransport(),
+    name_resolver=lambda request: request.url.host.removesuffix('.query.consul'),
+)
+```
+
+Returning the same name for several discovery hosts gives them one breaker;
+deriving a name from the path can split independent upstreams behind one
+gateway host. The result must be non-empty and contain something other than
+whitespace. Invalid names raise `ValueError` with the request URL before the
+wrapped transport performs I/O.
+
+The resolved name is used consistently as the registry key, in
+`CircuitOpenError`, and in every listener event. Resolve the name here instead
+of rewriting listener labels so metrics always identify the breaker whose
+state they report. Both synchronous and asynchronous transports accept the
+option.
+
 ## Share one registry across clients
 
 Pass a caller-owned `Registry` when several clients reach the same dependency.
-Requests for the same host then use one breaker instance and one sliding
-window, even when they travel through different transports:
+Requests resolving to the same name then use one breaker instance and one
+sliding window, even when they travel through different transports:
 
 ```python
 import httpx2
@@ -2863,7 +2892,7 @@ the breaker cannot fix a contract or protocol error.
 ## Tuning
 
 Pass any of `config`, `clock`, `classifier`, `listener` to the transport; they
-flow to every per-host breaker:
+flow to every breaker:
 
 ```python
 from interlock import Config, LoggingEventListener
@@ -2971,10 +3000,37 @@ continues normally. An open breaker raises `CircuitOpenError` before the
 wrapped transport performs I/O. A request URL without a host raises
 `ValueError` for the same reason: there is no dependency identity to key on.
 
+## Custom breaker keys
+
+Pass `name_resolver` when the request host is transport plumbing rather than
+the logical dependency identity. The callback receives the native
+`httpx.Request` and returns the breaker name:
+
+```python
+import httpx
+
+from interlock.integrations.httpx import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(
+    httpx.AsyncHTTPTransport(),
+    name_resolver=lambda request: request.url.host.removesuffix('.query.consul'),
+)
+```
+
+The same callback can split one gateway host into independent breakers, for
+example by returning a name derived from the first path segment. It must return
+a non-empty, non-whitespace name; invalid names raise `ValueError` with the
+request URL before the wrapped transport performs I/O.
+
+The resolved name is the registry key and the name carried by
+`CircuitOpenError` and every listener event. Use the resolver, rather than
+rewriting labels in a listener, so breaker state and observability labels stay
+aligned. Both synchronous and asynchronous transports accept the option.
+
 ## Share one registry across clients
 
 Inject one caller-owned `Registry` when several clients should observe the
-same dependency health. The transports then resolve the same host to the same
+same dependency health. The transports then resolve the same name to the same
 breaker and contribute to one sliding window:
 
 ```python
@@ -3033,7 +3089,7 @@ and is not recorded by the breaker.
 ## Tuning
 
 `config`, `clock`, `initial_state`, `classifier`, and `listener` are shared by
-every per-host breaker created by the transport:
+every breaker created by the transport:
 
 ```python
 import httpx
@@ -3108,10 +3164,33 @@ The breaker observes the time to *response headers*; reading the body happens
 outside the guarded call — the same semantics as the
 [httpx2 transport](httpx2.md).
 
+## Custom breaker keys
+
+Pass `name_resolver` when host-based isolation does not match the logical
+dependencies. The callback receives the native `aiohttp.ClientRequest` and
+returns the breaker name:
+
+```python
+from interlock.integrations.aiohttp import CircuitBreakerMiddleware
+
+middleware = CircuitBreakerMiddleware(
+    name_resolver=lambda request: request.url.host.removesuffix('.query.consul'),
+)
+```
+
+A resolver can collapse several discovery hosts onto one breaker or derive a
+name from the request path to separate upstreams behind a shared gateway. It
+must return a non-empty, non-whitespace name; invalid names raise `ValueError`
+with the request URL before the handler performs I/O.
+
+The resolved name is used by the registry, `CircuitOpenError`, and every
+listener event. Resolve it in the middleware rather than rewriting listener
+labels so observed names always match the breaker whose state they describe.
+
 ## Share one registry across sessions
 
 Several middleware instances can share one caller-owned registry, so traffic
-to the same host contributes to one breaker and one sliding window:
+resolving to the same name contributes to one breaker and one sliding window:
 
 ```python
 from interlock import Config, Registry
@@ -3180,11 +3259,10 @@ Any custom `FailureClassifier` works too — see
 
 The middleware accepts the same collaborators as `CircuitBreaker` — `config`,
 `clock`, `initial_state`, `classifier`, `listener`. One middleware instance
-holds one registry
-of per-host breakers; reuse the instance across sessions to share breaker
-state, or create separate instances to isolate them. For application-level
-retries combine with the [tenacity integration](tenacity.md) and read
-[Retries and circuit breakers](../guides/retries.md) first.
+holds one registry of resolved breakers; reuse the instance across sessions to
+share breaker state, or create separate instances to isolate them. For
+application-level retries combine with the [tenacity integration](tenacity.md)
+and read [Retries and circuit breakers](../guides/retries.md) first.
 
 ---
 
@@ -3240,10 +3318,35 @@ created lazily and shared across requests. When a host's circuit is open the
 request raises [`CircuitOpenError`](../reference.md) *before* a connection is
 made.
 
+## Custom breaker keys
+
+Pass `name_resolver` when the request host is not the logical dependency
+identity. The callback receives the native `requests.PreparedRequest` and
+returns the breaker name. For example, the first path segment can separate
+independent upstreams behind one gateway host:
+
+```python
+from interlock.integrations.requests import CircuitBreakerAdapter
+
+adapter = CircuitBreakerAdapter(
+    name_resolver=lambda request: request.path_url.split('/')[1],
+)
+```
+
+Returning one name for several discovery hosts instead makes them share a
+breaker. The result must be non-empty and contain something other than
+whitespace; invalid names raise `ValueError` with the request URL before the
+adapter performs I/O.
+
+The resolved name is used consistently as the registry key, in
+`CircuitOpenError`, and in every listener event. Resolve the identity here
+instead of rewriting listener labels so metrics remain aligned with breaker
+state.
+
 ## Share one registry across sessions
 
 Inject a caller-owned `Registry` when independent sessions should use one
-breaker and one sliding window for the same host:
+breaker and one sliding window for the same resolved name:
 
 ```python
 import requests

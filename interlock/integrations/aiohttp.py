@@ -1,7 +1,8 @@
 """aiohttp client integration — requires the ``aiohttp`` extra.
 
 Pass ``CircuitBreakerMiddleware`` to a session and every request it sends is
-guarded by a circuit breaker **per host** — no decorators in call sites::
+guarded by a circuit breaker **per host by default** — no decorators in call
+sites::
 
     import aiohttp
     from interlock.integrations.aiohttp import CircuitBreakerMiddleware
@@ -26,7 +27,7 @@ outside the guarded call — the same semantics as the httpx2 transport.
 """
 
 import http
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import cast
 
 from aiohttp import ClientHandlerType, ClientRequest, ClientResponse
@@ -81,19 +82,44 @@ class HttpStatusClassifier:
         return cast('ClientResponse', result).status in self._failure_statuses
 
 
+def _host(request: ClientRequest) -> str:
+    """Return the host key, rejecting URLs that cannot identify a dependency."""
+    host = request.url.host
+    if not host:
+        raise ValueError(f'Request URL has no host to key a breaker on: {request.url!s}')
+
+    return host
+
+
+def _breaker_name(
+    request: ClientRequest,
+    name_resolver: Callable[[ClientRequest], str],
+) -> str:
+    """Resolve and validate the dependency identity before registry access."""
+    name = name_resolver(request)
+    if not name.strip():
+        raise ValueError(
+            f'Name resolver returned an empty breaker name for request URL: {request.url!s}'
+        )
+
+    return name
+
+
 class CircuitBreakerMiddleware:
-    """A client middleware that guards each host with a circuit breaker.
+    """A client middleware that guards each dependency with a circuit breaker.
 
     Args:
-        config: Thresholds, window and timing for every host's breaker.
+        config: Thresholds, window and timing for every breaker.
         clock: Time source for the breakers; inject a fake for deterministic
             tests.
-        initial_state: Stable state assigned before a host's first request.
+        initial_state: Stable state assigned before a breaker's first request.
             Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
-        listener: Observability hooks shared by every host's breaker.
+        listener: Observability hooks shared by every breaker.
         registry: Caller-owned registry shared with other clients. Mutually
             exclusive with all breaker-construction options above.
+        name_resolver: Maps each request to its breaker name. Defaults to the
+            request host.
 
     Raises:
         ValueError: If ``initial_state`` is unsupported or ``registry`` is
@@ -110,7 +136,9 @@ class CircuitBreakerMiddleware:
         classifier: FailureClassifier | None = None,
         listener: CoreEventListener | StorageEventListener | None = None,
         registry: Registry | None = None,
+        name_resolver: Callable[[ClientRequest], str] = _host,
     ) -> None:
+        self._name_resolver = name_resolver
         self._registry, self._owns_registry = resolve_registry(
             registry=registry,
             config=config,
@@ -123,7 +151,7 @@ class CircuitBreakerMiddleware:
 
     @property
     def registry(self) -> Registry:
-        """The per-host registry, exposed for diagnostics and operator control."""
+        """The breaker registry, exposed for diagnostics and operator control."""
         return self._registry
 
     async def aclose(self) -> None:
@@ -132,17 +160,14 @@ class CircuitBreakerMiddleware:
             await self._registry.aclose_all()
 
     async def __call__(self, request: ClientRequest, handler: ClientHandlerType) -> ClientResponse:
-        """Run the request under its host's breaker.
+        """Run the request under its resolved dependency's breaker.
 
         Raises:
-            CircuitOpenError: If the host's breaker is open.
-            ValueError: If the request URL carries no host to key a breaker on.
+            CircuitOpenError: If the resolved dependency's breaker is open.
+            ValueError: If the request URL has no host under the default
+                resolver, or the configured resolver returns an empty name.
         """
-        host = request.url.host
-        if not host:
-            raise ValueError(f'Request URL has no host to key a breaker on: {request.url!s}')
-
-        breaker = self._registry.get(host)
+        breaker = self._registry.get(_breaker_name(request, self._name_resolver))
 
         # The composed handler is not guaranteed to be a coroutine *function*
         # (middleware chains may hand over plain callables returning

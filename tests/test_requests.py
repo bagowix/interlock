@@ -90,6 +90,50 @@ def test__adapter__open_host__other_host_unaffected(
     assert transport.call_count == 3
 
 
+def test__adapter__name_resolver__splits_host_by_path(
+    mocker: MockerFixture,
+    fake_clock: FakeClock,
+) -> None:
+    transport = _patch_transport(mocker, [_response(503), _response(503), _response(200)])
+    adapter = CircuitBreakerAdapter(
+        config=_TRIP_FAST,
+        clock=fake_clock,
+        name_resolver=lambda request: request.path_url.split('/')[1],
+    )
+
+    adapter.send(_prepared('https://gateway.example.com/orders/1'))
+    adapter.send(_prepared('https://gateway.example.com/orders/2'))
+
+    with pytest.raises(CircuitOpenError):
+        adapter.send(_prepared('https://gateway.example.com/orders/3'))
+    response = adapter.send(_prepared('https://gateway.example.com/payments/1'))
+    orders = adapter.registry.get_existing('orders')
+    payments = adapter.registry.get_existing('payments')
+    assert response.status_code == 200
+    assert orders is not None
+    assert payments is not None
+    assert orders is not payments
+    assert transport.call_count == 3
+
+
+def test__adapter__empty_resolved_name__raises_before_transport(
+    mocker: MockerFixture,
+    fake_clock: FakeClock,
+) -> None:
+    transport = _patch_transport(mocker, [_response(200)])
+    adapter = CircuitBreakerAdapter(
+        clock=fake_clock,
+        name_resolver=lambda _request: '',
+    )
+    request = _prepared('https://api.example.com/v1')
+
+    with pytest.raises(ValueError, match='empty breaker name') as raised:
+        adapter.send(request)
+
+    assert request.url in str(raised.value)
+    assert transport.call_count == 0
+
+
 def test__adapter__client_errors__do_not_trip(mocker: MockerFixture, fake_clock: FakeClock) -> None:
     transport = _patch_transport(mocker, [_response(404)] * 5)
     adapter = CircuitBreakerAdapter(config=_TRIP_FAST, clock=fake_clock)

@@ -86,10 +86,37 @@ continues normally. An open breaker raises `CircuitOpenError` before the
 wrapped transport performs I/O. A request URL without a host raises
 `ValueError` for the same reason: there is no dependency identity to key on.
 
+## Custom breaker keys
+
+Pass `name_resolver` when the request host is transport plumbing rather than
+the logical dependency identity. The callback receives the native
+`httpx.Request` and returns the breaker name:
+
+```python
+import httpx
+
+from interlock.integrations.httpx import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(
+    httpx.AsyncHTTPTransport(),
+    name_resolver=lambda request: request.url.host.removesuffix('.query.consul'),
+)
+```
+
+The same callback can split one gateway host into independent breakers, for
+example by returning a name derived from the first path segment. It must return
+a non-empty, non-whitespace name; invalid names raise `ValueError` with the
+request URL before the wrapped transport performs I/O.
+
+The resolved name is the registry key and the name carried by
+`CircuitOpenError` and every listener event. Use the resolver, rather than
+rewriting labels in a listener, so breaker state and observability labels stay
+aligned. Both synchronous and asynchronous transports accept the option.
+
 ## Share one registry across clients
 
 Inject one caller-owned `Registry` when several clients should observe the
-same dependency health. The transports then resolve the same host to the same
+same dependency health. The transports then resolve the same name to the same
 breaker and contribute to one sliding window:
 
 ```python
@@ -148,7 +175,7 @@ and is not recorded by the breaker.
 ## Tuning
 
 `config`, `clock`, `initial_state`, `classifier`, and `listener` are shared by
-every per-host breaker created by the transport:
+every breaker created by the transport:
 
 ```python
 import httpx

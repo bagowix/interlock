@@ -1,7 +1,8 @@
 """requests integration — requires the ``requests`` extra.
 
 Mount ``CircuitBreakerAdapter`` on a session and every request it sends is
-guarded by a circuit breaker **per host** — no decorators in call sites::
+guarded by a circuit breaker **per host by default** — no decorators in call
+sites::
 
     import requests
     from interlock.integrations.requests import CircuitBreakerAdapter
@@ -22,7 +23,7 @@ successes. Supply a custom ``classifier`` to change that policy.
 """
 
 import http
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
 from typing import cast
 from urllib.parse import urlsplit
@@ -83,19 +84,44 @@ class HttpStatusClassifier:
         return cast('Response', result).status_code in self._failure_statuses
 
 
+def _host(request: PreparedRequest) -> str:
+    """Return the host key, rejecting URLs that cannot identify a dependency."""
+    host = urlsplit(request.url or '').hostname
+    if not host:
+        raise ValueError(f'Request URL has no host to key a breaker on: {request.url!r}')
+
+    return host
+
+
+def _breaker_name(
+    request: PreparedRequest,
+    name_resolver: Callable[[PreparedRequest], str],
+) -> str:
+    """Resolve and validate the dependency identity before registry access."""
+    name = name_resolver(request)
+    if not name.strip():
+        raise ValueError(
+            f'Name resolver returned an empty breaker name for request URL: {request.url!s}'
+        )
+
+    return name
+
+
 class CircuitBreakerAdapter(HTTPAdapter):
-    """An ``HTTPAdapter`` that guards each host with a circuit breaker.
+    """An ``HTTPAdapter`` that guards each dependency with a circuit breaker.
 
     Args:
-        config: Thresholds, window and timing for every host's breaker.
+        config: Thresholds, window and timing for every breaker.
         clock: Time source for the breakers; inject a fake for deterministic
             tests.
-        initial_state: Stable state assigned before a host's first request.
+        initial_state: Stable state assigned before a breaker's first request.
             Use ``State.METRICS_ONLY`` for shadow mode.
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
-        listener: Observability hooks shared by every host's breaker.
+        listener: Observability hooks shared by every breaker.
         registry: Caller-owned registry shared with other clients. Mutually
             exclusive with all breaker-construction options above.
+        name_resolver: Maps each request to its breaker name. Defaults to the
+            request host.
         adapter_kwargs: Passed through to ``HTTPAdapter`` (pool sizes,
             ``max_retries``, ...).
 
@@ -114,9 +140,11 @@ class CircuitBreakerAdapter(HTTPAdapter):
         classifier: FailureClassifier | None = None,
         listener: CoreEventListener | StorageEventListener | None = None,
         registry: Registry | None = None,
+        name_resolver: Callable[[PreparedRequest], str] = _host,
         **adapter_kwargs: object,
     ) -> None:
         super().__init__(**adapter_kwargs)  # type: ignore[arg-type]
+        self._name_resolver = name_resolver
         self._registry, self._owns_registry = resolve_registry(
             registry=registry,
             config=config,
@@ -129,7 +157,7 @@ class CircuitBreakerAdapter(HTTPAdapter):
 
     @property
     def registry(self) -> Registry:
-        """The per-host registry, exposed for diagnostics and operator control."""
+        """The breaker registry, exposed for diagnostics and operator control."""
         return self._registry
 
     def close(self) -> None:
@@ -151,17 +179,14 @@ class CircuitBreakerAdapter(HTTPAdapter):
         cert: _Cert = None,
         proxies: Mapping[str, str] | None = None,
     ) -> Response:
-        """Run the request under its host's breaker.
+        """Run the request under its resolved dependency's breaker.
 
         Raises:
-            CircuitOpenError: If the host's breaker is open.
-            ValueError: If the request URL carries no host to key a breaker on.
+            CircuitOpenError: If the resolved dependency's breaker is open.
+            ValueError: If the request URL has no host under the default
+                resolver, or the configured resolver returns an empty name.
         """
-        host = urlsplit(request.url or '').hostname
-        if not host:
-            raise ValueError(f'Request URL has no host to key a breaker on: {request.url!r}')
-
-        breaker = self._registry.get(host)
+        breaker = self._registry.get(_breaker_name(request, self._name_resolver))
         guarded = breaker(super().send)
         return guarded(
             request,

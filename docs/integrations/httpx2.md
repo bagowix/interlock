@@ -92,11 +92,40 @@ correct than global state — each host's health is observed independently.
 When a host's breaker is open, its requests raise `CircuitOpenError` before
 reaching the network.
 
+## Custom breaker keys
+
+Pass `name_resolver` when the request host is not the logical dependency
+identity. The callback receives the native `httpx2.Request` and returns the
+breaker name:
+
+```python
+import httpx2
+
+from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
+
+transport = AsyncCircuitBreakerTransport(
+    httpx2.AsyncHTTPTransport(),
+    name_resolver=lambda request: request.url.host.removesuffix('.query.consul'),
+)
+```
+
+Returning the same name for several discovery hosts gives them one breaker;
+deriving a name from the path can split independent upstreams behind one
+gateway host. The result must be non-empty and contain something other than
+whitespace. Invalid names raise `ValueError` with the request URL before the
+wrapped transport performs I/O.
+
+The resolved name is used consistently as the registry key, in
+`CircuitOpenError`, and in every listener event. Resolve the name here instead
+of rewriting listener labels so metrics always identify the breaker whose
+state they report. Both synchronous and asynchronous transports accept the
+option.
+
 ## Share one registry across clients
 
 Pass a caller-owned `Registry` when several clients reach the same dependency.
-Requests for the same host then use one breaker instance and one sliding
-window, even when they travel through different transports:
+Requests resolving to the same name then use one breaker instance and one
+sliding window, even when they travel through different transports:
 
 ```python
 import httpx2
@@ -144,7 +173,7 @@ the breaker cannot fix a contract or protocol error.
 ## Tuning
 
 Pass any of `config`, `clock`, `classifier`, `listener` to the transport; they
-flow to every per-host breaker:
+flow to every breaker:
 
 ```python
 from interlock import Config, LoggingEventListener
