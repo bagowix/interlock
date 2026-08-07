@@ -96,6 +96,10 @@ explicitly, so the core stays dependency-free:
 uv add 'interlock-cb[otel]'
 ```
 
+Supports `opentelemetry-api>=1.20.0` — the listener only calls
+`get_meter`/`create_histogram`/`create_counter`, stable across any
+`opentelemetry-distro`/SDK release from that version on.
+
 ```python
 from interlock import CircuitBreaker
 from interlock.integrations.otel import OTelEventListener
