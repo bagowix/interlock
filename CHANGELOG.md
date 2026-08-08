@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The classifier trap behind an injected registry is now visible in the editor.**
+  A caller-owned `Registry` owns the failure policy, so a bare one silently
+  downgrades the httpx2/httpx transports, the aiohttp middleware and the requests
+  adapter to exception-only classification — a returned `503` counts as a success
+  with no error anywhere. The warning existed only in the integration guides; the
+  `registry` argument docstrings now carry it too, where the reader is when they
+  make the choice.
+
 ## [2.5.0] - 2026-08-08
 
 ### Added
