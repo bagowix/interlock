@@ -102,6 +102,11 @@ as a success. The registry owns `config`, `clock`, `initial_state`,
 `classifier`, and `listener`; combining `registry` with any of those adapter
 options raises `ValueError`.
 
+Share such a registry with HTTP sessions only. `HttpStatusClassifier` reads
+`.status_code` off every result it records, so a breaker taken from the same
+registry for non-HTTP work — `registry.get('db')` — raises `AttributeError` the
+first time that call returns. Keep a separate registry for those.
+
 Closing a session automatically closes its breakers only when the adapter owns
 the registry. An injected registry remains open while its connection pools
 close; the application must explicitly call `registry.close_all()` during

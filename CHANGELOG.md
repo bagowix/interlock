@@ -15,6 +15,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with no error anywhere. The warning existed only in the integration guides; the
   `registry` argument docstrings now carry it too, where the reader is when they
   make the choice.
+- **The opposite trap is documented as well.** A registry configured with
+  `HttpStatusClassifier` reads the status off every result it records, so
+  borrowing a breaker from it for non-HTTP work raised `AttributeError` on the
+  first returned value. The four shared-registry guides now say to keep such a
+  registry for HTTP clients only.
+- **Rejecting an option the injected registry already owns explains itself.** The
+  `ValueError` used to name the conflicting options and stop; it now says the
+  registry owns them and to configure them there.
 
 ## [2.5.0] - 2026-08-08
 

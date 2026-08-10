@@ -99,6 +99,11 @@ as a success. The registry owns `config`, `clock`, `initial_state`,
 `classifier`, and `listener`; passing any of them to the middleware together
 with `registry` raises `ValueError`.
 
+Share such a registry with HTTP sessions only. `HttpStatusClassifier` reads
+`.status` off every result it records, so a breaker taken from the same
+registry for non-HTTP work — `registry.get('db')` — raises `AttributeError` the
+first time that call returns. Keep a separate registry for those.
+
 Calling `aclose()` automatically closes the breakers only when the middleware
 owns the registry. An injected registry remains open until the application
 explicitly calls `await registry.aclose_all()` during shutdown.

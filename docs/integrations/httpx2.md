@@ -152,6 +152,11 @@ status policy; otherwise a returned `503` counts as a success. The supplied
 registry owns `config`, `clock`, `initial_state`, `classifier`, and `listener`,
 so none of those options may also be passed to the transport.
 
+Share such a registry with HTTP clients only. `HttpStatusClassifier` reads
+`.status_code` off every result it records, so a breaker taken from the same
+registry for non-HTTP work — `registry.get('db')` — raises `AttributeError` the
+first time that call returns. Keep a separate registry for those.
+
 Closing a client automatically closes its breakers only when the transport
 owns the registry. An injected registry remains open while the wrapped
 connection pool closes; the application must explicitly call
