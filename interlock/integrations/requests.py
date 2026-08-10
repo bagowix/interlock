@@ -127,7 +127,10 @@ class CircuitBreakerAdapter(HTTPAdapter):
         classifier: Failure policy. Defaults to ``HttpStatusClassifier``.
         listener: Observability hooks shared by every breaker.
         registry: Caller-owned registry shared with other clients. Mutually
-            exclusive with all breaker-construction options above.
+            exclusive with all breaker-construction options above; it owns the
+            failure policy too, so pass ``classifier=HttpStatusClassifier()``
+            when creating it — a bare ``Registry`` counts only exceptions, and
+            a returned ``503`` is a success.
         name_resolver: Maps each request to its breaker name. Defaults to the
             request host.
         adapter_kwargs: Passed through to ``HTTPAdapter`` (pool sizes,

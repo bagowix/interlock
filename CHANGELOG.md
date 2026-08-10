@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **A caller-owned `Registry` needs its own HTTP classifier.** Handing one to the
+  httpx2/httpx transports, the aiohttp middleware or the requests adapter moves
+  the failure policy to the registry, so a returned `503` counts as a success
+  unless the registry is built with `classifier=HttpStatusClassifier()`. The
+  `registry` argument now states that where the registry is configured.
+- **The opposite trap is documented as well.** A registry configured with
+  `HttpStatusClassifier` reads the status off every result it records, so
+  borrowing a breaker from it for non-HTTP work raised `AttributeError` on the
+  first returned value. The four shared-registry guides now say to keep such a
+  registry for HTTP clients only.
+- **Rejecting an option the injected registry already owns explains itself.** The
+  `ValueError` used to name the conflicting options and stop; it now says the
+  registry owns them and to configure them there.
+
 ## [2.5.0] - 2026-08-08
 
 ### Added

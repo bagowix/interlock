@@ -30,7 +30,7 @@ def test__reject_registry_options__explicit_builder_option__raises_conflict() ->
 
     wrapped = reject_registry_options(init)
 
-    with pytest.raises(ValueError, match='config'):
+    with pytest.raises(ValueError, match=r'config\. Configure them on the registry instead'):
         wrapped(registry=Registry(), config=None)
 
 

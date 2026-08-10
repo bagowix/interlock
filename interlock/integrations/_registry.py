@@ -27,7 +27,10 @@ def reject_registry_options(init: Callable[_P, None]) -> Callable[_P, None]:
             conflicts = [name for name in _REGISTRY_OPTIONS if name in kwargs]
             if conflicts:
                 joined = ', '.join(conflicts)
-                raise ValueError(f'registry cannot be combined with: {joined}')
+                raise ValueError(
+                    f'The injected registry already owns these options: {joined}. '
+                    'Configure them on the registry instead.'
+                )
         init(*args, **kwargs)
 
     return wrapped

@@ -2871,6 +2871,11 @@ status policy; otherwise a returned `503` counts as a success. The supplied
 registry owns `config`, `clock`, `initial_state`, `classifier`, and `listener`,
 so none of those options may also be passed to the transport.
 
+Share such a registry with HTTP clients only. `HttpStatusClassifier` reads
+`.status_code` off every result it records, so a breaker taken from the same
+registry for non-HTTP work — `registry.get('db')` — raises `AttributeError` the
+first time that call returns. Keep a separate registry for those.
+
 Closing a client automatically closes its breakers only when the transport
 owns the registry. An injected registry remains open while the wrapped
 connection pool closes; the application must explicitly call
@@ -3060,6 +3065,11 @@ supplied registry also owns `config`, `clock`, `initial_state`, `classifier`,
 and `listener`; combining `registry` with any of those transport options raises
 `ValueError` instead of silently ignoring one source of configuration.
 
+Share such a registry with HTTP clients only. `HttpStatusClassifier` reads
+`.status_code` off every result it records, so a breaker taken from the same
+registry for non-HTTP work — `registry.get('db')` — raises `AttributeError` the
+first time that call returns. Keep a separate registry for those.
+
 Closing a client automatically closes its breakers only when the transport
 owns the registry. An injected registry remains open while the wrapped
 connection pool closes; the application must explicitly call
@@ -3212,6 +3222,11 @@ bare `Registry` uses exception-only classification, so a returned `503` counts
 as a success. The registry owns `config`, `clock`, `initial_state`,
 `classifier`, and `listener`; passing any of them to the middleware together
 with `registry` raises `ValueError`.
+
+Share such a registry with HTTP sessions only. `HttpStatusClassifier` reads
+`.status` off every result it records, so a breaker taken from the same
+registry for non-HTTP work — `registry.get('db')` — raises `AttributeError` the
+first time that call returns. Keep a separate registry for those.
 
 Calling `aclose()` automatically closes the breakers only when the middleware
 owns the registry. An injected registry remains open until the application
@@ -3373,6 +3388,11 @@ it, a bare `Registry` classifies exceptions only and a returned `503` counts
 as a success. The registry owns `config`, `clock`, `initial_state`,
 `classifier`, and `listener`; combining `registry` with any of those adapter
 options raises `ValueError`.
+
+Share such a registry with HTTP sessions only. `HttpStatusClassifier` reads
+`.status_code` off every result it records, so a breaker taken from the same
+registry for non-HTTP work — `registry.get('db')` — raises `AttributeError` the
+first time that call returns. Keep a separate registry for those.
 
 Closing a session automatically closes its breakers only when the adapter owns
 the registry. An injected registry remains open while its connection pools
