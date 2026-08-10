@@ -34,6 +34,20 @@ def test__reject_registry_options__explicit_builder_option__raises_conflict() ->
         wrapped(registry=Registry(), config=None)
 
 
+def test__reject_registry_options__conflicting_option__names_option_and_registry_fix() -> None:
+    def init(*, registry: Registry | None = None, config: Config | None = None) -> None:
+        raise AssertionError(f'conflicting call reached the constructor: {registry!r}, {config!r}')
+
+    wrapped = reject_registry_options(init)
+
+    with pytest.raises(ValueError) as exc_info:
+        wrapped(registry=Registry(), config=None)
+
+    error_message = str(exc_info.value)
+    assert 'config' in error_message
+    assert 'Configure them on the registry instead' in error_message
+
+
 def test__resolve_registry__injected_registry__returns_non_owner() -> None:
     registry = Registry()
 
