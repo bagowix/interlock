@@ -8,13 +8,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **The classifier trap behind an injected registry is now visible in the editor.**
-  A caller-owned `Registry` owns the failure policy, so a bare one silently
-  downgrades the httpx2/httpx transports, the aiohttp middleware and the requests
-  adapter to exception-only classification — a returned `503` counts as a success
-  with no error anywhere. The warning existed only in the integration guides; the
-  `registry` argument docstrings now carry it too, where the reader is when they
-  make the choice.
+- **A caller-owned `Registry` needs its own HTTP classifier.** Handing one to the
+  httpx2/httpx transports, the aiohttp middleware or the requests adapter moves
+  the failure policy to the registry, so a returned `503` counts as a success
+  unless the registry is built with `classifier=HttpStatusClassifier()`. The
+  `registry` argument now states that where the registry is configured.
 - **The opposite trap is documented as well.** A registry configured with
   `HttpStatusClassifier` reads the status off every result it records, so
   borrowing a breaker from it for non-HTTP work raised `AttributeError` on the
