@@ -1,8 +1,37 @@
+import threading
+
 import pytest
 from pytest_mock import MockerFixture
 
 from conftest import FakeClock
 from interlock import CircuitBreaker, Config, Registry, State
+
+
+class _CountingLock:
+    def __init__(self) -> None:
+        self.acquisitions = 0
+        self._lock = threading.Lock()
+
+    def __enter__(self) -> None:
+        self.acquisitions += 1
+        self._lock.acquire()
+
+    def __exit__(self, *_args: object) -> None:
+        self._lock.release()
+
+
+class _RacingLock:
+    """Another thread wins the creation race while this one waits for the lock."""
+
+    def __init__(self, registry: Registry, winner: CircuitBreaker) -> None:
+        self._registry = registry
+        self._winner = winner
+
+    def __enter__(self) -> None:
+        self._registry._breakers.setdefault(self._winner.name, self._winner)
+
+    def __exit__(self, *_args: object) -> None:
+        return
 
 
 def _fail_twice(breaker: CircuitBreaker) -> None:
@@ -33,6 +62,38 @@ def test__get__different_names__returns_distinct_instances() -> None:
     registry = Registry()
 
     assert registry.get('a') is not registry.get('b')
+
+
+def test__get__cached_name__reads_without_taking_the_lock() -> None:
+    """The per-request path of every transport integration: a cache hit is lock-free."""
+    registry = Registry()
+    breaker = registry.get('payments')
+    lock = _CountingLock()
+    registry._lock = lock  # type: ignore[assignment]
+
+    assert registry.get('payments') is breaker
+    assert lock.acquisitions == 0
+
+
+def test__get__lost_creation_race__returns_the_winner_without_replacing_it() -> None:
+    """The lock-free miss is re-checked under the lock, so a name has one breaker."""
+    registry = Registry()
+    winner = CircuitBreaker(name='payments')
+    registry._lock = _RacingLock(registry, winner)  # type: ignore[assignment]
+
+    assert registry.get('payments') is winner
+    assert registry.get('payments') is winner
+
+
+def test__get__missing_name__creates_under_the_lock() -> None:
+    registry = Registry()
+    lock = _CountingLock()
+    registry._lock = lock  # type: ignore[assignment]
+
+    breaker = registry.get('payments')
+
+    assert breaker.name == 'payments'
+    assert lock.acquisitions == 1
 
 
 @pytest.mark.parametrize(

@@ -231,8 +231,7 @@ class CircuitBreakerTransport(BaseTransport):
                 empty name.
         """
         breaker = self._registry.get(_breaker_name(request, self._name_resolver))
-        guarded = breaker(self._transport.handle_request)
-        return guarded(request)
+        return breaker.call_sync(self._transport.handle_request, request)
 
     def __enter__(self) -> Self:
         """Enter the wrapped transport's context and return this wrapper."""
@@ -325,8 +324,7 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
                 empty name.
         """
         breaker = self._registry.get(_breaker_name(request, self._name_resolver))
-        guarded = breaker(self._transport.handle_async_request)
-        return await guarded(request)
+        return await breaker.call_async(self._transport.handle_async_request, request)
 
     async def __aenter__(self) -> Self:
         """Enter the wrapped transport's context and return this wrapper."""

@@ -77,6 +77,14 @@ class Registry:
         Returns:
             The cached or newly created breaker.
         """
+        # A hit reads the dict without the lock: this is the per-request path of
+        # every transport integration, and a breaker is never replaced or
+        # removed once cached, so the worst a concurrent creation can do is send
+        # this reader down the locked path below.
+        cached = self._breakers.get(name)
+        if cached is not None:
+            return cached
+
         with self._lock:
             breaker = self._breakers.get(name)
             if breaker is None:

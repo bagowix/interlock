@@ -10,7 +10,7 @@ from requests import PreparedRequest, Response
 from requests.adapters import HTTPAdapter
 from tests.conftest import FakeClock
 
-from interlock import CircuitOpenError, Config, Registry, State
+from interlock import CircuitBreaker, CircuitOpenError, Config, Registry, State
 from interlock.integrations.requests import CircuitBreakerAdapter, HttpStatusClassifier
 
 _TRIP_FAST = Config(minimum_number_of_calls=2, failure_rate_threshold=0.5)
@@ -107,6 +107,18 @@ def test__adapter__failure_statuses__trip_breaker_and_reject(
     with pytest.raises(CircuitOpenError):
         adapter.send(_prepared('https://api.a/x'))
     assert transport.call_count == 2
+
+
+def test__adapter__cached_breaker__is_not_redecorated_per_request(
+    mocker: MockerFixture, fake_clock: FakeClock
+) -> None:
+    """The per-request path costs no decoration: no ``functools.wraps``, no detection."""
+    _patch_transport(mocker, [_response(200), _response(200)])
+    adapter = CircuitBreakerAdapter(config=_TRIP_FAST, clock=fake_clock)
+    adapter.send(_prepared('https://api.a/x'))
+    mocker.patch.object(CircuitBreaker, '__call__', side_effect=AssertionError('decorated'))
+
+    assert adapter.send(_prepared('https://api.a/x')).status_code == 200
 
 
 def test__adapter__open_host__other_host_unaffected(
