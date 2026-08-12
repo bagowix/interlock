@@ -76,7 +76,9 @@ records outcomes but never raises `CircuitOpenError`. Use the listener for
 production metrics. For local diagnosis,
 `transport.registry.get_existing(host)` returns an existing breaker without
 creating one; inspect its `state` and `snapshot()`. Hosts are only known at
-runtime, so `transport.registry.items()` lists the breakers created so far.
+runtime, so `transport.registry.items()` lists the breakers created so far and
+`names()` just their hosts. Both are point-in-time copies: a host first seen
+afterwards is not in them.
 
 After tuning thresholds, deploy a new transport with the default
 `initial_state=State.CLOSED`. Do not reset only the currently known hosts: a

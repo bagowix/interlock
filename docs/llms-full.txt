@@ -2847,7 +2847,9 @@ records outcomes but never raises `CircuitOpenError`. Use the listener for
 production metrics. For local diagnosis,
 `transport.registry.get_existing(host)` returns an existing breaker without
 creating one; inspect its `state` and `snapshot()`. Hosts are only known at
-runtime, so `transport.registry.items()` lists the breakers created so far.
+runtime, so `transport.registry.items()` lists the breakers created so far and
+`names()` just their hosts. Both are point-in-time copies: a host first seen
+afterwards is not in them.
 
 After tuning thresholds, deploy a new transport with the default
 `initial_state=State.CLOSED`. Do not reset only the currently known hosts: a
@@ -3071,7 +3073,9 @@ records outcomes but never raises `CircuitOpenError`. Use the listener for
 production metrics. For local diagnosis,
 `transport.registry.get_existing(host)` returns an existing breaker without
 creating one; inspect its `state` and `snapshot()`. Hosts are only known at
-runtime, so `transport.registry.items()` lists the breakers created so far.
+runtime, so `transport.registry.items()` lists the breakers created so far and
+`names()` just their hosts. Both are point-in-time copies: a host first seen
+afterwards is not in them.
 
 After tuning thresholds, deploy a new transport with the default
 `initial_state=State.CLOSED`. Do not reset only the currently known hosts: a
@@ -3352,8 +3356,9 @@ middleware = CircuitBreakerMiddleware(
 ```
 
 The public `middleware.registry` supports local diagnosis with
-`get_existing(host)`, `state` and `snapshot()`, and `items()` for the hosts
-created so far. Use an `EventListener` for
+`get_existing(host)`, `state` and `snapshot()`, plus `names()` and `items()` for
+the hosts created so far — point-in-time copies, without the hosts first seen
+afterwards. Use an `EventListener` for
 production metrics, then deploy a new middleware with the default `CLOSED`
 state to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 
@@ -3531,8 +3536,9 @@ adapter = CircuitBreakerAdapter(
 ```
 
 The public `adapter.registry` supports local diagnosis with
-`get_existing(host)`, `state` and `snapshot()`, and `items()` for the hosts
-created so far. Use an `EventListener` for
+`get_existing(host)`, `state` and `snapshot()`, plus `names()` and `items()` for
+the hosts created so far — point-in-time copies, without the hosts first seen
+afterwards. Use an `EventListener` for
 production metrics, then deploy a new adapter with the default `CLOSED` state
 to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 

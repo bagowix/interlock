@@ -128,8 +128,9 @@ adapter = CircuitBreakerAdapter(
 ```
 
 The public `adapter.registry` supports local diagnosis with
-`get_existing(host)`, `state` and `snapshot()`, and `items()` for the hosts
-created so far. Use an `EventListener` for
+`get_existing(host)`, `state` and `snapshot()`, plus `names()` and `items()` for
+the hosts created so far — point-in-time copies, without the hosts first seen
+afterwards. Use an `EventListener` for
 production metrics, then deploy a new adapter with the default `CLOSED` state
 to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 
