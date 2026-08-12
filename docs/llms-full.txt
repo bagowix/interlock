@@ -931,7 +931,7 @@ breaker = pybreaker.CircuitBreaker(exclude=[ValueError])
 ```python
 # after — interlock
 class IgnoreValueError:
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         if isinstance(exception, ValueError):
             return False  # business error, not a dependency problem
         return exception is not None
@@ -1084,7 +1084,7 @@ circuitbreaker's `expected_exception` is the *inverse* of pybreaker's
 
 ```python
 class OnlyConnectionError:
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         return isinstance(exception, ConnectionError)
 ```
 
@@ -1723,14 +1723,16 @@ whose `503` status means the dependency is unhealthy.
 
 A classifier implements one method. The `result`/`exception` pair is mutually
 exclusive: when `exception` is not `None` the call raised; otherwise `result`
-holds the return value.
+holds the return value. `exception` is always an `Exception` — a
+`BaseException` such as `CancelledError` says nothing about the dependency, so
+the breaker releases the call without classifying it.
 
 ```python
 from interlock import CircuitBreaker
 
 
 class StatusClassifier:
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         if exception is not None:
             return True
         return getattr(result, 'status_code', 200) >= 500
@@ -1751,11 +1753,15 @@ Encode that by treating only the exceptions you care about as failures:
 
 ```python
 class IgnoreNotFound:
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         if isinstance(exception, NotFoundError):
             return False  # expected, not a dependency problem
         return exception is not None
 ```
+
+An ignored exception is recorded as a **success** — the sliding window has only
+two outcomes — and still propagates to the caller. It therefore dilutes the
+failure rate rather than being invisible to it.
 
 ## HTTP out of the box
 
@@ -1763,8 +1769,26 @@ For HTTP clients, you do not need to write this yourself — the
 [httpx2](../integrations/httpx2.md), [httpx](../integrations/httpx.md),
 [aiohttp](../integrations/aiohttp.md), and
 [requests](../integrations/requests.md) integrations ship
-`HttpStatusClassifier`, which treats transport exceptions and the canonical
-retryable statuses (`429, 500, 502, 503, 504`) as failures.
+`HttpStatusClassifier`, which treats the canonical retryable statuses
+(`429, 500, 502, 503, 504`) and every non-excluded transport exception as
+failures.
+
+Errors the *caller* caused are excluded for the same reason as a `404`: a
+scheme-less URL or a local protocol violation is a bug in your code, not
+evidence that the dependency is unhealthy, and counting it would open the
+circuit of a host that is answering fine. The default set differs per
+integration, because each client library raises different things inside the
+guarded call:
+
+| Integration | Excluded by default |
+|---|---|
+| [httpx2](../integrations/httpx2.md), [httpx](../integrations/httpx.md) | `UnsupportedProtocol`, `LocalProtocolError` |
+| [requests](../integrations/requests.md) | `InvalidURL` (and its `InvalidProxyURL` subclass) |
+| [aiohttp](../integrations/aiohttp.md) | nothing — it rejects malformed URLs before the middleware chain runs, so every handler exception counts unless you exclude it |
+
+All four take `excluded_exceptions=(...)` to replace that set — `()` counts
+every exception as a failure. Entries must be `Exception` subclasses;
+anything else raises `TypeError` at construction.
 
 ---
 
@@ -2457,10 +2481,15 @@ Every integration follows the same rules, so learning one means knowing all:
   deploy a new integration with `CLOSED` after tuning thresholds.
 - **One classification model.** Responses are classified by an
   `HttpStatusClassifier` — by default the canonical retryable set
-  (`429, 500, 502, 503, 504`) plus any transport exception counts as a
-  failure, while `4xx` client mistakes do not. Pass
-  `HttpStatusClassifier(failure_statuses={...})` or your own
-  `FailureClassifier` to change the policy.
+  (`429, 500, 502, 503, 504`) plus every non-excluded transport exception
+  counts as a failure, while `4xx` client mistakes do not. Exceptions the
+  *caller* caused say nothing about the dependency's health, so each
+  integration excludes the ones its own library raises inside the guarded
+  call: `UnsupportedProtocol` / `LocalProtocolError` for httpx2 and httpx,
+  `InvalidURL` for requests, nothing for aiohttp (it rejects malformed URLs
+  before the middleware chain runs). Pass
+  `HttpStatusClassifier(failure_statuses={...}, excluded_exceptions=(...))` or
+  your own `FailureClassifier` to change the policy.
 - **One rejection signal.** An open circuit always raises
   [`CircuitOpenError`](../reference.md) — carrying the breaker name, a
   `retry_after` estimate and the last recorded failure — *before* a
@@ -2886,13 +2915,40 @@ when all guarded clients are synchronous).
 
 By default the transport uses `HttpStatusClassifier`:
 
-- any transport exception (connect/read errors) → failure;
+- a transport exception (connect/read errors) → failure;
 - a response with status `429, 500, 502, 503, 504` → failure;
-- everything else, including `4xx` client errors like `404`, → success.
+- everything else, including `4xx` client errors like `404`, → success;
+- `UnsupportedProtocol` and `LocalProtocolError` → success.
 
 This mirrors the retryable set used by urllib3, AWS and Google clients.
 Permanent `5xx` (`501`, `505`) are deliberately excluded — retrying or tripping
 the breaker cannot fix a contract or protocol error.
+
+The two excluded exceptions are the caller's own bug — a scheme-less or
+unsupported URL, and the local side violating HTTP. They are deterministic and
+say nothing about the dependency, so a burst of them must not open the circuit
+of a healthy host; they still propagate to the caller unchanged.
+
+`PoolTimeout` is *not* excluded: an exhausted pool is usually the dependency
+holding connections open, and shedding load then is the point. Exclude it
+explicitly when your pool is sized below your own burst:
+
+```python
+import httpx2
+from interlock.integrations.httpx2 import HttpStatusClassifier
+
+classifier = HttpStatusClassifier(
+    excluded_exceptions=(
+        httpx2.LocalProtocolError,
+        httpx2.UnsupportedProtocol,
+        httpx2.PoolTimeout,
+    ),
+)
+```
+
+`excluded_exceptions` replaces the default set — pass `()` to count every
+exception as a failure. An excluded exception is recorded as a *success*: the
+sliding window has no third outcome.
 
 ## Tuning
 
@@ -3084,8 +3140,31 @@ The default `HttpStatusClassifier` counts these as failures:
 - response statuses `429, 500, 502, 503, 504`.
 
 Other responses, including caller errors such as `404`, count as successes.
+So are the transport exceptions httpx raises for the *caller's* own bug —
+`UnsupportedProtocol` (a scheme-less or unsupported URL) and
+`LocalProtocolError` (the local side violating HTTP). They are deterministic
+and say nothing about the dependency, so a burst of them must not open the
+circuit of a healthy host. They still propagate to the caller unchanged.
+
+`PoolTimeout` is *not* excluded: an exhausted pool is usually the dependency
+holding connections open, and shedding load then is the point. Exclude it
+explicitly when your pool is sized below your own burst:
+
+```python
+import httpx
+from interlock.integrations.httpx import HttpStatusClassifier
+
+classifier = HttpStatusClassifier(
+    excluded_exceptions=(httpx.LocalProtocolError, httpx.UnsupportedProtocol, httpx.PoolTimeout),
+)
+```
+
+`excluded_exceptions` replaces the default set — pass `()` to count every
+exception as a failure. An excluded exception is recorded as a *success*: the
+sliding window has no third outcome.
+
 Pass `HttpStatusClassifier(failure_statuses={...})` or another
-`FailureClassifier` to change the policy.
+`FailureClassifier` to change the status side of the policy.
 
 ## Streaming responses
 
@@ -3257,7 +3336,18 @@ state to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout)
 By default a response counts as a failure when its status is in the canonical
 retryable set (`429, 500, 502, 503, 504`) and any exception raised while
 sending (connect/read errors) is a failure; `4xx` client mistakes like `404`
-are successes. Change the statuses, or the whole policy:
+are successes.
+
+Nothing is excluded by default: aiohttp rejects a malformed or non-HTTP URL
+before the middleware chain runs, so no caller-side error of its own reaches
+the classifier. Middlewares of your own that sit inside this one are the
+exception — an auth middleware refusing to sign a request is your bug, not the
+dependency's, so exclude what it raises with
+`excluded_exceptions=(MissingCredentials,)`. An excluded exception is recorded
+as a *success*, since the sliding window has no third outcome, and still
+propagates to the caller.
+
+Change the statuses, or the whole policy:
 
 ```python
 from interlock import Config
@@ -3422,9 +3512,19 @@ to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 ## Failure policy
 
 By default a response counts as a failure when its status is in the canonical
-retryable set (`429, 500, 502, 503, 504`) and any transport exception
+retryable set (`429, 500, 502, 503, 504`) and a transport exception
 (connect/read errors) is a failure; `4xx` client mistakes like `404` are
-successes. Change the statuses, or the whole policy:
+successes.
+
+`InvalidURL` — raised by the adapter when the request or proxy URL carries no
+host, and the parent of `InvalidProxyURL` — is a success too. It is the
+caller's own bug: deterministic, and no evidence about the dependency, so a
+burst of them must not open the circuit of a healthy host. The exception still
+propagates to the caller. Replace that set with `excluded_exceptions=(...)`,
+or pass `()` to count every exception as a failure; an excluded exception is
+recorded as a *success*, since the sliding window has no third outcome.
+
+Change the statuses, or the whole policy:
 
 ```python
 from interlock import Config
@@ -3480,7 +3580,7 @@ class LLMFailureClassifier:
 
     _FAILURE_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
 
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         if exception is None:
             return False
         if isinstance(exception, anthropic.APIStatusError):
@@ -4282,7 +4382,9 @@ Implement any of these to swap a core behaviour:
   `expected_version` (version-fenced CAS); every write carries a `ttl`.
   Mechanism only — threshold policy stays in the core. `AsyncStorage` is the
   awaitable mirror. See the [Redis integration](integrations/redis.md).
-- **`FailureClassifier`** — `is_failure(*, result, exception) -> bool`. See
+- **`FailureClassifier`** — `is_failure(*, result, exception) -> bool`, where
+  `exception` is an `Exception` or `None` — cancellation and shutdown are
+  released without being classified. See
   [Failure classification](guides/failure-classification.md).
 - **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`,
   plus `on_storage_degraded` / `on_storage_recovered` /
@@ -4313,9 +4415,11 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
   initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
-  exceptions and statuses `429, 500, 502, 503, 504` (override the set via
-  `failure_statuses`).
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
+  fails on transport exceptions and statuses `429, 500, 502, 503, 504`
+  (override the set via `failure_statuses`). `UnsupportedProtocol` and
+  `LocalProtocolError` are caller-side and count as successes; replace that set
+  via `excluded_exceptions`.
 
 Both transports expose their per-host `registry`; `close()` / `aclose()` release
 the wrapped transport and every breaker in that registry. See the
@@ -4329,8 +4433,9 @@ Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
   initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
-  exceptions and statuses `429, 500, 502, 503, 504`.
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
+  same policy, including the caller-side `UnsupportedProtocol` /
+  `LocalProtocolError` exclusions.
 
 Both transports expose their per-host `registry`, preserve streaming responses,
 and release the wrapped transport and every breaker on `close()` / `aclose()`.
@@ -4344,8 +4449,9 @@ Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations
   initial_state=State.CLOSED, classifier=None, listener=None)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
-- **`HttpStatusClassifier(failure_statuses=None)`** — same canonical HTTP
-  policy, reading `ClientResponse.status`.
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
+  same canonical HTTP policy, reading `ClientResponse.status`; nothing is
+  excluded by default (aiohttp rejects bad URLs before the middleware runs).
 
 It exposes its `registry`; call `await middleware.aclose()` during application
 shutdown. See the [aiohttp integration](integrations/aiohttp.md).
@@ -4358,8 +4464,9 @@ Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
   initial_state=State.CLOSED, classifier=None, listener=None, **adapter_kwargs)`** —
   `HTTPAdapter` subclass for `session.mount(...)`; one breaker per request
   host. Extra kwargs go to `HTTPAdapter`.
-- **`HttpStatusClassifier(failure_statuses=None)`** — same policy, reading
-  `Response.status_code`.
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
+  same policy, reading `Response.status_code`; the caller-side `InvalidURL`
+  counts as a success.
 
 It exposes its `registry`; closing the adapter or owning session releases both
 the connection pools and breaker resources. See the

@@ -71,6 +71,22 @@ def test__http_status_classifier__exception__is_failure() -> None:
     assert classifier.is_failure(result=None, exception=ConnectionError('boom')) is True
 
 
+def test__http_status_classifier__excluded_exception__is_success() -> None:
+    class _MissingCredentials(Exception):
+        pass
+
+    classifier = HttpStatusClassifier(excluded_exceptions=(_MissingCredentials,))
+
+    assert classifier.is_failure(result=None, exception=_MissingCredentials()) is False
+    assert classifier.is_failure(result=None, exception=ConnectionError('boom')) is True
+
+
+@pytest.mark.parametrize('entry', ['ConnectionError', str, KeyboardInterrupt])
+def test__http_status_classifier__non_exception_exclusion__raises(entry: object) -> None:
+    with pytest.raises(TypeError, match='Exception subclasses'):
+        HttpStatusClassifier(excluded_exceptions=[cast('type[Exception]', entry)])
+
+
 # --- CircuitBreakerMiddleware (unit, stubbed handler) -------------------------
 
 

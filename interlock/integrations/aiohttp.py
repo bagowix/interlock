@@ -54,30 +54,76 @@ _FAILURE_STATUSES = frozenset(
     }
 )
 
+# Empty on purpose: aiohttp raises its caller-side errors — a malformed or
+# non-HTTP URL — before the middleware chain runs, so none of them can reach
+# the classifier and be misread as the dependency failing.
+_EXCLUDED_EXCEPTIONS: tuple[type[Exception], ...] = ()
+
+
+def _exception_types(
+    excluded: Iterable[type[Exception]] | None,
+) -> tuple[type[Exception], ...]:
+    """Freeze the exclusion set, rejecting entries that can never be classified.
+
+    Raises:
+        TypeError: If an entry is not an ``Exception`` subclass.
+    """
+    if excluded is None:
+        return _EXCLUDED_EXCEPTIONS
+
+    types = tuple(excluded)
+    # The annotation is a promise, not a guarantee: an untyped caller can still
+    # pass a string. Checking now beats an ``isinstance`` TypeError raised from
+    # inside the guarded call, on the first real failure.
+    for entry in cast('tuple[object, ...]', types):
+        if not (isinstance(entry, type) and issubclass(entry, Exception)):
+            raise TypeError(f'excluded_exceptions must hold Exception subclasses, got: {entry!r}')
+
+    return types
+
 
 class HttpStatusClassifier:
     """Counts handler exceptions and unhealthy-status responses as failures.
 
     A returned response is a failure when its status is in ``failure_statuses``
-    — by default the canonical retryable set (``429, 500, 502, 503, 504``);
-    any raised exception is a failure. Other responses — including ``4xx``
-    client mistakes like ``404`` — are successes, so they never trip the
-    breaker.
+    — by default the canonical retryable set (``429, 500, 502, 503, 504``); a
+    raised exception is a failure unless it is one of ``excluded_exceptions``,
+    which is empty by default. Other responses — including ``4xx`` client
+    mistakes like ``404`` — are successes, so they never trip the breaker.
+
+    aiohttp rejects a malformed or non-HTTP URL before the middleware chain
+    runs, so no caller-side error of its own reaches this classifier — hence
+    the empty default. Exclude the exceptions raised by middlewares of your
+    own that sit inside this one: they are the caller's, not the dependency's.
+
+    An excluded exception still propagates to the caller; it is recorded as a
+    success, since the window has no third outcome.
 
     Args:
         failure_statuses: Statuses to count as failures instead of the
             canonical set.
+        excluded_exceptions: Exception types to count as successes.
+
+    Raises:
+        TypeError: If ``excluded_exceptions`` holds anything but ``Exception``
+            subclasses.
     """
 
-    def __init__(self, *, failure_statuses: Iterable[int] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        failure_statuses: Iterable[int] | None = None,
+        excluded_exceptions: Iterable[type[Exception]] | None = None,
+    ) -> None:
         self._failure_statuses = (
             frozenset(failure_statuses) if failure_statuses is not None else _FAILURE_STATUSES
         )
+        self._excluded_exceptions = _exception_types(excluded_exceptions)
 
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         """Return whether a completed request counts as a failure."""
         if exception is not None:
-            return True
+            return not isinstance(exception, self._excluded_exceptions)
 
         return cast('ClientResponse', result).status in self._failure_statuses
 

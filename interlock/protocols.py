@@ -178,11 +178,16 @@ class AsyncStorage(Protocol):
 class FailureClassifier(Protocol):
     """Decides what counts as a failure, by exception and by result."""
 
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         """Return whether a completed call counts as a failure.
 
         Exactly one dimension is meaningful per call: when ``exception`` is not
         ``None`` the call raised; otherwise ``result`` is its return value.
+
+        Only an ``Exception`` is ever passed: a ``BaseException`` — cancellation,
+        shutdown — says nothing about the dependency, so the engine releases the
+        call without classifying it. A classifier that handles cancellation here
+        is writing code that can never run.
         """
         ...
 

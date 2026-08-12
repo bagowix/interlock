@@ -25,7 +25,7 @@ class LLMFailureClassifier:
 
     _FAILURE_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
 
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         if exception is None:
             return False
         if isinstance(exception, anthropic.APIStatusError):

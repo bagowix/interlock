@@ -16,8 +16,9 @@ no decorators in user code. Each host gets its own breaker (a slow or failing
 
 By default a response counts as a failure when its status is one of
 ``HttpStatusClassifier``'s — the canonical retryable set ``429, 500, 502, 503,
-504`` — and any transport exception (connect/read errors) is a failure. Supply
-a custom ``classifier`` to change that policy.
+504`` — and a transport exception (connect/read errors) is a failure unless it
+is caller-side (a malformed URL, a local protocol violation). Supply a custom
+``classifier`` to change that policy.
 """
 
 import http
@@ -26,7 +27,14 @@ from contextlib import AsyncExitStack, ExitStack
 from types import TracebackType
 from typing import Self, cast
 
-from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
+from httpx2 import (
+    AsyncBaseTransport,
+    BaseTransport,
+    LocalProtocolError,
+    Request,
+    Response,
+    UnsupportedProtocol,
+)
 
 from interlock.config import Config
 from interlock.integrations._registry import reject_registry_options, resolve_registry
@@ -54,30 +62,82 @@ _FAILURE_STATUSES = frozenset(
     }
 )
 
+# httpx2 raises these from inside the transport, but they are the caller's own
+# fault: a scheme-less or unsupported URL, and a local violation of the HTTP
+# protocol. Both are deterministic — no retry and no open circuit can make them
+# succeed — and say nothing about the dependency, so counting them would trip
+# the breaker of a perfectly healthy host. ``PoolTimeout`` is deliberately not
+# here: an exhausted pool is usually the dependency holding connections open,
+# and shedding load then is the point.
+_EXCLUDED_EXCEPTIONS: tuple[type[Exception], ...] = (
+    LocalProtocolError,
+    UnsupportedProtocol,
+)
+
+
+def _exception_types(
+    excluded: Iterable[type[Exception]] | None,
+) -> tuple[type[Exception], ...]:
+    """Freeze the exclusion set, rejecting entries that can never be classified.
+
+    Raises:
+        TypeError: If an entry is not an ``Exception`` subclass.
+    """
+    if excluded is None:
+        return _EXCLUDED_EXCEPTIONS
+
+    types = tuple(excluded)
+    # The annotation is a promise, not a guarantee: an untyped caller can still
+    # pass a string. Checking now beats an ``isinstance`` TypeError raised from
+    # inside the guarded call, on the first real failure.
+    for entry in cast('tuple[object, ...]', types):
+        if not (isinstance(entry, type) and issubclass(entry, Exception)):
+            raise TypeError(f'excluded_exceptions must hold Exception subclasses, got: {entry!r}')
+
+    return types
+
 
 class HttpStatusClassifier:
     """Counts transport exceptions and unhealthy-status responses as failures.
 
     A returned response is a failure when its status is in ``failure_statuses``
-    — by default the canonical retryable set (``429, 500, 502, 503, 504``);
-    any raised exception is a failure. Other responses — including ``4xx``
-    client mistakes like ``404`` — are successes, so they never trip the
-    breaker.
+    — by default the canonical retryable set (``429, 500, 502, 503, 504``); a
+    raised exception is a failure unless it is one of ``excluded_exceptions``,
+    by default the caller-side errors ``LocalProtocolError`` and
+    ``UnsupportedProtocol``. Other responses — including ``4xx`` client
+    mistakes like ``404`` — are successes, so they never trip the breaker.
+
+    An excluded exception still propagates to the caller; it is recorded as a
+    success, since the window has no third outcome.
 
     Args:
         failure_statuses: Statuses to count as failures instead of the
             canonical set.
+        excluded_exceptions: Exception types to count as successes instead of
+            the caller-side default. Pass ``()`` to count every exception as a
+            failure, or add ``PoolTimeout`` when the local pool is sized below
+            the caller's own burst.
+
+    Raises:
+        TypeError: If ``excluded_exceptions`` holds anything but ``Exception``
+            subclasses.
     """
 
-    def __init__(self, *, failure_statuses: Iterable[int] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        failure_statuses: Iterable[int] | None = None,
+        excluded_exceptions: Iterable[type[Exception]] | None = None,
+    ) -> None:
         self._failure_statuses = (
             frozenset(failure_statuses) if failure_statuses is not None else _FAILURE_STATUSES
         )
+        self._excluded_exceptions = _exception_types(excluded_exceptions)
 
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         """Return whether a completed request counts as a failure."""
         if exception is not None:
-            return True
+            return not isinstance(exception, self._excluded_exceptions)
 
         return cast('Response', result).status_code in self._failure_statuses
 

@@ -165,8 +165,31 @@ The default `HttpStatusClassifier` counts these as failures:
 - response statuses `429, 500, 502, 503, 504`.
 
 Other responses, including caller errors such as `404`, count as successes.
+So are the transport exceptions httpx raises for the *caller's* own bug —
+`UnsupportedProtocol` (a scheme-less or unsupported URL) and
+`LocalProtocolError` (the local side violating HTTP). They are deterministic
+and say nothing about the dependency, so a burst of them must not open the
+circuit of a healthy host. They still propagate to the caller unchanged.
+
+`PoolTimeout` is *not* excluded: an exhausted pool is usually the dependency
+holding connections open, and shedding load then is the point. Exclude it
+explicitly when your pool is sized below your own burst:
+
+```python
+import httpx
+from interlock.integrations.httpx import HttpStatusClassifier
+
+classifier = HttpStatusClassifier(
+    excluded_exceptions=(httpx.LocalProtocolError, httpx.UnsupportedProtocol, httpx.PoolTimeout),
+)
+```
+
+`excluded_exceptions` replaces the default set — pass `()` to count every
+exception as a failure. An excluded exception is recorded as a *success*: the
+sliding window has no third outcome.
+
 Pass `HttpStatusClassifier(failure_statuses={...})` or another
-`FailureClassifier` to change the policy.
+`FailureClassifier` to change the status side of the policy.
 
 ## Streaming responses
 

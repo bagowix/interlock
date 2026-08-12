@@ -133,7 +133,18 @@ state to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout)
 By default a response counts as a failure when its status is in the canonical
 retryable set (`429, 500, 502, 503, 504`) and any exception raised while
 sending (connect/read errors) is a failure; `4xx` client mistakes like `404`
-are successes. Change the statuses, or the whole policy:
+are successes.
+
+Nothing is excluded by default: aiohttp rejects a malformed or non-HTTP URL
+before the middleware chain runs, so no caller-side error of its own reaches
+the classifier. Middlewares of your own that sit inside this one are the
+exception — an auth middleware refusing to sign a request is your bug, not the
+dependency's, so exclude what it raises with
+`excluded_exceptions=(MissingCredentials,)`. An excluded exception is recorded
+as a *success*, since the sliding window has no third outcome, and still
+propagates to the caller.
+
+Change the statuses, or the whole policy:
 
 ```python
 from interlock import Config
