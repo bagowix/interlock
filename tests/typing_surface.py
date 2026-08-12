@@ -109,6 +109,14 @@ def _breaker_call_infers_sync_result() -> None:
     assert_type(breaker.call(_fetch_sync, 1), str)
 
 
+def _breaker_call_sync_infers_result() -> None:
+    assert_type(breaker.call_sync(_fetch_sync, 1), str)
+
+
+async def _breaker_call_async_infers_result() -> None:
+    assert_type(await breaker.call_async(_fetch, 1), str)
+
+
 async def _breaker_decorator_preserves_async_signature() -> None:
     assert_type(await _decorated_async(1), str)
 

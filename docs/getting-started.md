@@ -80,6 +80,19 @@ checkers still see `charge` as `(int) -> str`.
 result = breaker.call(gateway.charge, 100)
 ```
 
+`call` inspects the callable to pick the sync or the async path. Where that is
+already known — a synchronous client, an awaited handler — `call_sync` and
+`call_async` skip the inspection:
+
+```python
+result = breaker.call_sync(gateway.charge, 100)
+result = await breaker.call_async(client.get, url)
+```
+
+`call_sync` never awaits, so passing a coroutine function to it records the
+coroutine's creation rather than its outcome. Reach for these on a hot path that
+calls the same shape every time; `call` is the right default everywhere else.
+
 ### Context manager
 
 ```python

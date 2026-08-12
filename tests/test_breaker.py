@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import threading
+from collections.abc import Awaitable
 
 import pytest
 
@@ -146,6 +147,90 @@ async def test__call__async_callable__awaited(breaker: CircuitBreaker) -> None:
         return 'a'
 
     assert await breaker.call(ok) == 'a'
+
+
+def test__call_sync__success__returns_result(breaker: CircuitBreaker) -> None:
+    assert breaker.call_sync(lambda a, b: a + b, 2, 3) == 5
+
+
+def test__call_sync__failures_reach_threshold__opens(breaker: CircuitBreaker) -> None:
+    def boom() -> None:
+        raise ValueError('boom')
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match='boom'):
+            breaker.call_sync(boom)
+
+    assert breaker.state is State.OPEN
+
+
+def test__call_sync__open_circuit__raises_circuit_open_error(breaker: CircuitBreaker) -> None:
+    _fail(breaker)
+
+    with pytest.raises(CircuitOpenError):
+        breaker.call_sync(lambda: 1)
+
+
+def test__call_sync__async_callable__is_never_detected(breaker: CircuitBreaker) -> None:
+    """The caller states the nature; a coroutine function is run, not awaited."""
+
+    async def never_awaited() -> str:
+        return 'a'
+
+    coroutine = breaker.call_sync(never_awaited)
+
+    assert breaker.snapshot() == WindowSnapshot(total_calls=1, failed_calls=0, slow_calls=0)
+    coroutine.close()
+
+
+@pytest.mark.asyncio
+async def test__call_async__success__returns_result(breaker: CircuitBreaker) -> None:
+    async def add(a: int, b: int) -> int:
+        return a + b
+
+    assert await breaker.call_async(add, 2, 3) == 5
+
+
+@pytest.mark.asyncio
+async def test__call_async__failures_reach_threshold__opens(breaker: CircuitBreaker) -> None:
+    async def boom() -> None:
+        raise ValueError('boom')
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match='boom'):
+            await breaker.call_async(boom)
+
+    assert breaker.state is State.OPEN
+
+
+@pytest.mark.asyncio
+async def test__call_async__open_circuit__raises_circuit_open_error(
+    breaker: CircuitBreaker,
+) -> None:
+    async def boom() -> None:
+        raise ValueError('boom')
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match='boom'):
+            await breaker.call_async(boom)
+
+    with pytest.raises(CircuitOpenError):
+        await breaker.call_async(boom)
+
+
+@pytest.mark.asyncio
+async def test__call_async__plain_callable_returning_awaitable__awaited(
+    breaker: CircuitBreaker,
+) -> None:
+    """Middleware chains hand over callables that are not coroutine functions."""
+
+    async def inner() -> str:
+        return 'a'
+
+    def handler() -> Awaitable[str]:
+        return inner()
+
+    assert await breaker.call_async(handler) == 'a'
 
 
 def test__decorator__sync__preserves_name_and_runs(breaker: CircuitBreaker) -> None:
