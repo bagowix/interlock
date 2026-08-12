@@ -17,9 +17,10 @@ created lazily and shared across requests. When a host's circuit is open the
 request is rejected with ``CircuitOpenError`` before a connection is made.
 
 By default a response counts as a failure when its status is in the canonical
-retryable set (``429, 500, 502, 503, 504``) and any transport exception
-(connect/read errors) is a failure; ``4xx`` client mistakes like ``404`` are
-successes. Supply a custom ``classifier`` to change that policy.
+retryable set (``429, 500, 502, 503, 504``) and a transport exception
+(connect/read errors) is a failure unless it is caller-side (a URL with no
+host); ``4xx`` client mistakes like ``404`` are successes. Supply a custom
+``classifier`` to change that policy.
 """
 
 import http
@@ -30,6 +31,7 @@ from urllib.parse import urlsplit
 
 from requests import PreparedRequest, Response
 from requests.adapters import HTTPAdapter
+from requests.exceptions import InvalidURL
 
 from interlock.config import Config
 from interlock.integrations._registry import reject_registry_options, resolve_registry
@@ -56,30 +58,53 @@ _FAILURE_STATUSES = frozenset(
 _Timeout = float | tuple[float, float] | tuple[float, None] | None
 _Cert = bytes | str | tuple[bytes | str, bytes | str] | None
 
+# The adapter raises ``InvalidURL`` (and its ``InvalidProxyURL`` subclass) when
+# the request or proxy URL carries no host — the caller's own bug. It is
+# deterministic, so no retry and no open circuit can make it succeed, and it
+# says nothing about the dependency: counting it would trip the breaker of a
+# perfectly healthy host. ``InvalidHeader`` is *not* here — urllib3 raises it
+# for a malformed header sent by the *server*.
+_EXCLUDED_EXCEPTIONS: tuple[type[Exception], ...] = (InvalidURL,)
+
 
 class HttpStatusClassifier:
     """Counts transport exceptions and unhealthy-status responses as failures.
 
     A returned response is a failure when its status is in ``failure_statuses``
-    — by default the canonical retryable set (``429, 500, 502, 503, 504``);
-    any raised exception is a failure. Other responses — including ``4xx``
-    client mistakes like ``404`` — are successes, so they never trip the
-    breaker.
+    — by default the canonical retryable set (``429, 500, 502, 503, 504``); a
+    raised exception is a failure unless it is one of ``excluded_exceptions``,
+    by default the caller-side ``InvalidURL``. Other responses — including
+    ``4xx`` client mistakes like ``404`` — are successes, so they never trip
+    the breaker.
+
+    An excluded exception still propagates to the caller; it is recorded as a
+    success, since the window has no third outcome.
 
     Args:
         failure_statuses: Statuses to count as failures instead of the
             canonical set.
+        excluded_exceptions: Exception types to count as successes instead of
+            the caller-side default. Pass ``()`` to count every exception as a
+            failure.
     """
 
-    def __init__(self, *, failure_statuses: Iterable[int] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        failure_statuses: Iterable[int] | None = None,
+        excluded_exceptions: Iterable[type[Exception]] | None = None,
+    ) -> None:
         self._failure_statuses = (
             frozenset(failure_statuses) if failure_statuses is not None else _FAILURE_STATUSES
         )
+        self._excluded_exceptions = (
+            tuple(excluded_exceptions) if excluded_exceptions is not None else _EXCLUDED_EXCEPTIONS
+        )
 
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         """Return whether a completed request counts as a failure."""
         if exception is not None:
-            return True
+            return not isinstance(exception, self._excluded_exceptions)
 
         return cast('Response', result).status_code in self._failure_statuses
 

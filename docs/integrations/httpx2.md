@@ -167,13 +167,40 @@ when all guarded clients are synchronous).
 
 By default the transport uses `HttpStatusClassifier`:
 
-- any transport exception (connect/read errors) → failure;
+- a transport exception (connect/read errors) → failure;
 - a response with status `429, 500, 502, 503, 504` → failure;
-- everything else, including `4xx` client errors like `404`, → success.
+- everything else, including `4xx` client errors like `404`, → success;
+- `UnsupportedProtocol` and `LocalProtocolError` → success.
 
 This mirrors the retryable set used by urllib3, AWS and Google clients.
 Permanent `5xx` (`501`, `505`) are deliberately excluded — retrying or tripping
 the breaker cannot fix a contract or protocol error.
+
+The two excluded exceptions are the caller's own bug — a scheme-less or
+unsupported URL, and the local side violating HTTP. They are deterministic and
+say nothing about the dependency, so a burst of them must not open the circuit
+of a healthy host; they still propagate to the caller unchanged.
+
+`PoolTimeout` is *not* excluded: an exhausted pool is usually the dependency
+holding connections open, and shedding load then is the point. Exclude it
+explicitly when your pool is sized below your own burst:
+
+```python
+import httpx2
+from interlock.integrations.httpx2 import HttpStatusClassifier
+
+classifier = HttpStatusClassifier(
+    excluded_exceptions=(
+        httpx2.LocalProtocolError,
+        httpx2.UnsupportedProtocol,
+        httpx2.PoolTimeout,
+    ),
+)
+```
+
+`excluded_exceptions` replaces the default set — pass `()` to count every
+exception as a failure. An excluded exception is recorded as a *success*: the
+sliding window has no third outcome.
 
 ## Tuning
 

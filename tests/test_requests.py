@@ -57,6 +57,35 @@ def test__http_status_classifier__exception__is_failure() -> None:
     assert classifier.is_failure(result=None, exception=exc) is True
 
 
+@pytest.mark.parametrize(
+    'exception',
+    [
+        requests.exceptions.InvalidURL('no host'),
+        requests.exceptions.InvalidProxyURL('proxy has no host'),
+    ],
+)
+def test__http_status_classifier__caller_side_exception__is_success(
+    exception: requests.RequestException,
+) -> None:
+    classifier = HttpStatusClassifier()
+
+    assert classifier.is_failure(result=None, exception=exception) is False
+
+
+def test__http_status_classifier__custom_exclusions__override_default_set() -> None:
+    classifier = HttpStatusClassifier(excluded_exceptions=(requests.exceptions.InvalidHeader,))
+
+    excluded = requests.exceptions.InvalidHeader('bad Retry-After')
+    assert classifier.is_failure(result=None, exception=excluded) is False
+    assert classifier.is_failure(result=None, exception=requests.exceptions.InvalidURL()) is True
+
+
+def test__http_status_classifier__empty_exclusions__counts_every_exception() -> None:
+    classifier = HttpStatusClassifier(excluded_exceptions=())
+
+    assert classifier.is_failure(result=None, exception=requests.exceptions.InvalidURL()) is True
+
+
 # --- CircuitBreakerAdapter ----------------------------------------------------
 
 

@@ -108,7 +108,7 @@ breaker = pybreaker.CircuitBreaker(exclude=[ValueError])
 ```python
 # after — interlock
 class IgnoreValueError:
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         if isinstance(exception, ValueError):
             return False  # business error, not a dependency problem
         return exception is not None
@@ -261,7 +261,7 @@ circuitbreaker's `expected_exception` is the *inverse* of pybreaker's
 
 ```python
 class OnlyConnectionError:
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         return isinstance(exception, ConnectionError)
 ```
 

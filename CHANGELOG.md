@@ -6,8 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A bug in your own code no longer opens the circuit of a healthy
+  dependency.** The HTTP integrations counted every exception raised inside the
+  guarded call as the dependency failing, including the ones the client library
+  raises for the *caller's* mistake: a scheme-less URL (`UnsupportedProtocol`)
+  or a local protocol violation (`LocalProtocolError`) in httpx2/httpx, a URL
+  or proxy URL with no host (`InvalidURL`) in requests. A burst of them was
+  enough to trip the breaker and start rejecting real traffic to a host that
+  was answering fine — and in `METRICS_ONLY` they polluted the very
+  baseline used to pick thresholds. Those exceptions now count as successes and
+  still propagate unchanged. `HttpStatusClassifier(excluded_exceptions=...)`
+  replaces the set: pass `()` for the old behaviour, or add `PoolTimeout` (kept
+  a failure by default — an exhausted pool usually means the dependency is
+  holding connections open) when the local pool is sized below your own burst.
+  aiohttp excludes nothing by default, since it rejects malformed URLs before
+  the middleware chain runs; the knob is there for the exceptions of
+  middlewares of your own.
+
 ### Changed
 
+- **`FailureClassifier.is_failure` now declares `exception: Exception | None`.**
+  The engine never passed a `BaseException` — cancellation and shutdown are
+  released without being classified — so the wider annotation invited
+  classifier authors to write cancellation handling that could never run. A
+  classifier still annotated `BaseException | None` keeps type-checking.
 - **A caller-owned `Registry` needs its own HTTP classifier.** Handing one to the
   httpx2/httpx transports, the aiohttp middleware or the requests adapter moves
   the failure policy to the registry, so a returned `503` counts as a success

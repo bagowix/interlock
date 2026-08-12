@@ -22,14 +22,16 @@ whose `503` status means the dependency is unhealthy.
 
 A classifier implements one method. The `result`/`exception` pair is mutually
 exclusive: when `exception` is not `None` the call raised; otherwise `result`
-holds the return value.
+holds the return value. `exception` is always an `Exception` — a
+`BaseException` such as `CancelledError` says nothing about the dependency, so
+the breaker releases the call without classifying it.
 
 ```python
 from interlock import CircuitBreaker
 
 
 class StatusClassifier:
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         if exception is not None:
             return True
         return getattr(result, 'status_code', 200) >= 500
@@ -50,11 +52,15 @@ Encode that by treating only the exceptions you care about as failures:
 
 ```python
 class IgnoreNotFound:
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         if isinstance(exception, NotFoundError):
             return False  # expected, not a dependency problem
         return exception is not None
 ```
+
+An ignored exception is recorded as a **success** — the sliding window has only
+two outcomes — and still propagates to the caller. It therefore dilutes the
+failure rate rather than being invisible to it.
 
 ## HTTP out of the box
 
@@ -64,3 +70,9 @@ For HTTP clients, you do not need to write this yourself — the
 [requests](../integrations/requests.md) integrations ship
 `HttpStatusClassifier`, which treats transport exceptions and the canonical
 retryable statuses (`429, 500, 502, 503, 504`) as failures.
+
+Errors the *caller* caused are excluded there for the same reason: a
+scheme-less URL or a local protocol violation is a bug in your code, not
+evidence that the dependency is unhealthy, and counting it would open the
+circuit of a host that is answering fine. Each integration excludes its own
+library's types and takes `excluded_exceptions=(...)` to replace that set.

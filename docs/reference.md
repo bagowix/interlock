@@ -137,7 +137,9 @@ Implement any of these to swap a core behaviour:
   `expected_version` (version-fenced CAS); every write carries a `ttl`.
   Mechanism only — threshold policy stays in the core. `AsyncStorage` is the
   awaitable mirror. See the [Redis integration](integrations/redis.md).
-- **`FailureClassifier`** — `is_failure(*, result, exception) -> bool`. See
+- **`FailureClassifier`** — `is_failure(*, result, exception) -> bool`, where
+  `exception` is an `Exception` or `None` — cancellation and shutdown are
+  released without being classified. See
   [Failure classification](guides/failure-classification.md).
 - **`EventListener`** — `on_state_change`, `on_call`, `on_rejected`, `on_reset`,
   plus `on_storage_degraded` / `on_storage_recovered` /
@@ -168,9 +170,11 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
   initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
-  exceptions and statuses `429, 500, 502, 503, 504` (override the set via
-  `failure_statuses`).
+- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+  fails on transport exceptions and statuses `429, 500, 502, 503, 504`
+  (override the set via `failure_statuses`). `UnsupportedProtocol` and
+  `LocalProtocolError` are caller-side and count as successes; replace that set
+  via `excluded_exceptions`.
 
 Both transports expose their per-host `registry`; `close()` / `aclose()` release
 the wrapped transport and every breaker in that registry. See the
@@ -184,8 +188,9 @@ Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
   initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier(failure_statuses=None)`** — fails on transport
-  exceptions and statuses `429, 500, 502, 503, 504`.
+- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+  same policy, including the caller-side `UnsupportedProtocol` /
+  `LocalProtocolError` exclusions.
 
 Both transports expose their per-host `registry`, preserve streaming responses,
 and release the wrapped transport and every breaker on `close()` / `aclose()`.
@@ -199,8 +204,9 @@ Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations
   initial_state=State.CLOSED, classifier=None, listener=None)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
-- **`HttpStatusClassifier(failure_statuses=None)`** — same canonical HTTP
-  policy, reading `ClientResponse.status`.
+- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+  same canonical HTTP policy, reading `ClientResponse.status`; nothing is
+  excluded by default (aiohttp rejects bad URLs before the middleware runs).
 
 It exposes its `registry`; call `await middleware.aclose()` during application
 shutdown. See the [aiohttp integration](integrations/aiohttp.md).
@@ -213,8 +219,9 @@ Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
   initial_state=State.CLOSED, classifier=None, listener=None, **adapter_kwargs)`** —
   `HTTPAdapter` subclass for `session.mount(...)`; one breaker per request
   host. Extra kwargs go to `HTTPAdapter`.
-- **`HttpStatusClassifier(failure_statuses=None)`** — same policy, reading
-  `Response.status_code`.
+- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+  same policy, reading `Response.status_code`; the caller-side `InvalidURL`
+  counts as a success.
 
 It exposes its `registry`; closing the adapter or owning session releases both
 the connection pools and breaker resources. See the

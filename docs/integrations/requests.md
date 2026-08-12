@@ -135,9 +135,19 @@ to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 ## Failure policy
 
 By default a response counts as a failure when its status is in the canonical
-retryable set (`429, 500, 502, 503, 504`) and any transport exception
+retryable set (`429, 500, 502, 503, 504`) and a transport exception
 (connect/read errors) is a failure; `4xx` client mistakes like `404` are
-successes. Change the statuses, or the whole policy:
+successes.
+
+`InvalidURL` — raised by the adapter when the request or proxy URL carries no
+host, and the parent of `InvalidProxyURL` — is a success too. It is the
+caller's own bug: deterministic, and no evidence about the dependency, so a
+burst of them must not open the circuit of a healthy host. The exception still
+propagates to the caller. Replace that set with `excluded_exceptions=(...)`,
+or pass `()` to count every exception as a failure; an excluded exception is
+recorded as a *success*, since the sliding window has no third outcome.
+
+Change the statuses, or the whole policy:
 
 ```python
 from interlock import Config

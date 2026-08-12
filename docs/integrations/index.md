@@ -36,10 +36,13 @@ Every integration follows the same rules, so learning one means knowing all:
   deploy a new integration with `CLOSED` after tuning thresholds.
 - **One classification model.** Responses are classified by an
   `HttpStatusClassifier` — by default the canonical retryable set
-  (`429, 500, 502, 503, 504`) plus any transport exception counts as a
-  failure, while `4xx` client mistakes do not. Pass
-  `HttpStatusClassifier(failure_statuses={...})` or your own
-  `FailureClassifier` to change the policy.
+  (`429, 500, 502, 503, 504`) plus a transport exception counts as a
+  failure, while `4xx` client mistakes do not. Exceptions the *caller* caused
+  (a malformed URL, a local protocol violation) are excluded wherever the
+  client library raises them inside the guarded call: they say nothing about
+  the dependency's health. Pass
+  `HttpStatusClassifier(failure_statuses={...}, excluded_exceptions=(...))` or
+  your own `FailureClassifier` to change the policy.
 - **One rejection signal.** An open circuit always raises
   [`CircuitOpenError`](../reference.md) — carrying the breaker name, a
   `retry_after` estimate and the last recorded failure — *before* a

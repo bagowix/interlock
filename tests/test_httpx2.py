@@ -120,6 +120,53 @@ def test__http_status_classifier__healthy_or_permanent_status__is_success(status
     assert not classifier.is_failure(result=Response(status), exception=None)
 
 
+@pytest.mark.parametrize(
+    'exception',
+    [httpx2.UnsupportedProtocol('no scheme'), httpx2.LocalProtocolError('bad request')],
+)
+def test__http_status_classifier__caller_side_exception__is_success(
+    exception: httpx2.TransportError,
+) -> None:
+    classifier = HttpStatusClassifier()
+
+    assert not classifier.is_failure(result=None, exception=exception)
+
+
+def test__http_status_classifier__pool_timeout__is_failure() -> None:
+    classifier = HttpStatusClassifier()
+
+    assert classifier.is_failure(result=None, exception=httpx2.PoolTimeout('exhausted'))
+
+
+def test__http_status_classifier__custom_exclusions__override_default_set() -> None:
+    classifier = HttpStatusClassifier(excluded_exceptions=(httpx2.PoolTimeout,))
+
+    assert not classifier.is_failure(result=None, exception=httpx2.PoolTimeout('exhausted'))
+    assert classifier.is_failure(result=None, exception=httpx2.UnsupportedProtocol('no scheme'))
+
+
+def test__http_status_classifier__empty_exclusions__counts_every_exception() -> None:
+    classifier = HttpStatusClassifier(excluded_exceptions=())
+
+    assert classifier.is_failure(result=None, exception=httpx2.UnsupportedProtocol('no scheme'))
+
+
+def test__sync_transport__caller_side_exceptions__keep_circuit_closed(
+    fake_clock: FakeClock,
+) -> None:
+    def unsupported(_request: Request) -> Response:
+        raise httpx2.UnsupportedProtocol('no scheme')
+
+    inner = _SyncStub(unsupported)
+    transport = CircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
+
+    for _ in range(4):
+        with pytest.raises(httpx2.UnsupportedProtocol):
+            transport.handle_request(_request())
+
+    assert transport.registry.get('api.example.com').state is State.CLOSED
+
+
 def test__sync_transport__success_response__passes_through(fake_clock: FakeClock) -> None:
     inner = _SyncStub(lambda _request: Response(200))
     transport = CircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)

@@ -11,7 +11,7 @@ __all__ = ('DefaultFailureClassifier',)
 class DefaultFailureClassifier:
     """Counts a call as a failure exactly when it raised."""
 
-    def is_failure(self, *, result: object, exception: BaseException | None) -> bool:  # noqa: ARG002
+    def is_failure(self, *, result: object, exception: Exception | None) -> bool:  # noqa: ARG002
         """Return whether a completed call counts as a failure.
 
         Args:
