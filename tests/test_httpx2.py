@@ -151,6 +151,12 @@ def test__http_status_classifier__empty_exclusions__counts_every_exception() -> 
     assert classifier.is_failure(result=None, exception=httpx2.UnsupportedProtocol('no scheme'))
 
 
+@pytest.mark.parametrize('entry', ['httpx2.PoolTimeout', str, KeyboardInterrupt])
+def test__http_status_classifier__non_exception_exclusion__raises(entry: object) -> None:
+    with pytest.raises(TypeError, match='Exception subclasses'):
+        HttpStatusClassifier(excluded_exceptions=[cast('type[Exception]', entry)])
+
+
 def test__sync_transport__caller_side_exceptions__keep_circuit_closed(
     fake_clock: FakeClock,
 ) -> None:

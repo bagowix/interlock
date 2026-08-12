@@ -68,11 +68,23 @@ For HTTP clients, you do not need to write this yourself — the
 [httpx2](../integrations/httpx2.md), [httpx](../integrations/httpx.md),
 [aiohttp](../integrations/aiohttp.md), and
 [requests](../integrations/requests.md) integrations ship
-`HttpStatusClassifier`, which treats transport exceptions and the canonical
-retryable statuses (`429, 500, 502, 503, 504`) as failures.
+`HttpStatusClassifier`, which treats the canonical retryable statuses
+(`429, 500, 502, 503, 504`) and every non-excluded transport exception as
+failures.
 
-Errors the *caller* caused are excluded there for the same reason: a
+Errors the *caller* caused are excluded for the same reason as a `404`: a
 scheme-less URL or a local protocol violation is a bug in your code, not
 evidence that the dependency is unhealthy, and counting it would open the
-circuit of a host that is answering fine. Each integration excludes its own
-library's types and takes `excluded_exceptions=(...)` to replace that set.
+circuit of a host that is answering fine. The default set differs per
+integration, because each client library raises different things inside the
+guarded call:
+
+| Integration | Excluded by default |
+|---|---|
+| [httpx2](../integrations/httpx2.md), [httpx](../integrations/httpx.md) | `UnsupportedProtocol`, `LocalProtocolError` |
+| [requests](../integrations/requests.md) | `InvalidURL` (and its `InvalidProxyURL` subclass) |
+| [aiohttp](../integrations/aiohttp.md) | nothing — it rejects malformed URLs before the middleware chain runs, so every handler exception counts unless you exclude it |
+
+All four take `excluded_exceptions=(...)` to replace that set — `()` counts
+every exception as a failure. Entries must be `Exception` subclasses;
+anything else raises `TypeError` at construction.

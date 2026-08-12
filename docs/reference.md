@@ -170,7 +170,7 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
   initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   fails on transport exceptions and statuses `429, 500, 502, 503, 504`
   (override the set via `failure_statuses`). `UnsupportedProtocol` and
   `LocalProtocolError` are caller-side and count as successes; replace that set
@@ -188,7 +188,7 @@ Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
   initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same policy, including the caller-side `UnsupportedProtocol` /
   `LocalProtocolError` exclusions.
 
@@ -204,7 +204,7 @@ Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations
   initial_state=State.CLOSED, classifier=None, listener=None)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
-- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same canonical HTTP policy, reading `ClientResponse.status`; nothing is
   excluded by default (aiohttp rejects bad URLs before the middleware runs).
 
@@ -219,7 +219,7 @@ Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
   initial_state=State.CLOSED, classifier=None, listener=None, **adapter_kwargs)`** —
   `HTTPAdapter` subclass for `session.mount(...)`; one breaker per request
   host. Extra kwargs go to `HTTPAdapter`.
-- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same policy, reading `Response.status_code`; the caller-side `InvalidURL`
   counts as a success.
 

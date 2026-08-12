@@ -1769,14 +1769,26 @@ For HTTP clients, you do not need to write this yourself — the
 [httpx2](../integrations/httpx2.md), [httpx](../integrations/httpx.md),
 [aiohttp](../integrations/aiohttp.md), and
 [requests](../integrations/requests.md) integrations ship
-`HttpStatusClassifier`, which treats transport exceptions and the canonical
-retryable statuses (`429, 500, 502, 503, 504`) as failures.
+`HttpStatusClassifier`, which treats the canonical retryable statuses
+(`429, 500, 502, 503, 504`) and every non-excluded transport exception as
+failures.
 
-Errors the *caller* caused are excluded there for the same reason: a
+Errors the *caller* caused are excluded for the same reason as a `404`: a
 scheme-less URL or a local protocol violation is a bug in your code, not
 evidence that the dependency is unhealthy, and counting it would open the
-circuit of a host that is answering fine. Each integration excludes its own
-library's types and takes `excluded_exceptions=(...)` to replace that set.
+circuit of a host that is answering fine. The default set differs per
+integration, because each client library raises different things inside the
+guarded call:
+
+| Integration | Excluded by default |
+|---|---|
+| [httpx2](../integrations/httpx2.md), [httpx](../integrations/httpx.md) | `UnsupportedProtocol`, `LocalProtocolError` |
+| [requests](../integrations/requests.md) | `InvalidURL` (and its `InvalidProxyURL` subclass) |
+| [aiohttp](../integrations/aiohttp.md) | nothing — it rejects malformed URLs before the middleware chain runs, so every handler exception counts unless you exclude it |
+
+All four take `excluded_exceptions=(...)` to replace that set — `()` counts
+every exception as a failure. Entries must be `Exception` subclasses;
+anything else raises `TypeError` at construction.
 
 ---
 
@@ -2469,11 +2481,13 @@ Every integration follows the same rules, so learning one means knowing all:
   deploy a new integration with `CLOSED` after tuning thresholds.
 - **One classification model.** Responses are classified by an
   `HttpStatusClassifier` — by default the canonical retryable set
-  (`429, 500, 502, 503, 504`) plus a transport exception counts as a
-  failure, while `4xx` client mistakes do not. Exceptions the *caller* caused
-  (a malformed URL, a local protocol violation) are excluded wherever the
-  client library raises them inside the guarded call: they say nothing about
-  the dependency's health. Pass
+  (`429, 500, 502, 503, 504`) plus every non-excluded transport exception
+  counts as a failure, while `4xx` client mistakes do not. Exceptions the
+  *caller* caused say nothing about the dependency's health, so each
+  integration excludes the ones its own library raises inside the guarded
+  call: `UnsupportedProtocol` / `LocalProtocolError` for httpx2 and httpx,
+  `InvalidURL` for requests, nothing for aiohttp (it rejects malformed URLs
+  before the middleware chain runs). Pass
   `HttpStatusClassifier(failure_statuses={...}, excluded_exceptions=(...))` or
   your own `FailureClassifier` to change the policy.
 - **One rejection signal.** An open circuit always raises
@@ -4401,7 +4415,7 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
   initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   fails on transport exceptions and statuses `429, 500, 502, 503, 504`
   (override the set via `failure_statuses`). `UnsupportedProtocol` and
   `LocalProtocolError` are caller-side and count as successes; replace that set
@@ -4419,7 +4433,7 @@ Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
   initial_state=State.CLOSED, classifier=None, listener=None)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
-- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same policy, including the caller-side `UnsupportedProtocol` /
   `LocalProtocolError` exclusions.
 
@@ -4435,7 +4449,7 @@ Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations
   initial_state=State.CLOSED, classifier=None, listener=None)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
-- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same canonical HTTP policy, reading `ClientResponse.status`; nothing is
   excluded by default (aiohttp rejects bad URLs before the middleware runs).
 
@@ -4450,7 +4464,7 @@ Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
   initial_state=State.CLOSED, classifier=None, listener=None, **adapter_kwargs)`** —
   `HTTPAdapter` subclass for `session.mount(...)`; one breaker per request
   host. Extra kwargs go to `HTTPAdapter`.
-- **`HttpStatusClassifier(failure_statuses=None, excluded_exceptions=None)`** —
+- **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same policy, reading `Response.status_code`; the caller-side `InvalidURL`
   counts as a success.
 

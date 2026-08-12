@@ -36,11 +36,13 @@ Every integration follows the same rules, so learning one means knowing all:
   deploy a new integration with `CLOSED` after tuning thresholds.
 - **One classification model.** Responses are classified by an
   `HttpStatusClassifier` — by default the canonical retryable set
-  (`429, 500, 502, 503, 504`) plus a transport exception counts as a
-  failure, while `4xx` client mistakes do not. Exceptions the *caller* caused
-  (a malformed URL, a local protocol violation) are excluded wherever the
-  client library raises them inside the guarded call: they say nothing about
-  the dependency's health. Pass
+  (`429, 500, 502, 503, 504`) plus every non-excluded transport exception
+  counts as a failure, while `4xx` client mistakes do not. Exceptions the
+  *caller* caused say nothing about the dependency's health, so each
+  integration excludes the ones its own library raises inside the guarded
+  call: `UnsupportedProtocol` / `LocalProtocolError` for httpx2 and httpx,
+  `InvalidURL` for requests, nothing for aiohttp (it rejects malformed URLs
+  before the middleware chain runs). Pass
   `HttpStatusClassifier(failure_statuses={...}, excluded_exceptions=(...))` or
   your own `FailureClassifier` to change the policy.
 - **One rejection signal.** An open circuit always raises

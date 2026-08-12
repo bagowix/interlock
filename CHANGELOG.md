@@ -23,7 +23,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holding connections open) when the local pool is sized below your own burst.
   aiohttp excludes nothing by default, since it rejects malformed URLs before
   the middleware chain runs; the knob is there for the exceptions of
-  middlewares of your own.
+  middlewares of your own. The set is validated at construction — an entry that
+  is not an `Exception` subclass raises `TypeError` there instead of crashing
+  the classifier mid-incident, when the first real failure arrives.
 
 ### Changed
 

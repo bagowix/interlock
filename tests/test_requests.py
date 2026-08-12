@@ -86,6 +86,12 @@ def test__http_status_classifier__empty_exclusions__counts_every_exception() -> 
     assert classifier.is_failure(result=None, exception=requests.exceptions.InvalidURL()) is True
 
 
+@pytest.mark.parametrize('entry', ['requests.ConnectionError', str, KeyboardInterrupt])
+def test__http_status_classifier__non_exception_exclusion__raises(entry: object) -> None:
+    with pytest.raises(TypeError, match='Exception subclasses'):
+        HttpStatusClassifier(excluded_exceptions=[cast('type[Exception]', entry)])
+
+
 # --- CircuitBreakerAdapter ----------------------------------------------------
 
 

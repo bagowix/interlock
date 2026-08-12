@@ -60,6 +60,28 @@ _FAILURE_STATUSES = frozenset(
 _EXCLUDED_EXCEPTIONS: tuple[type[Exception], ...] = ()
 
 
+def _exception_types(
+    excluded: Iterable[type[Exception]] | None,
+) -> tuple[type[Exception], ...]:
+    """Freeze the exclusion set, rejecting entries that can never be classified.
+
+    Raises:
+        TypeError: If an entry is not an ``Exception`` subclass.
+    """
+    if excluded is None:
+        return _EXCLUDED_EXCEPTIONS
+
+    types = tuple(excluded)
+    # The annotation is a promise, not a guarantee: an untyped caller can still
+    # pass a string. Checking now beats an ``isinstance`` TypeError raised from
+    # inside the guarded call, on the first real failure.
+    for entry in cast('tuple[object, ...]', types):
+        if not (isinstance(entry, type) and issubclass(entry, Exception)):
+            raise TypeError(f'excluded_exceptions must hold Exception subclasses, got: {entry!r}')
+
+    return types
+
+
 class HttpStatusClassifier:
     """Counts handler exceptions and unhealthy-status responses as failures.
 
@@ -81,6 +103,10 @@ class HttpStatusClassifier:
         failure_statuses: Statuses to count as failures instead of the
             canonical set.
         excluded_exceptions: Exception types to count as successes.
+
+    Raises:
+        TypeError: If ``excluded_exceptions`` holds anything but ``Exception``
+            subclasses.
     """
 
     def __init__(
@@ -92,9 +118,7 @@ class HttpStatusClassifier:
         self._failure_statuses = (
             frozenset(failure_statuses) if failure_statuses is not None else _FAILURE_STATUSES
         )
-        self._excluded_exceptions = (
-            tuple(excluded_exceptions) if excluded_exceptions is not None else _EXCLUDED_EXCEPTIONS
-        )
+        self._excluded_exceptions = _exception_types(excluded_exceptions)
 
     def is_failure(self, *, result: object, exception: Exception | None) -> bool:
         """Return whether a completed request counts as a failure."""
