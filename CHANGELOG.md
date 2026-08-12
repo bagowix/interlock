@@ -37,6 +37,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`DISABLED` no longer claims to be a metrics no-op.** `State.DISABLED` and
+  `disable()` were documented as "admit all traffic, record nothing", but only
+  the sliding window ever went quiet: every admitted call is still classified,
+  timed and delivered to the `EventListener` as `on_call`. So an operator who
+  reached for `disable()` to silence a noisy exporter kept seeing its metrics,
+  and one who switched a rollout from `METRICS_ONLY` to `DISABLED` had no
+  documented promise that listener-fed dashboards would survive it. The
+  docstrings and the states guide now separate the two surfaces: `DISABLED`
+  records no outcome — thresholds are never evaluated and `snapshot()` gets
+  nothing new — and leaves listener events flowing. Behaviour is unchanged.
 - **A bug in your own code no longer opens the circuit of a healthy
   dependency.** The HTTP integrations counted every exception raised inside the
   guarded call as the dependency failing, including the ones the client library
