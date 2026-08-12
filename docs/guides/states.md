@@ -115,6 +115,16 @@ For local diagnosis, `registry.get_existing(name)` returns a cached breaker or
 `None` without creating one. Inspect its `state` and `snapshot()`; use listeners
 rather than polling snapshots for production metrics.
 
+When the names are not known in advance — the HTTP transports create one
+breaker per host, lazily — `registry.items()` lists every breaker created so
+far, and `registry.names()` just their names. Both return a point-in-time copy,
+so they also drive bulk operator actions:
+
+```python
+for _, breaker in registry.items():
+    breaker.metrics_only()
+```
+
 ## Coordinated state (optional)
 
 With a shared [storage](../integrations/redis.md), `OPEN` and `HALF_OPEN` can

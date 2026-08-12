@@ -128,6 +128,54 @@ def test__get_existing__created_name__returns_cached_breaker() -> None:
     assert registry.get_existing('payments') is breaker
 
 
+def test__names__no_breaker_created__returns_empty_tuple() -> None:
+    registry = Registry()
+
+    assert registry.names() == ()
+
+
+def test__names__created_breakers__returns_every_name() -> None:
+    registry = Registry()
+    registry.get('payments')
+    registry.get('search')
+
+    assert set(registry.names()) == {'payments', 'search'}
+
+
+def test__names__breaker_created_after_the_call__is_absent_from_the_snapshot() -> None:
+    registry = Registry()
+    registry.get('payments')
+
+    names = registry.names()
+    registry.get('search')
+
+    assert names == ('payments',)
+
+
+def test__items__no_breaker_created__returns_empty_tuple() -> None:
+    registry = Registry()
+
+    assert registry.items() == ()
+
+
+def test__items__created_breakers__pairs_each_name_with_its_breaker() -> None:
+    registry = Registry()
+    payments = registry.get('payments')
+    search = registry.get('search')
+
+    assert set(registry.items()) == {('payments', payments), ('search', search)}
+
+
+def test__items__breaker_created_after_the_call__is_absent_from_the_snapshot() -> None:
+    registry = Registry()
+    payments = registry.get('payments')
+
+    items = registry.items()
+    registry.get('search')
+
+    assert items == (('payments', payments),)
+
+
 def test__close_all__one_breaker_raises__still_closes_the_rest(
     mocker: MockerFixture,
 ) -> None:

@@ -50,6 +50,8 @@ Registry(*, config=None, clock=None, initial_state=State.CLOSED,
          classifier=None, listener=None, storage=None)
 registry.get(name, *, config=None) -> CircuitBreaker
 registry.get_existing(name) -> CircuitBreaker | None
+registry.names() -> tuple[str, ...]
+registry.items() -> tuple[tuple[str, CircuitBreaker], ...]
 registry.close_all() / await registry.aclose_all()
 ```
 
@@ -60,6 +62,16 @@ request of a service does not serialise on lookups. A `storage`
 is handed to every breaker the registry creates; each coordinates under its own
 name. `initial_state` is assigned before a lazy breaker is published;
 `get_existing()` inspects the cache without creating a missing name.
+
+`names()` and `items()` enumerate the breakers created so far — the only way to
+see the ones the HTTP transports create lazily, one per host. Both take a
+point-in-time copy under the registry lock: a breaker created afterwards is not
+in it, and the returned tuple never changes.
+
+```python
+for name, breaker in registry.items():
+    print(name, breaker.state, breaker.snapshot())
+```
 
 `close_all()` / `aclose_all()` close every breaker created so far. The cache is
 kept, so `get()` keeps returning the same, torn-down instances instead of

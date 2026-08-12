@@ -124,7 +124,9 @@ middleware = CircuitBreakerMiddleware(
 ```
 
 The public `middleware.registry` supports local diagnosis with
-`get_existing(host)`, `state` and `snapshot()`. Use an `EventListener` for
+`get_existing(host)`, `state` and `snapshot()`, plus `names()` and `items()` for
+the breakers created so far — point-in-time copies, without the ones created
+afterwards. Use an `EventListener` for
 production metrics, then deploy a new middleware with the default `CLOSED`
 state to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 

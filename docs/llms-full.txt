@@ -1687,6 +1687,16 @@ For local diagnosis, `registry.get_existing(name)` returns a cached breaker or
 `None` without creating one. Inspect its `state` and `snapshot()`; use listeners
 rather than polling snapshots for production metrics.
 
+When the names are not known in advance — the HTTP transports create one
+breaker per host, lazily — `registry.items()` lists every breaker created so
+far, and `registry.names()` just their names. Both return a point-in-time copy,
+so they also drive bulk operator actions:
+
+```python
+for _, breaker in registry.items():
+    breaker.metrics_only()
+```
+
 ## Coordinated state (optional)
 
 With a shared [storage](../integrations/redis.md), `OPEN` and `HALF_OPEN` can
@@ -2836,7 +2846,10 @@ Every host created later starts in `METRICS_ONLY` before its first request: it
 records outcomes but never raises `CircuitOpenError`. Use the listener for
 production metrics. For local diagnosis,
 `transport.registry.get_existing(host)` returns an existing breaker without
-creating one; inspect its `state` and `snapshot()`.
+creating one; inspect its `state` and `snapshot()`. Hosts are only known at
+runtime, so `transport.registry.items()` lists the breakers created so far and
+`names()` just the names they were created under. Both are point-in-time copies:
+a breaker created afterwards is not in them.
 
 After tuning thresholds, deploy a new transport with the default
 `initial_state=State.CLOSED`. Do not reset only the currently known hosts: a
@@ -3059,7 +3072,10 @@ Every host created later starts in `METRICS_ONLY` before its first request: it
 records outcomes but never raises `CircuitOpenError`. Use the listener for
 production metrics. For local diagnosis,
 `transport.registry.get_existing(host)` returns an existing breaker without
-creating one; inspect its `state` and `snapshot()`.
+creating one; inspect its `state` and `snapshot()`. Hosts are only known at
+runtime, so `transport.registry.items()` lists the breakers created so far and
+`names()` just the names they were created under. Both are point-in-time copies:
+a breaker created afterwards is not in them.
 
 After tuning thresholds, deploy a new transport with the default
 `initial_state=State.CLOSED`. Do not reset only the currently known hosts: a
@@ -3340,7 +3356,9 @@ middleware = CircuitBreakerMiddleware(
 ```
 
 The public `middleware.registry` supports local diagnosis with
-`get_existing(host)`, `state` and `snapshot()`. Use an `EventListener` for
+`get_existing(host)`, `state` and `snapshot()`, plus `names()` and `items()` for
+the breakers created so far — point-in-time copies, without the ones created
+afterwards. Use an `EventListener` for
 production metrics, then deploy a new middleware with the default `CLOSED`
 state to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 
@@ -3518,7 +3536,9 @@ adapter = CircuitBreakerAdapter(
 ```
 
 The public `adapter.registry` supports local diagnosis with
-`get_existing(host)`, `state` and `snapshot()`. Use an `EventListener` for
+`get_existing(host)`, `state` and `snapshot()`, plus `names()` and `items()` for
+the breakers created so far — point-in-time copies, without the ones created
+afterwards. Use an `EventListener` for
 production metrics, then deploy a new adapter with the default `CLOSED` state
 to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
 
@@ -4308,6 +4328,8 @@ Registry(*, config=None, clock=None, initial_state=State.CLOSED,
          classifier=None, listener=None, storage=None)
 registry.get(name, *, config=None) -> CircuitBreaker
 registry.get_existing(name) -> CircuitBreaker | None
+registry.names() -> tuple[str, ...]
+registry.items() -> tuple[tuple[str, CircuitBreaker], ...]
 registry.close_all() / await registry.aclose_all()
 ```
 
@@ -4318,6 +4340,16 @@ request of a service does not serialise on lookups. A `storage`
 is handed to every breaker the registry creates; each coordinates under its own
 name. `initial_state` is assigned before a lazy breaker is published;
 `get_existing()` inspects the cache without creating a missing name.
+
+`names()` and `items()` enumerate the breakers created so far — the only way to
+see the ones the HTTP transports create lazily, one per host. Both take a
+point-in-time copy under the registry lock: a breaker created afterwards is not
+in it, and the returned tuple never changes.
+
+```python
+for name, breaker in registry.items():
+    print(name, breaker.state, breaker.snapshot())
+```
 
 `close_all()` / `aclose_all()` close every breaker created so far. The cache is
 kept, so `get()` keeps returning the same, torn-down instances instead of
