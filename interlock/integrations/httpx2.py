@@ -221,6 +221,11 @@ class CircuitBreakerTransport(BaseTransport):
         """The breaker registry, exposed for diagnostics and operator control."""
         return self._registry
 
+    @property
+    def wrapped(self) -> BaseTransport:
+        """The transport this wrapper delegates to."""
+        return self._transport
+
     def handle_request(self, request: Request) -> Response:
         """Run the request under its resolved dependency's breaker.
 
@@ -315,6 +320,11 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
     def registry(self) -> Registry:
         """The breaker registry, exposed for diagnostics and operator control."""
         return self._registry
+
+    @property
+    def wrapped(self) -> AsyncBaseTransport:
+        """The transport this wrapper delegates to."""
+        return self._transport
 
     async def handle_async_request(self, request: Request) -> Response:
         """Run the request under its resolved dependency's breaker.

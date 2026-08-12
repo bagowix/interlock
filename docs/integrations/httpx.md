@@ -157,6 +157,27 @@ connection pool closes; the application must explicitly call
 `await registry.aclose_all()` during async shutdown, or `registry.close_all()`
 when every guarded client is synchronous.
 
+## Reach the wrapped transport
+
+`transport.wrapped` returns the transport being guarded, so a composed object
+can be unwrapped without touching private attributes — verifying the pool
+limits, TLS context or proxy the inner transport was built with, inspecting it
+in a REPL, or walking a chain of wrappers:
+
+```python
+import httpx
+
+from interlock.integrations.httpx import AsyncCircuitBreakerTransport
+
+inner = httpx.AsyncHTTPTransport(limits=httpx.Limits(max_connections=20))
+transport = AsyncCircuitBreakerTransport(inner)
+
+assert transport.wrapped is inner
+```
+
+The property is read-only: the wrapped transport is fixed at construction. Both
+the synchronous and asynchronous classes expose it.
+
 ## What counts as a failure
 
 The default `HttpStatusClassifier` counts these as failures:

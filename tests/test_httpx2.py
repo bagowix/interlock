@@ -195,6 +195,13 @@ def test__sync_transport__context_manager__delegates_wrapped_lifecycle() -> None
     assert inner.closed
 
 
+def test__sync_transport__wrapped__exposes_inner_transport() -> None:
+    inner = _SyncStub(lambda _request: Response(200))
+    transport = CircuitBreakerTransport(inner)
+
+    assert transport.wrapped is inner
+
+
 def test__sync_transport__server_errors__open_breaker_for_host(fake_clock: FakeClock) -> None:
     inner = _SyncStub(lambda _request: Response(503))
     transport = CircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
@@ -376,6 +383,13 @@ async def test__async_transport__context_manager__delegates_wrapped_lifecycle() 
     assert response.status_code == 200
     assert inner.exited
     assert inner.closed
+
+
+def test__async_transport__wrapped__exposes_inner_transport() -> None:
+    inner = _AsyncStub(lambda _request: Response(200))
+    transport = AsyncCircuitBreakerTransport(inner)
+
+    assert transport.wrapped is inner
 
 
 @pytest.mark.asyncio
