@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`Registry` can now be enumerated: `names()` and `items()`.** The registry
+  could only be asked about a name you already knew, which is exactly the case
+  that does not hold where it matters most: every HTTP integration creates its
+  breakers lazily, one per host, so the set of names is only known at runtime.
+  Listing them for a diagnostics endpoint during a `METRICS_ONLY` rollout, or
+  applying an operator override to all of them before a maintenance window,
+  meant reaching into the private `registry._breakers`. Both methods take a
+  point-in-time copy under the registry lock — a breaker created afterwards is
+  not in it, and the returned tuple never changes.
+
 ### Fixed
 
 - **A bug in your own code no longer opens the circuit of a healthy

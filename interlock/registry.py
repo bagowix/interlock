@@ -98,6 +98,30 @@ class Registry:
         with self._lock:
             return self._breakers.get(name)
 
+    def names(self) -> tuple[str, ...]:
+        """Return the names of the breakers created so far.
+
+        Returns:
+            A point-in-time copy taken under the registry lock: a breaker
+            created afterwards is not in it, and the returned tuple never
+            changes.
+        """
+        with self._lock:
+            return tuple(self._breakers)
+
+    def items(self) -> tuple[tuple[str, CircuitBreaker], ...]:
+        """Return every breaker created so far, paired with its name.
+
+        For listing states and snapshots in a diagnostics endpoint, or applying
+        an operator override to every breaker before a maintenance window.
+
+        Returns:
+            A point-in-time copy taken under the registry lock, with the same
+            snapshot semantics as ``names``.
+        """
+        with self._lock:
+            return tuple(self._breakers.items())
+
     def close_all(self) -> None:
         """Release the background resources of every breaker created so far.
 

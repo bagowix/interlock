@@ -94,6 +94,8 @@ transport = AsyncCircuitBreakerTransport(
 Use an `EventListener` for production metrics. For local diagnostics,
 `transport.registry.get_existing(host)` returns an already-created breaker
 without creating one, so its `state` and `snapshot()` can be inspected safely.
+Hosts are only known at runtime, so `transport.registry.items()` lists every
+breaker created so far — a point-in-time copy, name and breaker together.
 After tuning thresholds, deploy a new transport with the default
 `initial_state=State.CLOSED`; the enforcing instance starts with a fresh window.
 See [States and manual control](docs/guides/states.md#safe-rollout).
