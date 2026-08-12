@@ -248,8 +248,8 @@ class CircuitBreakerAdapter(HTTPAdapter):
                 empty name.
         """
         breaker = self._registry.get(_breaker_name(request, self._name_resolver))
-        guarded = breaker(super().send)
-        return guarded(
+        return breaker.call_sync(
+            super().send,
             request,
             stream=stream,
             timeout=timeout,

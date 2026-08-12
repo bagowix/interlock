@@ -209,8 +209,7 @@ class CircuitBreakerStrategy:
         Raises:
             CircuitOpenError: If the breaker rejects the call.
         """
-        guarded: Callable[[], T] = self._breaker(call)
-        return guarded()
+        return self._breaker.call_sync(call)
 
     async def execute_async(self, call: Callable[[], Awaitable[T]]) -> T:
         """Run the next async layer under the breaker's protection.
@@ -218,8 +217,7 @@ class CircuitBreakerStrategy:
         Raises:
             CircuitOpenError: If the breaker rejects the call.
         """
-        guarded: Callable[[], Awaitable[T]] = self._breaker(call)
-        return await guarded()
+        return await self._breaker.call_async(call)
 
 
 class TimeoutStrategy:

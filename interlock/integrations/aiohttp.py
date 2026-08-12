@@ -225,10 +225,6 @@ class CircuitBreakerMiddleware:
 
         # The composed handler is not guaranteed to be a coroutine *function*
         # (middleware chains may hand over plain callables returning
-        # awaitables), so don't rely on the breaker's sync/async detection —
-        # wrap the send in an explicit coroutine function.
-        async def _send() -> ClientResponse:
-            return await handler(request)
-
-        guarded = breaker(_send)
-        return await guarded()
+        # awaitables), so the breaker's sync/async detection must not decide
+        # here: call_async awaits whatever the handler returns.
+        return await breaker.call_async(handler, request)
