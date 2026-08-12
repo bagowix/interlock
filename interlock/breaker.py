@@ -178,6 +178,34 @@ class CircuitBreaker:
         """
         return self._engine.call(fn, *args, **kwargs)
 
+    def call_sync(self, fn: SyncCallable[P, R], /, *args: P.args, **kwargs: P.kwargs) -> R:
+        """Execute a synchronous ``fn`` under protection, without dispatching.
+
+        The caller states the callable's nature, so nothing is detected and
+        nothing is decorated — the shape a per-request integration path wants.
+        A coroutine function passed here is *not* awaited: its coroutine is
+        recorded as an immediate success. Use ``call_async`` for those, or
+        ``call`` to dispatch on the callable.
+
+        Raises:
+            CircuitOpenError: If the breaker rejects the call.
+        """
+        return self._engine.call_sync(fn, *args, **kwargs)
+
+    def call_async(
+        self, fn: AsyncCallable[P, R], /, *args: P.args, **kwargs: P.kwargs
+    ) -> Awaitable[R]:
+        """Execute an awaitable-returning ``fn`` under protection; ``call_sync``'s mirror.
+
+        ``fn`` need not be a coroutine *function*: any callable returning an
+        awaitable is awaited, which is the shape middleware chains hand over.
+
+        Raises:
+            CircuitOpenError: If the breaker rejects the call.
+            InterlockError: If the breaker is coordinated through a sync storage.
+        """
+        return self._engine.call_async(fn, *args, **kwargs)
+
     @overload
     def __call__(self, fn: AsyncCallable[P, R]) -> AsyncCallable[P, R]: ...
 

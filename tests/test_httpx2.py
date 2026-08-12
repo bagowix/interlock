@@ -8,7 +8,7 @@ from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
 from pytest_mock import MockerFixture
 from tests.conftest import FakeClock, RecordingListener
 
-from interlock import CircuitOpenError, Config, Outcome, Registry, State
+from interlock import CircuitBreaker, CircuitOpenError, Config, Outcome, Registry, State
 from interlock.integrations.httpx2 import (
     AsyncCircuitBreakerTransport,
     CircuitBreakerTransport,
@@ -180,6 +180,18 @@ def test__sync_transport__success_response__passes_through(fake_clock: FakeClock
     response = transport.handle_request(_request())
 
     assert response.status_code == 200
+
+
+def test__sync_transport__cached_breaker__is_not_redecorated_per_request(
+    fake_clock: FakeClock, mocker: MockerFixture
+) -> None:
+    """The per-request path costs no decoration: no ``functools.wraps``, no detection."""
+    inner = _SyncStub(lambda _request: Response(200))
+    transport = CircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
+    transport.handle_request(_request())
+    mocker.patch.object(CircuitBreaker, '__call__', side_effect=AssertionError('decorated'))
+
+    assert transport.handle_request(_request()).status_code == 200
 
 
 def test__sync_transport__context_manager__delegates_wrapped_lifecycle() -> None:
@@ -369,6 +381,20 @@ async def test__async_transport__name_resolver__uses_custom_breaker_key(
 
     assert transport.registry.get_existing('orders') is not None
     assert transport.registry.get_existing('gateway.example.com') is None
+
+
+@pytest.mark.asyncio
+async def test__async_transport__cached_breaker__is_not_redecorated_per_request(
+    fake_clock: FakeClock, mocker: MockerFixture
+) -> None:
+    inner = _AsyncStub(lambda _request: Response(200))
+    transport = AsyncCircuitBreakerTransport(inner, config=_TRIP_FAST, clock=fake_clock)
+    await transport.handle_async_request(_request())
+    mocker.patch.object(CircuitBreaker, '__call__', side_effect=AssertionError('decorated'))
+
+    response = await transport.handle_async_request(_request())
+
+    assert response.status_code == 200
 
 
 @pytest.mark.asyncio

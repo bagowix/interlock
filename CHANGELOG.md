@@ -8,6 +8,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`CircuitBreaker.call_sync()` and `call_async()` protect a call without
+  deciding what it is.** `call()` inspects every callable it is handed —
+  unwrapping `functools.partial`, probing `__call__` — and the decorator copies
+  metadata onto a freshly allocated closure. A caller that already knows its own
+  nature paid for a decision it could not change. The two new methods run the
+  same protected path with the dispatch removed; `call()` keeps dispatching and
+  stays the default. `call_async` awaits whatever the callable returns, so a
+  callable that is not a coroutine *function* (a middleware handler, say) works
+  too; `call_sync` never awaits, so a coroutine function passed to it is
+  recorded as an immediate success.
+- **`Registry` can now be enumerated: `names()` and `items()`.** The registry
+  could only be asked about a name you already knew, which is exactly the case
+  that does not hold where it matters most: every HTTP integration creates its
+  breakers lazily, one per host, so the set of names is only known at runtime.
+  Listing them for a diagnostics endpoint during a `METRICS_ONLY` rollout, or
+  applying an operator override to all of them before a maintenance window,
+  meant reaching into the private `registry._breakers`. Both methods take a
+  point-in-time copy under the registry lock — a breaker created afterwards is
+  not in it, and the returned tuple never changes.
 - **The guarded transport is reachable without private attributes.** The
   httpx2/httpx transports kept the transport they wrap in `self._transport`,
   so checking what a wrapper was actually built around — the pool limits, the
@@ -39,6 +58,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The HTTP integrations no longer rebuild their guarded wrapper on every
+  request.** Each request through the httpx2/httpx transports, the requests
+  adapter and the aiohttp middleware re-ran the breaker's sync/async detection
+  and built a fresh `functools.wraps` closure before the request could start —
+  per-request overhead with no behavioural value, paid exactly when a service is
+  busiest. They now call the breaker directly (`call_sync` / `call_async`), and
+  the aiohttp middleware no longer needs its per-request coroutine wrapper.
+  Against a stubbed transport that answers from memory, an httpx request through
+  the wrapper falls from ~10.5 µs to ~7.5 µs (sync) and from ~9.9 µs to ~8.0 µs
+  (async); ~3.5 µs of that is the stub itself, so the integration's own overhead
+  drops by roughly 40%. Behaviour is unchanged.
+- **The pipeline's breaker step stopped rebuilding its wrapper as well.**
+  `CircuitBreakerStrategy` decorated the next layer on every call for the same
+  reason, although it statically knows whether that layer is sync or async. It
+  now routes through `call_sync` / `call_async`: the same protected path, one
+  detection and one closure fewer per pipeline call.
+- **A `Registry` cache hit no longer takes the registry lock.** Because the
+  transport integrations create one breaker per host lazily, every request paid
+  a lock acquisition to find a breaker that was already there. The lookup now
+  reads the cache first and falls back to the locked, double-checked creation
+  path only for a name it has not seen — one name still yields exactly one
+  breaker, and a lost creation race returns the winner.
 - **`FailureClassifier.is_failure` now declares `exception: Exception | None`.**
   The engine never passed a `BaseException` — cancellation and shutdown are
   released without being classified — so the wider annotation invited

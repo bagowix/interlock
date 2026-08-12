@@ -15,6 +15,12 @@ A named breaker for sync and async callables.
 
 - **Use as** a decorator (`@breaker`), a sync/async context manager
   (`with` / `async with`), or `breaker.call(fn, *args, **kwargs)`.
+- **`call_sync(fn, ...)` / `call_async(fn, ...)`** — the same protection with the
+  sync/async dispatch skipped, for callers that already know their own nature
+  (the transport integrations use them per request). `call_sync` never awaits: a
+  coroutine function passed to it is recorded as an immediate success.
+  `call_async` awaits whatever `fn` returns, so it accepts any
+  awaitable-returning callable, not only a coroutine function.
 - **Properties:** `name: str`, `state: State`.
 - **`initial_state`** — one of `CLOSED`, `FORCED_OPEN`, `DISABLED` or
   `METRICS_ONLY`; transitional `OPEN` / `HALF_OPEN` raise `ValueError`.
@@ -44,14 +50,28 @@ Registry(*, config=None, clock=None, initial_state=State.CLOSED,
          classifier=None, listener=None, storage=None)
 registry.get(name, *, config=None) -> CircuitBreaker
 registry.get_existing(name) -> CircuitBreaker | None
+registry.names() -> tuple[str, ...]
+registry.items() -> tuple[tuple[str, CircuitBreaker], ...]
 registry.close_all() / await registry.aclose_all()
 ```
 
 Creates and caches named breakers. The same name always returns the same
-instance; the per-call `config` override applies only at creation. A `storage`
+instance; the per-call `config` override applies only at creation. A cache hit
+is served without taking the registry lock, so a registry shared by every
+request of a service does not serialise on lookups. A `storage`
 is handed to every breaker the registry creates; each coordinates under its own
 name. `initial_state` is assigned before a lazy breaker is published;
 `get_existing()` inspects the cache without creating a missing name.
+
+`names()` and `items()` enumerate the breakers created so far — the only way to
+see the ones the HTTP transports create lazily, one per host. Both take a
+point-in-time copy under the registry lock: a breaker created afterwards is not
+in it, and the returned tuple never changes.
+
+```python
+for name, breaker in registry.items():
+    print(name, breaker.state, breaker.snapshot())
+```
 
 `close_all()` / `aclose_all()` close every breaker created so far. The cache is
 kept, so `get()` keeps returning the same, torn-down instances instead of

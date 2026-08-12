@@ -1,5 +1,6 @@
 """Tests for the aiohttp integration (``interlock.integrations.aiohttp``)."""
 
+from collections.abc import Awaitable
 from typing import cast
 
 import pytest
@@ -9,7 +10,7 @@ from pytest_mock import MockerFixture
 from tests.conftest import FakeClock
 from yarl import URL
 
-from interlock import CircuitOpenError, Config, Registry, State
+from interlock import CircuitBreaker, CircuitOpenError, Config, Registry, State
 from interlock.integrations.aiohttp import CircuitBreakerMiddleware, HttpStatusClassifier
 
 _TRIP_FAST = Config(minimum_number_of_calls=2, failure_rate_threshold=0.5)
@@ -103,6 +104,37 @@ async def test__middleware__failure_statuses__trip_breaker_and_reject(
     with pytest.raises(CircuitOpenError):
         await middleware(_request('https://api.a/x'), cast('ClientHandlerType', handler))
     assert handler.calls == 2
+
+
+@pytest.mark.asyncio
+async def test__middleware__cached_breaker__is_not_redecorated_per_request(
+    fake_clock: FakeClock, mocker: MockerFixture
+) -> None:
+    """The per-request path costs no decoration: no ``functools.wraps``, no detection."""
+    middleware = CircuitBreakerMiddleware(config=_TRIP_FAST, clock=fake_clock)
+    handler = _handler([200, 200])
+    await middleware(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+    mocker.patch.object(CircuitBreaker, '__call__', side_effect=AssertionError('decorated'))
+
+    response = await middleware(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+
+    assert response.status == 200
+
+
+@pytest.mark.asyncio
+async def test__middleware__handler_is_not_a_coroutine_function__still_awaited(
+    fake_clock: FakeClock,
+) -> None:
+    """Middleware chains may hand over plain callables that return an awaitable."""
+    middleware = CircuitBreakerMiddleware(config=_TRIP_FAST, clock=fake_clock)
+    inner = _handler([200])
+
+    def handler(request: ClientRequest) -> Awaitable[ClientResponse]:
+        return inner(request)
+
+    response = await middleware(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+
+    assert response.status == 200
 
 
 @pytest.mark.asyncio
