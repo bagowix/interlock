@@ -144,7 +144,13 @@ class CircuitBreaker:
         self._engine.force_open()
 
     def disable(self) -> None:
-        """Disable the breaker: admit all traffic and record nothing."""
+        """Disable the breaker: admit all traffic, record no outcome.
+
+        Thresholds are never evaluated and ``snapshot()`` gets nothing new (a
+        time-based window drains as its buckets expire). Listener ``on_call``
+        events keep firing — ``disable()`` silences the breaker, not its
+        observability.
+        """
         self._engine.disable()
 
     def metrics_only(self) -> None:

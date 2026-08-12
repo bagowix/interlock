@@ -265,7 +265,11 @@ class Engine:
         self._override(self._machine.force_open)
 
     def disable(self) -> None:
-        """Override to ``DISABLED``: admit all traffic, record nothing."""
+        """Override to ``DISABLED``: admit all traffic, record no outcome.
+
+        ``_settle`` still classifies the outcome and notifies ``on_call``; only
+        the window — and with it the thresholds and ``snapshot()`` — goes quiet.
+        """
         self._override(self._machine.disable)
 
     def metrics_only(self) -> None:

@@ -1636,7 +1636,7 @@ Three special states are set manually and stay until you `reset()`:
 | Method | State | Behaviour |
 |--------|-------|-----------|
 | `breaker.force_open()` | `FORCED_OPEN` | Reject all traffic regardless of metrics. |
-| `breaker.disable()` | `DISABLED` | Admit all traffic, record nothing — the breaker is a no-op. |
+| `breaker.disable()` | `DISABLED` | Admit all traffic but record no outcome — thresholds are never evaluated and `snapshot()` gets nothing new. Listener `on_call` events still fire. |
 | `breaker.metrics_only()` | `METRICS_ONLY` | Admit all traffic, record metrics, but never trip. |
 | `breaker.reset()` | `CLOSED` | Return to closed with a fresh, empty window. In coordinated mode, resume the cached shared state instead. |
 
@@ -1645,6 +1645,32 @@ breaker.metrics_only()  # observe in production without enforcing
 # ... inspect breaker.snapshot() until thresholds look right ...
 breaker.reset()  # start enforcing with a clean window
 ```
+
+### What an override does to your metrics
+
+Two observability surfaces are in play, and an override does not move them
+together:
+
+- the sliding **window** — what `snapshot()` reports and what the thresholds
+  read. `METRICS_ONLY` keeps filling it (that is the whole point of shadow
+  mode); `DISABLED` records nothing and `FORCED_OPEN` admits nothing to record,
+  so neither feeds it. A count-based window then keeps its last contents
+  unchanged; a time-based one drains as its buckets expire;
+- the **`EventListener`**, which observes calls rather than the window.
+  `on_call` fires whenever an admitted call settles, whatever the state —
+  `DISABLED` included; `on_rejected` fires for every rejected call,
+  `FORCED_OPEN` included.
+
+So `disable()` is not a way to silence a listener: `LoggingEventListener`, the
+`OTelEventListener` or a Prometheus exporter keeps reporting outcomes and
+durations for a disabled breaker, with the classifier still deciding success
+from failure. That is deliberate — dashboards going dark the moment an operator
+disables a breaker looks exactly like an outage. To stop the events, drop the
+listener instead (construct the breaker without one).
+
+Switching a rollout from `metrics_only()` to `disable()` therefore keeps
+listener-exported dashboards alive, and only stops threshold evaluation and
+`snapshot()`.
 
 ### Safe rollout
 

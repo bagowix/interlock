@@ -13,7 +13,9 @@ class State(StrEnum):
     overrides for safe rollout and manual control:
 
     - ``FORCED_OPEN``: rejects all traffic regardless of metrics.
-    - ``DISABLED``: passes all traffic, no metrics, breaker is a no-op.
+    - ``DISABLED``: passes all traffic but records no outcome — thresholds are
+      never evaluated and ``snapshot()`` gets nothing new. Listener ``on_call``
+      events still fire, so external dashboards stay live.
     - ``METRICS_ONLY``: shadow/observe mode — passes all traffic and records
       metrics, but never trips. The key to tuning thresholds before enforcing.
 

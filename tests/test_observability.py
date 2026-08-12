@@ -139,6 +139,21 @@ def test__disable__admits_all_without_recording(breaker: CircuitBreaker) -> None
     assert breaker.snapshot().total_calls == 0
 
 
+def test__disable__admitted_call__still_reports_on_call(
+    breaker: CircuitBreaker, fake_clock: FakeClock, listener: RecordingListener
+) -> None:
+    breaker.disable()
+
+    def work() -> int:
+        fake_clock.advance(0.25)
+        return 1
+
+    breaker.call(work)
+
+    assert listener.calls == [(Outcome.SUCCESS, 0.25)]
+    assert breaker.snapshot().total_calls == 0
+
+
 def test__metrics_only__records_but_never_trips(breaker: CircuitBreaker) -> None:
     breaker.metrics_only()
 

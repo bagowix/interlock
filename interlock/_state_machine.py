@@ -18,8 +18,8 @@ Three core states cycle on downstream health:
   then closes or reopens based on the probes' rates.
 
 Three special states are operator overrides: ``FORCED_OPEN`` (reject all),
-``DISABLED`` (admit all, no metrics), ``METRICS_ONLY`` (admit all, record
-metrics, never trip).
+``DISABLED`` (admit all, record nothing in the window), ``METRICS_ONLY``
+(admit all, record metrics, never trip).
 """
 
 from interlock._initial_state import validate_initial_state
@@ -167,7 +167,12 @@ class StateMachine:
         self._reset_probes()
 
     def disable(self) -> None:
-        """Override to ``DISABLED``: admit all traffic, record nothing."""
+        """Override to ``DISABLED``: admit all traffic, record nothing.
+
+        Nothing reaches the window, so no threshold is ever evaluated and
+        ``snapshot()`` gets nothing new. What the call layer does with an
+        outcome — notifying a listener, say — is not this machine's business.
+        """
         self._state = State.DISABLED
         self._generation += 1
         self._reset_probes()
