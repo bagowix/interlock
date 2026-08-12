@@ -27,6 +27,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   meant reaching into the private `registry._breakers`. Both methods take a
   point-in-time copy under the registry lock — a breaker created afterwards is
   not in it, and the returned tuple never changes.
+- **The guarded transport is reachable without private attributes.** The
+  httpx2/httpx transports kept the transport they wrap in `self._transport`,
+  so checking what a wrapper was actually built around — the pool limits, the
+  TLS context, the proxy — meant reading privates through two libraries, and
+  tests ended up asserting constructor kwargs instead of the object. Both the
+  synchronous and asynchronous transports now expose a read-only `wrapped`
+  property alongside `registry`.
 
 ### Fixed
 

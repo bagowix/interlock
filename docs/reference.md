@@ -196,8 +196,10 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
   `LocalProtocolError` are caller-side and count as successes; replace that set
   via `excluded_exceptions`.
 
-Both transports expose their per-host `registry`; `close()` / `aclose()` release
-the wrapped transport and every breaker in that registry. See the
+Both transports expose their per-host `registry` and the guarded transport as a
+read-only `wrapped`. `close()` / `aclose()` release the wrapped transport and,
+when the transport owns the registry, every breaker in it; a caller-owned
+registry stays open and is closed by its owner. See the
 [httpx2 integration](integrations/httpx2.md).
 
 ## httpx adapters
@@ -212,8 +214,10 @@ Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
   same policy, including the caller-side `UnsupportedProtocol` /
   `LocalProtocolError` exclusions.
 
-Both transports expose their per-host `registry`, preserve streaming responses,
-and release the wrapped transport and every breaker on `close()` / `aclose()`.
+Both transports expose their per-host `registry` and the guarded transport as a
+read-only `wrapped`, and preserve streaming responses. `close()` / `aclose()`
+release the wrapped transport and, when the transport owns the registry, every
+breaker in it; a caller-owned registry stays open and is closed by its owner.
 See the [httpx integration](integrations/httpx.md).
 
 ## aiohttp adapters

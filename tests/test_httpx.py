@@ -224,6 +224,13 @@ def test__sync_transport__context_manager__delegates_wrapped_lifecycle() -> None
     assert inner.closed
 
 
+def test__sync_transport__wrapped__exposes_inner_transport() -> None:
+    inner = _SyncStub(lambda _request: httpx.Response(200))
+    transport = CircuitBreakerTransport(inner)
+
+    assert transport.wrapped is inner
+
+
 def test__sync_transport__streaming_response__preserves_stream(fake_clock: FakeClock) -> None:
     response = httpx.Response(200, stream=_SyncStream())
     inner = _SyncStub(lambda _request: response)
@@ -548,6 +555,13 @@ async def test__async_transport__context_manager__delegates_wrapped_lifecycle() 
     assert response.status_code == 200
     assert inner.exited
     assert inner.closed
+
+
+def test__async_transport__wrapped__exposes_inner_transport() -> None:
+    inner = _AsyncStub(lambda _request: httpx.Response(200))
+    transport = AsyncCircuitBreakerTransport(inner)
+
+    assert transport.wrapped is inner
 
 
 @pytest.mark.asyncio
