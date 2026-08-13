@@ -6,6 +6,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Documentation pages now carry Open Graph and Twitter card tags.** A link to
+  any page pasted into Slack, Reddit or a chat rendered as a bare url, because
+  the theme emits no such tags and nothing supplied them. Each page now declares
+  its title, description and canonical url. The card is the text-only `summary`
+  kind: Zensical ships no social-card generation and the documentation carries
+  no image asset.
+
+- **The documentation site is verified with Google Search Console.** Every
+  generated page carries the ownership tag for the property, so the maintainers
+  can finally see which pages are indexed and which searches reach them —
+  previously a blind spot. Nothing about the library itself changes. Removing
+  the tag silently un-verifies the property.
+
+### Changed
+
+- **Every link in the PyPI sidebar now goes somewhere different.** `Homepage`
+  and `Repository` both pointed at the GitHub repository, so a reader arriving
+  on the package page got two identically-targeted links and no obvious route
+  to the documentation. `Homepage` now points at the documentation site and the
+  redundant `Documentation` entry is gone; the repository stays reachable
+  through `Repository`.
+
+- **Page titles now describe the page to someone who has not arrived yet.**
+  Titles were written for a reader already inside the site — `Comparison`,
+  `httpx`, `Timeout` — which tells someone meeting the project in a search
+  result or a pasted link nothing about what they are looking at. A
+  `seo_titles` map in `zensical.toml` gives each page a self-describing title;
+  a page left out of the map keeps the theme default.
+
+### Fixed
+
+- **The documentation landing page was titled `interlock - interlock`.**
+  Zensical does not populate `page.is_homepage`, so the theme fell through to
+  the generic "page title - site name" branch and duplicated the project name
+  on the one page that is linked and ranked the most, leaving it without a
+  single word describing what the project is.
+
 ## [2.6.0] - 2026-08-12
 
 ### Added
