@@ -40,7 +40,6 @@ aiohttp = ["aiohttp>=3.12.0"]
 
 [project.urls]
 Homepage = "https://bagowix.github.io/interlock/"
-Documentation = "https://bagowix.github.io/interlock/"
 Repository = "https://github.com/bagowix/interlock"
 Changelog = "https://github.com/bagowix/interlock/blob/main/CHANGELOG.md"
 Issues = "https://github.com/bagowix/interlock/issues"

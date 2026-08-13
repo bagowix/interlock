@@ -17,11 +17,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **The PyPI sidebar no longer links to the same page twice.** `Homepage` and
-  `Repository` both pointed at the GitHub repository, so a reader arriving on
-  the package page got two identically-targeted links and no obvious route to
-  the documentation. `Homepage` now points at the documentation site; the
-  repository stays reachable through `Repository`.
+- **Every link in the PyPI sidebar now goes somewhere different.** `Homepage`
+  and `Repository` both pointed at the GitHub repository, so a reader arriving
+  on the package page got two identically-targeted links and no obvious route
+  to the documentation. `Homepage` now points at the documentation site and the
+  redundant `Documentation` entry is gone; the repository stays reachable
+  through `Repository`.
 
 - **Page titles now describe the page to someone who has not arrived yet.**
   Titles were written for a reader already inside the site — `Comparison`,
