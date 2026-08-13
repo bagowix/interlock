@@ -15,6 +15,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   kind: Zensical ships no social-card generation and the documentation carries
   no image asset.
 
+- **The documentation site is verified with Google Search Console.** Every
+  generated page carries the ownership tag for the property, so the maintainers
+  can finally see which pages are indexed and which searches reach them —
+  previously a blind spot. Nothing about the library itself changes. Removing
+  the tag silently un-verifies the property.
+
 ### Changed
 
 - **Every link in the PyPI sidebar now goes somewhere different.** `Homepage`
