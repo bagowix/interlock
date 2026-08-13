@@ -1,5 +1,17 @@
 {% extends "base.html" %}
 
+{# Zensical does not populate page.is_homepage, so the theme falls through to
+   "{{ page.title }} - {{ site_name }}" and the landing page ends up titled
+   "interlock - interlock" — a duplicated brand and no keyword for the one page
+   search engines rank first. The homepage is identified by its empty url. #}
+{% block htmltitle %}
+  {% if not page.url %}
+    <title>interlock — a modern circuit breaker for Python</title>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+
 {% block scripts %}
   {{ super() }}
   <script src="https://context7.com/widget.js" data-library="/bagowix/interlock"></script>

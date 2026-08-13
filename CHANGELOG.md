@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The PyPI sidebar no longer links to the same page twice.** `Homepage` and
+  `Repository` both pointed at the GitHub repository, so a reader arriving on
+  the package page got two identically-targeted links and no obvious route to
+  the documentation. `Homepage` now points at the documentation site; the
+  repository stays reachable through `Repository`.
+
+### Fixed
+
+- **The documentation landing page was titled `interlock - interlock`.**
+  Zensical does not populate `page.is_homepage`, so the theme fell through to
+  the generic "page title - site name" branch and duplicated the project name
+  on the one page that is linked and ranked the most, leaving it without a
+  single word describing what the project is. The landing page now carries a
+  descriptive title; every other page is unchanged.
+
 ## [2.6.0] - 2026-08-12
 
 ### Added
