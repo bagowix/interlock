@@ -21,6 +21,12 @@
    as a bare url. Zensical ships no social-card generation and the docs carry no
    image asset, so this is the text-only `summary` card, not a large one. #}
 {% block extrahead %}
+  {# Proves ownership of https://bagowix.github.io/interlock/ to Google Search
+     Console. Public by design, not a secret. Google only reads it from the
+     property root, but emitting it everywhere costs nothing and does not depend
+     on detecting the landing page — the very thing Zensical gets wrong above.
+     Removing this tag silently un-verifies the property. #}
+  <meta name="google-site-verification" content="0pvG2U_OKhCqv-fBlzprkqkYKRno4kI_bE3XpmO1JLw">
   {% set og_title = seo_titles[page.url] if page.url in seo_titles else (page.title | striptags) %}
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="{{ config.site_name }}">
