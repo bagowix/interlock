@@ -1,15 +1,35 @@
 {% extends "base.html" %}
 
-{# Zensical does not populate page.is_homepage, so the theme falls through to
-   "{{ page.title }} - {{ site_name }}" and the landing page ends up titled
-   "interlock - interlock" — a duplicated brand and no keyword for the one page
-   search engines rank first. The homepage is identified by its empty url. #}
+{# Page titles are written for someone already inside the site — "Comparison",
+   "httpx", "Timeout" — which says nothing to someone meeting the project in a
+   search result or a pasted link. `seo_titles` in zensical.toml maps a page url
+   to the title that page should carry outside the site. It also covers the
+   landing page: Zensical never populates `page.is_homepage`, so the theme falls
+   through to "{{ page.title }} - {{ site_name }}" and titles it
+   "interlock - interlock". A page absent from the map keeps the theme default. #}
+{% set seo_titles = config.extra.seo_titles | d({}) %}
+
 {% block htmltitle %}
-  {% if not page.url %}
-    <title>interlock — a modern circuit breaker for Python</title>
+  {% if page.url in seo_titles %}
+    <title>{{ seo_titles[page.url] }} · {{ config.site_name }}</title>
   {% else %}
     {{ super() }}
   {% endif %}
+{% endblock %}
+
+{# Without these a link to the docs pasted into Slack, Reddit or a chat renders
+   as a bare url. Zensical ships no social-card generation and the docs carry no
+   image asset, so this is the text-only `summary` card, not a large one. #}
+{% block extrahead %}
+  {% set og_title = seo_titles[page.url] if page.url in seo_titles else (page.title | striptags) %}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ og_title }}">
+  <meta property="og:description" content="{{ config.site_description }}">
+  <meta property="og:url" content="{{ page.canonical_url }}">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{ og_title }}">
+  <meta name="twitter:description" content="{{ config.site_description }}">
 {% endblock %}
 
 {% block scripts %}

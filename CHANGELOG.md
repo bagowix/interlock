@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Documentation pages now carry Open Graph and Twitter card tags.** A link to
+  any page pasted into Slack, Reddit or a chat rendered as a bare url, because
+  the theme emits no such tags and nothing supplied them. Each page now declares
+  its title, description and canonical url. The card is the text-only `summary`
+  kind: Zensical ships no social-card generation and the documentation carries
+  no image asset.
+
 ### Changed
 
 - **The PyPI sidebar no longer links to the same page twice.** `Homepage` and
@@ -14,14 +23,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the documentation. `Homepage` now points at the documentation site; the
   repository stays reachable through `Repository`.
 
+- **Page titles now describe the page to someone who has not arrived yet.**
+  Titles were written for a reader already inside the site — `Comparison`,
+  `httpx`, `Timeout` — which tells someone meeting the project in a search
+  result or a pasted link nothing about what they are looking at. A
+  `seo_titles` map in `zensical.toml` gives each page a self-describing title;
+  a page left out of the map keeps the theme default.
+
 ### Fixed
 
 - **The documentation landing page was titled `interlock - interlock`.**
   Zensical does not populate `page.is_homepage`, so the theme fell through to
   the generic "page title - site name" branch and duplicated the project name
   on the one page that is linked and ranked the most, leaving it without a
-  single word describing what the project is. The landing page now carries a
-  descriptive title; every other page is unchanged.
+  single word describing what the project is.
 
 ## [2.6.0] - 2026-08-12
 

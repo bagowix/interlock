@@ -67,3 +67,35 @@ custom_fences = [
 alternate_style = true
 [project.markdown_extensions.pymdownx.tasklist]
 custom_checkbox = true
+
+# Titles for readers who have not arrived yet: search results, pasted links,
+# social cards. Keyed by page url ("" is the landing page), consumed by the
+# htmltitle and extrahead blocks in overrides/main.html, which append the site
+# name. Keep each under ~60 characters or search engines truncate it. A page
+# left out of this map keeps the theme's "<page title> - interlock".
+[project.extra.seo_titles]
+"" = "A modern circuit breaker for Python"
+"getting-started/" = "Getting started with a Python circuit breaker"
+"comparison/" = "Python circuit breaker libraries compared"
+"migration/" = "Migrating from pybreaker or circuitbreaker"
+"demo/" = "A runnable Python circuit breaker demo"
+"correctness/" = "How the circuit breaker is tested for correctness"
+"reference/" = "Python circuit breaker API reference"
+"guides/configuration/" = "Configuring a Python circuit breaker"
+"guides/states/" = "Circuit breaker states and manual control"
+"guides/failure-classification/" = "Which failures should trip a circuit breaker"
+"guides/observability/" = "Circuit breaker metrics and OpenTelemetry"
+"guides/timeout/" = "Timeouts with a Python circuit breaker"
+"guides/retries/" = "Retries and circuit breakers in Python"
+"guides/pipeline/" = "Resilience pipeline: timeout, retry, bulkhead"
+"integrations/" = "Circuit breaker integrations for Python clients"
+"integrations/fastapi/" = "FastAPI circuit breaker with 503 and Retry-After"
+"integrations/litestar/" = "Litestar circuit breaker with 503 and Retry-After"
+"integrations/httpx/" = "httpx circuit breaker transport"
+"integrations/httpx2/" = "httpx2 circuit breaker transport"
+"integrations/aiohttp/" = "aiohttp circuit breaker middleware"
+"integrations/requests/" = "requests circuit breaker adapter"
+"integrations/redis/" = "Distributed circuit breaker state in Redis"
+"integrations/tenacity/" = "tenacity retries with a circuit breaker"
+"integrations/llm/" = "Circuit breaker for OpenAI and Anthropic calls"
+"integrations/frameworks/" = "Circuit breaker for Flask and Django"
