@@ -57,19 +57,20 @@ Start in shadow mode when introducing the integration to existing traffic:
 ```python
 import httpx
 
-from interlock import State
+from interlock import LoggingEventListener, State
 from interlock.integrations.httpx import AsyncCircuitBreakerTransport
 
 transport = AsyncCircuitBreakerTransport(
     httpx.AsyncHTTPTransport(),
     initial_state=State.METRICS_ONLY,
-    listener=metrics_listener,
+    listener=LoggingEventListener(),
 )
 ```
 
 Every host created later starts in `METRICS_ONLY` before its first request: it
-records outcomes but never raises `CircuitOpenError`. Use the listener for
-production metrics. For local diagnosis,
+records outcomes but never raises `CircuitOpenError`. `LoggingEventListener`
+writes every event through stdlib logging; swap it for an `EventListener` that
+exports to your metrics backend. For local diagnosis,
 `transport.registry.get_existing(host)` returns an existing breaker without
 creating one; inspect its `state` and `snapshot()`. Hosts are only known at
 runtime, so `transport.registry.items()` lists the breakers created so far and

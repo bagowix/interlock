@@ -45,6 +45,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on the one page that is linked and ranked the most, leaving it without a
   single word describing what the project is.
 
+- **Every safe-rollout example now runs as written.** The README and the
+  `httpx`, `httpx2`, `aiohttp` and `requests` pages passed
+  `listener=metrics_listener`, a name defined nowhere on the page, so anyone
+  copying the shadow-mode snippet — the one the documentation recommends
+  starting with — got a `NameError` before reaching the breaker. They now pass
+  the built-in `LoggingEventListener()`, which needs no setup and can be
+  swapped for a metrics exporter. The `aiohttp` and `requests` blocks also
+  never imported the middleware and the adapter they construct, unlike every
+  other block on those pages.
+
 ## [2.6.0] - 2026-08-12
 
 ### Added
