@@ -2869,8 +2869,9 @@ transport = AsyncCircuitBreakerTransport(
 ```
 
 Every host created later starts in `METRICS_ONLY` before its first request: it
-records outcomes but never raises `CircuitOpenError`. Use the listener for
-production metrics. For local diagnosis,
+records outcomes but never raises `CircuitOpenError`. `LoggingEventListener`
+writes every event through stdlib logging; swap it for an `EventListener` that
+exports to your metrics backend. For local diagnosis,
 `transport.registry.get_existing(host)` returns an existing breaker without
 creating one; inspect its `state` and `snapshot()`. Hosts are only known at
 runtime, so `transport.registry.items()` lists the breakers created so far and
@@ -3116,8 +3117,9 @@ transport = AsyncCircuitBreakerTransport(
 ```
 
 Every host created later starts in `METRICS_ONLY` before its first request: it
-records outcomes but never raises `CircuitOpenError`. Use the listener for
-production metrics. For local diagnosis,
+records outcomes but never raises `CircuitOpenError`. `LoggingEventListener`
+writes every event through stdlib logging; swap it for an `EventListener` that
+exports to your metrics backend. For local diagnosis,
 `transport.registry.get_existing(host)` returns an existing breaker without
 creating one; inspect its `state` and `snapshot()`. Hosts are only known at
 runtime, so `transport.registry.items()` lists the breakers created so far and
@@ -3416,6 +3418,7 @@ its first request:
 
 ```python
 from interlock import LoggingEventListener, State
+from interlock.integrations.aiohttp import CircuitBreakerMiddleware
 
 middleware = CircuitBreakerMiddleware(
     initial_state=State.METRICS_ONLY,
@@ -3426,9 +3429,10 @@ middleware = CircuitBreakerMiddleware(
 The public `middleware.registry` supports local diagnosis with
 `get_existing(host)`, `state` and `snapshot()`, plus `names()` and `items()` for
 the breakers created so far — point-in-time copies, without the ones created
-afterwards. Use an `EventListener` for
-production metrics, then deploy a new middleware with the default `CLOSED`
-state to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
+afterwards. `LoggingEventListener` writes every event through stdlib logging;
+swap it for an `EventListener` that exports to your metrics backend, then
+deploy a new middleware with the default `CLOSED` state to begin enforcement.
+See [Safe rollout](../guides/states.md#safe-rollout).
 
 ## Failure policy
 
@@ -3596,6 +3600,7 @@ its first request:
 
 ```python
 from interlock import LoggingEventListener, State
+from interlock.integrations.requests import CircuitBreakerAdapter
 
 adapter = CircuitBreakerAdapter(
     initial_state=State.METRICS_ONLY,
@@ -3606,9 +3611,10 @@ adapter = CircuitBreakerAdapter(
 The public `adapter.registry` supports local diagnosis with
 `get_existing(host)`, `state` and `snapshot()`, plus `names()` and `items()` for
 the breakers created so far — point-in-time copies, without the ones created
-afterwards. Use an `EventListener` for
-production metrics, then deploy a new adapter with the default `CLOSED` state
-to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
+afterwards. `LoggingEventListener` writes every event through stdlib logging;
+swap it for an `EventListener` that exports to your metrics backend, then
+deploy a new adapter with the default `CLOSED` state to begin enforcement.
+See [Safe rollout](../guides/states.md#safe-rollout).
 
 ## Failure policy
 

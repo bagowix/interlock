@@ -51,7 +51,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   copying the shadow-mode snippet — the one the documentation recommends
   starting with — got a `NameError` before reaching the breaker. They now pass
   the built-in `LoggingEventListener()`, which needs no setup and can be
-  swapped for a metrics exporter.
+  swapped for a metrics exporter. The `aiohttp` and `requests` blocks also
+  never imported the middleware and the adapter they construct, unlike every
+  other block on those pages.
 
 ## [2.6.0] - 2026-08-12
 

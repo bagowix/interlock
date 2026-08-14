@@ -68,8 +68,9 @@ transport = AsyncCircuitBreakerTransport(
 ```
 
 Every host created later starts in `METRICS_ONLY` before its first request: it
-records outcomes but never raises `CircuitOpenError`. Use the listener for
-production metrics. For local diagnosis,
+records outcomes but never raises `CircuitOpenError`. `LoggingEventListener`
+writes every event through stdlib logging; swap it for an `EventListener` that
+exports to your metrics backend. For local diagnosis,
 `transport.registry.get_existing(host)` returns an existing breaker without
 creating one; inspect its `state` and `snapshot()`. Hosts are only known at
 runtime, so `transport.registry.items()` lists the breakers created so far and

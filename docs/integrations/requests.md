@@ -120,6 +120,7 @@ its first request:
 
 ```python
 from interlock import LoggingEventListener, State
+from interlock.integrations.requests import CircuitBreakerAdapter
 
 adapter = CircuitBreakerAdapter(
     initial_state=State.METRICS_ONLY,
@@ -130,9 +131,10 @@ adapter = CircuitBreakerAdapter(
 The public `adapter.registry` supports local diagnosis with
 `get_existing(host)`, `state` and `snapshot()`, plus `names()` and `items()` for
 the breakers created so far — point-in-time copies, without the ones created
-afterwards. Use an `EventListener` for
-production metrics, then deploy a new adapter with the default `CLOSED` state
-to begin enforcement. See [Safe rollout](../guides/states.md#safe-rollout).
+afterwards. `LoggingEventListener` writes every event through stdlib logging;
+swap it for an `EventListener` that exports to your metrics backend, then
+deploy a new adapter with the default `CLOSED` state to begin enforcement.
+See [Safe rollout](../guides/states.md#safe-rollout).
 
 ## Failure policy
 
