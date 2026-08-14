@@ -61,13 +61,13 @@ Start in shadow mode when introducing the integration to existing traffic:
 ```python
 import httpx2
 
-from interlock import State
+from interlock import LoggingEventListener, State
 from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
 
 transport = AsyncCircuitBreakerTransport(
     httpx2.AsyncHTTPTransport(),
     initial_state=State.METRICS_ONLY,
-    listener=metrics_listener,
+    listener=LoggingEventListener(),
 )
 ```
 

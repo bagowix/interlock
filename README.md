@@ -1,5 +1,3 @@
-
-
 # interlock
 
 [![CI](https://github.com/bagowix/interlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bagowix/interlock/actions/workflows/ci.yml)
@@ -82,18 +80,19 @@ per-host breaker can admit its first request:
 ```python
 import httpx2
 
-from interlock import Config, State
+from interlock import Config, LoggingEventListener, State
 from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport
 
 transport = AsyncCircuitBreakerTransport(
     httpx2.AsyncHTTPTransport(),
     initial_state=State.METRICS_ONLY,
     config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
-    listener=None,  # or a custom EventListener instance
+    listener=LoggingEventListener(),
 )
 ```
 
-Use an `EventListener` for production metrics. For local diagnostics,
+`LoggingEventListener` writes every event through stdlib logging; swap it for
+an `EventListener` that exports to your metrics backend. For local diagnostics,
 `transport.registry.get_existing(host)` returns an already-created breaker
 without creating one, so its `state` and `snapshot()` can be inspected safely.
 Hosts are only known at runtime, so `transport.registry.items()` lists every

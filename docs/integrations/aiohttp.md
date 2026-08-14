@@ -115,11 +115,11 @@ rejecting requests. The state is applied to every lazily created host before
 its first request:
 
 ```python
-from interlock import State
+from interlock import LoggingEventListener, State
 
 middleware = CircuitBreakerMiddleware(
     initial_state=State.METRICS_ONLY,
-    listener=metrics_listener,
+    listener=LoggingEventListener(),
 )
 ```
 
