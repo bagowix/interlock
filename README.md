@@ -1,3 +1,5 @@
+
+
 # interlock
 
 [![CI](https://github.com/bagowix/interlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bagowix/interlock/actions/workflows/ci.yml)
@@ -87,7 +89,7 @@ transport = AsyncCircuitBreakerTransport(
     httpx2.AsyncHTTPTransport(),
     initial_state=State.METRICS_ONLY,
     config=Config(failure_rate_threshold=0.25, minimum_number_of_calls=50),
-    listener=metrics_listener,
+    listener=None,  # or a custom EventListener instance
 )
 ```
 
