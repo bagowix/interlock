@@ -1,21 +1,23 @@
 # interlock
 
+[![PyPI](https://img.shields.io/pypi/v/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
+[![Downloads](https://img.shields.io/pypi/dm/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
+[![Python versions](https://img.shields.io/pypi/pyversions/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/bagowix/interlock/blob/main/LICENSE)
 [![CI](https://github.com/bagowix/interlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bagowix/interlock/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/bagowix/interlock/branch/main/graph/badge.svg)](https://codecov.io/gh/bagowix/interlock)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/bagowix/interlock/badge)](https://scorecard.dev/viewer/?uri=github.com/bagowix/interlock)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13932/badge)](https://www.bestpractices.dev/projects/13932)
-[![PyPI](https://img.shields.io/pypi/v/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
-[![Downloads](https://img.shields.io/pypi/dm/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
-[![Python versions](https://img.shields.io/pypi/pyversions/interlock-cb.svg)](https://pypi.org/project/interlock-cb/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![llms.txt](https://img.shields.io/badge/-llms.txt-brightgreen)](docs/llms.txt)
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-2f6f55.svg)](https://bagowix.github.io/interlock/)
-[![Context7](https://img.shields.io/badge/docs-Context7-1f6feb.svg)](https://context7.com/bagowix/interlock)
 [![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/bagowix/interlock?utm_source=badge)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-2f6f55.svg)](https://bagowix.github.io/interlock/)
+[![llms.txt](https://img.shields.io/badge/-llms.txt-brightgreen)](https://bagowix.github.io/interlock/llms.txt)
+[![Context7](https://img.shields.io/badge/docs-Context7-1f6feb.svg)](https://context7.com/bagowix/interlock)
 
 A modern circuit breaker for Python — sync and async in a single class,
 sliding-window rate and slow-call detection, a type-safe API, and transparent
 integrations at the transport level.
+
+![CLOSED passes calls through and trips to OPEN once the failure or slow-call rate reaches its threshold; OPEN rejects calls without touching the dependency and moves to HALF_OPEN after the wait duration; HALF_OPEN admits probes only — a failing probe re-opens the circuit, successful probes close it](https://raw.githubusercontent.com/bagowix/interlock/main/docs/img/state-machine.svg)
 
 ## Installation
 
@@ -28,18 +30,23 @@ library; external integrations are installed as [optional extras](#integrations)
 
 ## Quickstart
 
-Create one named breaker and reuse it around calls to the same dependency:
+Create one named breaker per dependency and reuse it around every call to it:
 
 ```python
 from interlock import CircuitBreaker, CircuitOpenError, Config
 
-breaker = CircuitBreaker(
+payments = CircuitBreaker(
     name='payments',
-    config=Config(failure_rate_threshold=0.5, minimum_number_of_calls=20),
+    config=Config(
+        failure_rate_threshold=0.5,  # trip at 50% failures...
+        minimum_number_of_calls=20,  # ...once the window holds 20 calls
+        slow_call_duration_threshold=2.0,  # a call slower than 2s counts as slow
+        slow_call_rate_threshold=0.3,  # 30% slow calls trip it just as well
+    ),
 )
 
 
-@breaker
+@payments
 def charge(amount: int) -> str:
     return gateway.charge(amount)
 
@@ -47,14 +54,29 @@ def charge(amount: int) -> str:
 try:
     receipt = charge(100)
 except CircuitOpenError as exc:
-    print(exc)
+    print(exc)  # Circuit 'payments' is open; retry in ~60.000s
 ```
 
-The decorator preserves the function's signature and whether it is sync or
-async. The same breaker also supports `breaker.call(fn, ...)`, `with breaker`,
-and `async with breaker`. See [Getting started](docs/getting-started.md) for all
-calling styles and [Configuration](docs/guides/configuration.md) for every
-threshold.
+The slow-call thresholds matter as much as the failure ones: a dependency that
+answers every call in 30 seconds raises nothing, so a consecutive-failure
+counter keeps the circuit closed while your own request queue fills up.
+
+The same instance protects async callables — there is no second class to
+configure and no separate state to reason about:
+
+```python
+@payments
+async def refund(charge_id: str) -> None:
+    await gateway.refund(charge_id)
+```
+
+The decorator preserves the wrapped signature and whether it is sync or async.
+`breaker.call(fn, ...)`, `with breaker` and `async with breaker` protect the
+same call in other shapes — see
+[Getting started](https://bagowix.github.io/interlock/getting-started/) for all
+calling styles and
+[Configuration](https://bagowix.github.io/interlock/guides/configuration/) for
+every threshold.
 
 ## Why interlock
 
@@ -92,14 +114,36 @@ transport = AsyncCircuitBreakerTransport(
 ```
 
 `LoggingEventListener` writes every event through stdlib logging; swap it for
-an `EventListener` that exports to your metrics backend. For local diagnostics,
-`transport.registry.get_existing(host)` returns an already-created breaker
-without creating one, so its `state` and `snapshot()` can be inspected safely.
-Hosts are only known at runtime, so `transport.registry.items()` lists every
-breaker created so far — a point-in-time copy, name and breaker together.
-After tuning thresholds, deploy a new transport with the default
-`initial_state=State.CLOSED`; the enforcing instance starts with a fresh window.
-See [States and manual control](docs/guides/states.md#safe-rollout).
+an `EventListener` that exports to your metrics backend. Hosts are only known at
+runtime, so `transport.registry.items()` lists every breaker created so far and
+`get_existing(host)` inspects one without creating it. After tuning thresholds,
+deploy a new transport with the default `initial_state=State.CLOSED`; the
+enforcing instance starts with a fresh window. See
+[States and manual control](https://bagowix.github.io/interlock/guides/states/#safe-rollout).
+
+## Shared state across instances
+
+A local breaker only reacts to what its own process saw. Back it with Redis and
+the whole fleet backs off together:
+
+```python
+import redis
+
+from interlock import CircuitBreaker
+from interlock.integrations.redis import RedisStorage
+
+payments = CircuitBreaker(
+    name='payments',
+    storage=RedisStorage(redis.Redis(host='redis.internal')),
+)
+```
+
+Tripping is atomic across racing instances, recovery probes are budgeted
+globally rather than per process, and a Redis outage degrades to local state
+instead of failing calls. Sharing state gates traffic everywhere at once — that
+is the point, and the risk, so the
+[Redis integration](https://bagowix.github.io/interlock/integrations/redis/)
+page starts with when *not* to use it.
 
 ## Resilience pipeline
 
@@ -129,7 +173,7 @@ async def fetch_picks(user: str) -> list[str]:
 
 Retries never hammer an open circuit, one hung attempt cannot eat the retry
 budget, and every decision is observable — see the
-[pipeline guide](docs/guides/pipeline.md).
+[pipeline guide](https://bagowix.github.io/interlock/guides/pipeline/).
 
 ## Integrations
 
@@ -149,18 +193,18 @@ By default, transport exceptions and the canonical retryable statuses
 
 | Integration | Install | Documentation |
 |---|---|---|
-| httpx2 | `interlock-cb[httpx2]` | [Per-host transport](docs/integrations/httpx2.md) |
-| httpx | `interlock-cb[httpx]` | [Per-host transport](docs/integrations/httpx.md) |
-| aiohttp | `interlock-cb[aiohttp]` | [Client middleware](docs/integrations/aiohttp.md) |
-| requests | `interlock-cb[requests]` | [Session adapter](docs/integrations/requests.md) |
-| FastAPI | `interlock-cb[fastapi]` | [`503 + Retry-After` handler](docs/integrations/fastapi.md) |
-| Litestar | `interlock-cb[litestar]` | [`503 + Retry-After` handler](docs/integrations/litestar.md) |
-| tenacity | `interlock-cb[tenacity]` | [Retry composition](docs/integrations/tenacity.md) |
-| Redis | `interlock-cb[redis]` | [Shared state](docs/integrations/redis.md) |
-| OpenTelemetry | `interlock-cb[otel]` | [Metrics listener](docs/guides/observability.md) |
+| httpx2 | `interlock-cb[httpx2]` | [Per-host transport](https://bagowix.github.io/interlock/integrations/httpx2/) |
+| httpx | `interlock-cb[httpx]` | [Per-host transport](https://bagowix.github.io/interlock/integrations/httpx/) |
+| aiohttp | `interlock-cb[aiohttp]` | [Client middleware](https://bagowix.github.io/interlock/integrations/aiohttp/) |
+| requests | `interlock-cb[requests]` | [Session adapter](https://bagowix.github.io/interlock/integrations/requests/) |
+| FastAPI | `interlock-cb[fastapi]` | [`503 + Retry-After` handler](https://bagowix.github.io/interlock/integrations/fastapi/) |
+| Litestar | `interlock-cb[litestar]` | [`503 + Retry-After` handler](https://bagowix.github.io/interlock/integrations/litestar/) |
+| tenacity | `interlock-cb[tenacity]` | [Retry composition](https://bagowix.github.io/interlock/integrations/tenacity/) |
+| Redis | `interlock-cb[redis]` | [Shared state](https://bagowix.github.io/interlock/integrations/redis/) |
+| OpenTelemetry | `interlock-cb[otel]` | [Metrics listener](https://bagowix.github.io/interlock/guides/observability/) |
 
-The [integrations overview](docs/integrations/index.md) also includes recipes
-for LLM SDKs and Flask/Django.
+The [integrations overview](https://bagowix.github.io/interlock/integrations/)
+also includes recipes for LLM SDKs and Flask/Django.
 
 ## How it compares
 
@@ -181,13 +225,15 @@ more than the feature differences.
 | Composable resilience pipeline | ✅ | — | — |
 | Fully typed API (`py.typed`) | ✅ | — | — |
 
-The [full comparison](docs/comparison.md) covers more features as well as
-aiobreaker and purgatory. Something out of date or unfair? Please open a PR.
+The [full comparison](https://bagowix.github.io/interlock/comparison/) covers
+more features as well as aiobreaker and purgatory. Something out of date or
+unfair? Please open a PR.
 
 The reliability work compensating for the project's shorter production history
 includes 100% branch coverage, three strict type checkers, mutation testing of
 the state machine and engine, property- and model-based tests, and CI on
-free-threaded CPython. The [correctness and testing](docs/correctness.md) page
+free-threaded CPython. The
+[correctness and testing](https://bagowix.github.io/interlock/correctness/) page
 documents what is verified and where the limits are.
 
 ## Documentation
@@ -195,23 +241,31 @@ documents what is verified and where the limits are.
 The full documentation is hosted at **<https://bagowix.github.io/interlock/>**.
 Start with:
 
-- [Getting started](docs/getting-started.md)
-- [Configuration](docs/guides/configuration.md) and [states](docs/guides/states.md)
-- [Resilience pipeline](docs/guides/pipeline.md)
-- [Integrations](docs/integrations/index.md)
-- [Correctness and testing](docs/correctness.md)
-- [API reference](docs/reference.md)
+- [Getting started](https://bagowix.github.io/interlock/getting-started/)
+- [Configuration](https://bagowix.github.io/interlock/guides/configuration/) and
+  [states](https://bagowix.github.io/interlock/guides/states/)
+- [Timeouts](https://bagowix.github.io/interlock/guides/timeout/) and
+  [retries](https://bagowix.github.io/interlock/guides/retries/)
+- [Resilience pipeline](https://bagowix.github.io/interlock/guides/pipeline/)
+- [Integrations](https://bagowix.github.io/interlock/integrations/)
+- [Correctness and testing](https://bagowix.github.io/interlock/correctness/)
+- [API reference](https://bagowix.github.io/interlock/reference/)
 
 For a deterministic, network-free demonstration of every state transition, run
-the [`examples/`](examples/) scripts or follow the [walkthrough](docs/demo.md).
+the [`examples/`](https://github.com/bagowix/interlock/tree/main/examples)
+scripts or follow the
+[walkthrough](https://bagowix.github.io/interlock/demo/).
 
 ## Contributing
 
 Bug reports and pull requests are welcome. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for the local setup and the checks a change
-must pass, and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) for community
-expectations. Security issues: please follow [`SECURITY.md`](SECURITY.md).
+[`CONTRIBUTING.md`](https://github.com/bagowix/interlock/blob/main/CONTRIBUTING.md)
+for the local setup and the checks a change must pass, and
+[`CODE_OF_CONDUCT.md`](https://github.com/bagowix/interlock/blob/main/CODE_OF_CONDUCT.md)
+for community expectations. Security issues: please follow
+[`SECURITY.md`](https://github.com/bagowix/interlock/blob/main/SECURITY.md).
 
 ## License
 
-interlock is released under the [MIT License](LICENSE).
+interlock is released under the
+[MIT License](https://github.com/bagowix/interlock/blob/main/LICENSE).
