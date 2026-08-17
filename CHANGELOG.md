@@ -13,13 +13,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the theme emits no such tags and nothing supplied them. Each page now declares
   its title, description and canonical url. The card is the text-only `summary`
   kind: Zensical ships no social-card generation and the documentation carries
-  no image asset.
+  no social-card image.
 
 - **The documentation site is verified with Google Search Console.** Every
   generated page carries the ownership tag for the property, so the maintainers
   can finally see which pages are indexed and which searches reach them —
   previously a blind spot. Nothing about the library itself changes. Removing
   the tag silently un-verifies the property.
+
+- **The README opens with the state machine as a diagram.** The three states and
+  the condition on every edge had to be assembled from prose, so the shape of
+  the thing being installed was the one thing the landing page never showed.
+  `docs/img/state-machine.svg` draws CLOSED, OPEN and HALF_OPEN with their
+  transitions — including the slow-call rate, the edge no other Python breaker
+  has. One asset, no external fonts and no theme-dependent colours, so it
+  renders the same on GitHub, on PyPI and in either colour scheme.
 
 ### Changed
 
@@ -36,6 +44,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   result or a pasted link nothing about what they are looking at. A
   `seo_titles` map in `zensical.toml` gives each page a self-describing title;
   a page left out of the map keeps the theme default.
+
+- **The README now demonstrates what this breaker does differently.** Its only
+  configured example set a failure rate and a minimum call count — the two knobs
+  every other library has — while slow-call detection and the single sync/async
+  class, the reasons to choose it, stayed bullet points with no code behind
+  them. The quickstart now configures the slow-call thresholds, explains the
+  dependency they catch (one that answers slowly and never raises, so a
+  consecutive-failure counter never trips), and guards an async callable with
+  the same instance. A new section shows Redis-backed shared state in five
+  lines, and the rollout section dropped the paragraph that restated the states
+  guide.
 
 ### Fixed
 
@@ -54,6 +73,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   swapped for a metrics exporter. The `aiohttp` and `requests` blocks also
   never imported the middleware and the adapter they construct, unlike every
   other block on those pages.
+
+- **Every link in the README now works from PyPI as well.** The README is the
+  package's long description, and PyPI resolves a relative link against
+  `pypi.org` rather than the repository — so all 31 of them, the whole of
+  `docs/` plus `CONTRIBUTING.md`, `SECURITY.md`, the licence and the examples,
+  answered 404 for a reader who arrived on the package page, which is exactly
+  where the new `Homepage` link now sends people. Every link is absolute:
+  documentation goes to the published site rather than to raw Markdown, which
+  also spares a GitHub reader the tab syntax that only renders once built.
+  `tests/test_readme.py` fails the build on a relative link, on a documentation
+  url with no page behind it, on a repository url with no file behind it, and on
+  an anchor with no matching heading.
 
 ## [2.6.0] - 2026-08-12
 

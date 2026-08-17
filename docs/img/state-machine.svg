@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="200" viewBox="0 0 860 200"
+     role="img" aria-labelledby="title desc"
+     font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+  <title id="title">The interlock circuit breaker state machine</title>
+  <desc id="desc">CLOSED passes calls through and trips to OPEN once the failure or slow-call
+    rate crosses its threshold. OPEN rejects calls without touching the dependency and moves to
+    HALF_OPEN after the wait duration. HALF_OPEN admits probes only: a failing probe re-opens the
+    circuit, enough successful probes close it again.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#6e7781"/>
+    </marker>
+  </defs>
+
+  <g fill="none" stroke="#6e7781" stroke-width="1.6" marker-end="url(#arrow)">
+    <path d="M172 93 H351"/>
+    <path d="M688 82 H509"/>
+    <path d="M507 107 H686"/>
+    <path d="M765 126 V156 Q765 168 753 168 H107 Q95 168 95 156 V128"/>
+  </g>
+
+  <rect x="20" y="62" width="150" height="62" rx="12" fill="#2f6f55"/>
+  <rect x="355" y="62" width="150" height="62" rx="12" fill="#b3261e"/>
+  <rect x="690" y="62" width="150" height="62" rx="12" fill="#b26a00"/>
+
+  <g text-anchor="middle" fill="#ffffff">
+    <g font-size="15" font-weight="600" letter-spacing=".6">
+      <text x="95" y="92">CLOSED</text>
+      <text x="430" y="92">OPEN</text>
+      <text x="765" y="92">HALF_OPEN</text>
+    </g>
+    <g font-size="10.5" fill-opacity=".8">
+      <text x="95" y="110">calls pass through</text>
+      <text x="430" y="110">calls rejected fast</text>
+      <text x="765" y="110">probes only</text>
+    </g>
+  </g>
+
+  <g text-anchor="middle" fill="#6e7781" font-size="12">
+    <text x="262" y="52">failure or slow-call</text>
+    <text x="262" y="68">rate ≥ threshold</text>
+    <text x="597" y="68">probe fails</text>
+    <text x="597" y="127">wait duration elapsed</text>
+    <text x="430" y="188">probes succeed</text>
+  </g>
+</svg>
