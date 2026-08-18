@@ -50,8 +50,9 @@ Every integration follows the same rules, so learning one means knowing all:
   `retry_after` estimate and the last recorded failure — *before* a
   connection is attempted. Each HTTP client integration raises a subclass that
   is *also* a native error of that library, so an application's existing
-  degradation path catches it: `CircuitOpenTransportError`
-  (an `httpx.TransportError`), `CircuitOpenClientError`
+  degradation path catches it: `CircuitOpenTransportError` (an
+  `httpx.TransportError` for the httpx integration, an `httpx2.TransportError`
+  for the httpx2 one), `CircuitOpenClientError`
   (an `aiohttp.ClientConnectionError`), `CircuitOpenRequestError`
   (a `requests.exceptions.ConnectionError`). The host base is always the
   broadest "the request never completed" type, never a leaf such as

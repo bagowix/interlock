@@ -82,6 +82,13 @@ rejection burns an attempt against a circuit that is still open. urllib3's own
 `Retry` never sees it either: that runs inside `HTTPAdapter.send`, which the
 rejection replaces rather than enters.
 
+Only the rejection is retyped. The httpx transports also pair `CallTimeoutError`
+with `httpx.TimeoutException` and `BulkheadFullError` with `httpx.PoolTimeout`;
+requests has no honest counterpart for "no local slot was free" — the nearest type
+is `requests.exceptions.ConnectionError`, which the rejection already uses, so the pairing would claim a
+distinction it cannot express. A `CallTimeoutError` raised by a pipeline of your
+own inside the guarded call therefore stays an interlock error on its way out.
+
 ## Custom breaker keys
 
 Pass `name_resolver` when the request host is not the logical dependency

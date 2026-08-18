@@ -66,6 +66,7 @@ async def test__installed_handler__dialect_rejection__returns_503_with_retry_aft
 
     assert response.status_code == 503
     assert response.headers['retry-after'] == '3'  # ceil(2.2)
+    assert response.json()['detail'] == "Circuit 'payments' is open"
 
 
 def _build_app() -> FastAPI:

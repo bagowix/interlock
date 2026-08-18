@@ -230,7 +230,10 @@ class BulkheadFullTransportError(PoolTimeout, BulkheadFullError):
 
     ``httpx.PoolTimeout`` says the same thing about httpx's own connection
     pool: no local slot was free in time. The condition is local and transient,
-    so — again unlike a rejection — a retry can genuinely succeed.
+    so — again unlike a rejection — a retry can genuinely succeed. Note the
+    consequence: ``PoolTimeout`` *is* a ``httpx.TimeoutException``, so a
+    predicate keyed on that type retries a bulkhead rejection. Only
+    ``CircuitOpenTransportError`` is deliberately kept out of its reach.
 
     Args:
         max_concurrent: The bulkhead's concurrency limit.

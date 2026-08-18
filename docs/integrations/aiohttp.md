@@ -85,6 +85,13 @@ retry predicates key on — a retried rejection burns an attempt against a
 circuit that is still open. It also stays outside `ClientResponseError`, which
 would claim a response that never arrived.
 
+Only the rejection is retyped. The httpx transports also pair `CallTimeoutError`
+with `httpx.TimeoutException` and `BulkheadFullError` with `httpx.PoolTimeout`;
+aiohttp has no honest counterpart for "no local slot was free" — the nearest type
+is `aiohttp.ClientConnectionError`, which the rejection already uses, so the pairing would claim a
+distinction it cannot express. A `CallTimeoutError` raised by a pipeline of your
+own inside the guarded call therefore stays an interlock error on its way out.
+
 ## Custom breaker keys
 
 Pass `name_resolver` when host-based isolation does not match the logical

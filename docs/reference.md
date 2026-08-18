@@ -104,11 +104,18 @@ Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
   default.
 
 Every HTTP client integration raises a subclass of these that is *also* a
-native error of the host library, so `except httpx.TransportError` and
-`except CircuitOpenError` both catch the same rejection:
-`CircuitOpenTransportError` (httpx, httpx2), `CircuitOpenClientError`
-(aiohttp), `CircuitOpenRequestError` (requests). See the integration sections
-below.
+native error of the host library, so the idiom that library teaches and
+`except CircuitOpenError` catch the same rejection. The native base differs per
+integration — one `except` clause covers one client, not all four:
+
+| Integration | Rejection type | Native base |
+|---|---|---|
+| httpx | `CircuitOpenTransportError` | `httpx.TransportError` |
+| httpx2 | `CircuitOpenTransportError` | `httpx2.TransportError` |
+| aiohttp | `CircuitOpenClientError` | `aiohttp.ClientConnectionError` |
+| requests | `CircuitOpenRequestError` | `requests.exceptions.ConnectionError` |
+
+See the integration sections below.
 
 ## `timeout` / `sync_timeout`
 
@@ -195,7 +202,8 @@ Implement any of these to swap a core behaviour:
 Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
-  initial_state=State.CLOSED, classifier=None, listener=None)`**
+  initial_state=State.CLOSED, classifier=None, listener=None, registry=None,
+  name_resolver=<request host>)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   fails on transport exceptions and statuses `429, 500, 502, 503, 504`
@@ -213,7 +221,12 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
 Both transports expose their per-host `registry` and the guarded transport as a
 read-only `wrapped`. `close()` / `aclose()` release the wrapped transport and,
 when the transport owns the registry, every breaker in it; a caller-owned
-registry stays open and is closed by its owner. See the
+registry stays open and is closed by its owner. Every adapter below takes the
+same `registry` option — a caller-owned `Registry` shared between clients — and
+combining it with any breaker-construction option (`config`, `clock`,
+`initial_state`, `classifier`, `listener`) raises `ValueError`, since the
+registry already owns them. `name_resolver` maps each request to its breaker
+name and defaults to the request host. See the
 [httpx2 integration](integrations/httpx2.md).
 
 ## httpx adapters
@@ -222,7 +235,8 @@ Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
 `interlock.integrations.httpx`:
 
 - **`CircuitBreakerTransport(transport, *, config=None, clock=None,
-  initial_state=State.CLOSED, classifier=None, listener=None)`**
+  initial_state=State.CLOSED, classifier=None, listener=None, registry=None,
+  name_resolver=<request host>)`**
 - **`AsyncCircuitBreakerTransport(transport, *, ...)`**
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same policy, including the caller-side `UnsupportedProtocol` /
@@ -243,7 +257,8 @@ See the [httpx integration](integrations/httpx.md).
 Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations.aiohttp`:
 
 - **`CircuitBreakerMiddleware(*, config=None, clock=None,
-  initial_state=State.CLOSED, classifier=None, listener=None)`** —
+  initial_state=State.CLOSED, classifier=None, listener=None, registry=None,
+  name_resolver=<request host>)`** —
   client middleware for `ClientSession(middlewares=(...,))`; one breaker per
   request host.
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
@@ -261,7 +276,8 @@ shutdown. See the [aiohttp integration](integrations/aiohttp.md).
 Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
 
 - **`CircuitBreakerAdapter(*, config=None, clock=None,
-  initial_state=State.CLOSED, classifier=None, listener=None, **adapter_kwargs)`** —
+  initial_state=State.CLOSED, classifier=None, listener=None, registry=None,
+  name_resolver=<request host>, **adapter_kwargs)`** —
   `HTTPAdapter` subclass for `session.mount(...)`; one breaker per request
   host. Extra kwargs go to `HTTPAdapter`.
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —

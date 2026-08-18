@@ -145,6 +145,14 @@ class HttpStatusClassifier:
 # retry predicates key on — a retried rejection burns an attempt against a
 # circuit that is still open. It also keeps the rejection outside
 # ``ClientResponseError``, which would claim a response that never arrived.
+#
+# Only the rejection is retyped here, unlike the httpx transports, which also
+# pair ``CallTimeoutError`` with ``TimeoutException`` and ``BulkheadFullError``
+# with ``PoolTimeout``. aiohttp has no honest counterpart for "no local slot was
+# free": the nearest type is ``ClientConnectionError``, which this rejection
+# already uses, so the pairing would claim a distinction it cannot express.
+# A ``CallTimeoutError`` from an inner layer therefore stays an interlock error
+# on the way out — deliberately, not by omission.
 class CircuitOpenClientError(ClientConnectionError, CircuitOpenError):
     """A request rejected by an open circuit, raised in aiohttp's hierarchy.
 

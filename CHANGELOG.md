@@ -43,8 +43,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **`except httpx.TransportError` and its aiohttp / requests equivalents now
-  catch circuit rejections.** That is the point of the change, but it is a
+- **`except httpx.TransportError` — and `except httpx2.TransportError`,
+  `except aiohttp.ClientError`, `except requests.exceptions.RequestException` —
+  now catch circuit rejections.** That is the point of the change, but it is a
   behavioural difference for code that already catches those types: a rejection
   reaches such a handler where it previously escaped to an outer `except
   Exception`. Nothing that catches `CircuitOpenError` changes, and no typical
