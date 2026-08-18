@@ -103,10 +103,11 @@ Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
 - **`InterlockDeprecationWarning`** — subclasses `UserWarning`, visible by
   default.
 
-Every HTTP client integration raises a subclass of these that is *also* a
-native error of the host library, so the idiom that library teaches and
-`except CircuitOpenError` catch the same rejection. The native base differs per
-integration — one `except` clause covers one client, not all four:
+Every HTTP client integration retypes the **rejection** — and only the
+rejection — as a subclass that is *also* a native error of the host library, so
+the idiom that library teaches and `except CircuitOpenError` catch the same
+error. The native base differs per integration; one `except` clause covers one
+client, not all four:
 
 | Integration | Rejection type | Native base |
 |---|---|---|
@@ -115,7 +116,13 @@ integration — one `except` clause covers one client, not all four:
 | aiohttp | `CircuitOpenClientError` | `aiohttp.ClientConnectionError` |
 | requests | `CircuitOpenRequestError` | `requests.exceptions.ConnectionError` |
 
-See the integration sections below.
+`CallTimeoutError` and `BulkheadFullError` are paired only by the httpx and
+httpx2 transports, as `CallTimeoutTransportError` (a `TimeoutException`) and
+`BulkheadFullTransportError` (a `PoolTimeout`); they surface a timeout or
+bulkhead raised by a layer inside the wrapped transport. The aiohttp middleware
+and the requests adapter leave both untouched — neither hierarchy has an honest
+type for "no local slot was free" — so they reach the caller as plain interlock
+errors. See the integration sections below.
 
 ## `timeout` / `sync_timeout`
 
