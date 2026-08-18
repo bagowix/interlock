@@ -44,12 +44,46 @@ idempotent.
 
 Each host gets its own breaker (a failing `api.a` never trips `api.b`),
 created lazily and shared across requests. When a host's circuit is open the
-request raises [`CircuitOpenError`](../reference.md) *before* a connection is
-made.
+request raises `CircuitOpenClientError` *before* a connection is made.
 
 The breaker observes the time to *response headers*; reading the body happens
 outside the guarded call — the same semantics as the
 [httpx2 transport](httpx2.md).
+
+## What a rejection looks like
+
+An open circuit rejects the request with `CircuitOpenClientError`, which is
+both an `aiohttp.ClientConnectionError` and interlock's `CircuitOpenError`:
+
+```python
+import aiohttp
+
+from interlock.integrations.aiohttp import CircuitOpenClientError
+
+try:
+    response = await session.get('https://api.example.com/v1/users')
+except aiohttp.ClientError as exc:
+    # The dependency being unreachable and the breaker rejecting both land here.
+    if isinstance(exc, CircuitOpenClientError):
+        ...  # rejected before any I/O; the next probe is exc.retry_after away
+    raise
+```
+
+That is the point of the type: the degradation paths an application already
+writes in aiohttp's own idiom keep working the day a breaker leaves shadow
+mode. The rejection is still a `CircuitOpenError` too, so `except
+CircuitOpenError`, a `FallbackStrategy(on=(CircuitOpenError,))` or a framework
+exception handler registered for it catch exactly what they caught before. It
+carries `breaker_name`, `retry_after` and `last_failure`. aiohttp re-raises a
+`ClientError` from the middleware chain untouched, so it reaches the caller
+exactly as raised.
+
+The base type is deliberately the broad `ClientConnectionError` and never a
+leaf such as `ClientOSError` or `ServerDisconnectedError`: nothing was
+connected and no server dropped anything, and those leaves are exactly what
+retry predicates key on — a retried rejection burns an attempt against a
+circuit that is still open. It also stays outside `ClientResponseError`, which
+would claim a response that never arrived.
 
 ## Custom breaker keys
 

@@ -4,14 +4,29 @@ from collections.abc import Awaitable
 from typing import cast
 
 import pytest
-from aiohttp import ClientHandlerType, ClientRequest, ClientResponse, ClientSession, web
+from aiohttp import (
+    ClientConnectionError,
+    ClientError,
+    ClientHandlerType,
+    ClientOSError,
+    ClientRequest,
+    ClientResponse,
+    ClientResponseError,
+    ClientSession,
+    ServerTimeoutError,
+    web,
+)
 from aiohttp.test_utils import TestServer
 from pytest_mock import MockerFixture
 from tests.conftest import FakeClock
 from yarl import URL
 
 from interlock import CircuitBreaker, CircuitOpenError, Config, Registry, State
-from interlock.integrations.aiohttp import CircuitBreakerMiddleware, HttpStatusClassifier
+from interlock.integrations.aiohttp import (
+    CircuitBreakerMiddleware,
+    CircuitOpenClientError,
+    HttpStatusClassifier,
+)
 
 _TRIP_FAST = Config(minimum_number_of_calls=2, failure_rate_threshold=0.5)
 
@@ -365,3 +380,109 @@ def test__http_status_classifier__custom_statuses__override_default_set() -> Non
     assert classifier.is_failure(result=_StubResponse(404), exception=None) is True
     assert classifier.is_failure(result=_StubResponse(408), exception=None) is True
     assert classifier.is_failure(result=_StubResponse(500), exception=None) is False
+
+
+# --- dialect errors -----------------------------------------------------------
+
+
+async def _tripped_middleware(fake_clock: FakeClock) -> CircuitBreakerMiddleware:
+    """A middleware whose ``api.a`` breaker has just been tripped open."""
+    middleware = CircuitBreakerMiddleware(config=_TRIP_FAST, clock=fake_clock)
+    handler = _handler([ClientConnectionError('down'), ClientConnectionError('down')])
+    for _ in range(2):
+        with pytest.raises(ClientConnectionError):
+            await middleware(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+
+    return middleware
+
+
+@pytest.mark.asyncio
+async def test__middleware__open_circuit__rejects_inside_aiohttp_hierarchy(
+    fake_clock: FakeClock,
+) -> None:
+    middleware = await _tripped_middleware(fake_clock)
+    handler = _handler([])
+
+    with pytest.raises(CircuitOpenClientError) as excinfo:
+        await middleware(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+
+    assert isinstance(excinfo.value, ClientConnectionError)
+    assert isinstance(excinfo.value, ClientError)
+    assert isinstance(excinfo.value, CircuitOpenError)
+
+
+@pytest.mark.asyncio
+async def test__middleware__open_circuit__stays_outside_retryable_leaf_types(
+    fake_clock: FakeClock,
+) -> None:
+    middleware = await _tripped_middleware(fake_clock)
+    handler = _handler([])
+
+    with pytest.raises(CircuitOpenClientError) as excinfo:
+        await middleware(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+
+    assert not isinstance(excinfo.value, ClientResponseError)
+    assert not isinstance(excinfo.value, ClientOSError)
+    assert not isinstance(excinfo.value, ServerTimeoutError)
+
+
+@pytest.mark.asyncio
+async def test__middleware__open_circuit__carries_breaker_context(
+    fake_clock: FakeClock,
+) -> None:
+    middleware = await _tripped_middleware(fake_clock)
+    handler = _handler([])
+
+    with pytest.raises(CircuitOpenClientError) as excinfo:
+        await middleware(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+
+    error = excinfo.value
+    assert error.breaker_name == 'api.a'
+    assert error.retry_after == _TRIP_FAST.wait_duration_in_open
+    assert isinstance(error.last_failure, ClientConnectionError)
+    assert str(error) == f"Circuit 'api.a' is open; retry in ~{error.retry_after:.3f}s"
+    assert type(error.__cause__) is CircuitOpenError
+
+
+@pytest.mark.asyncio
+async def test__middleware__inner_dialect_error__propagates_unchanged(
+    fake_clock: FakeClock,
+) -> None:
+    rejection = CircuitOpenClientError('inner', retry_after=1.0)
+    middleware = CircuitBreakerMiddleware(config=_TRIP_FAST, clock=fake_clock)
+    handler = _handler([rejection])
+
+    with pytest.raises(CircuitOpenClientError) as excinfo:
+        await middleware(_request('https://api.a/x'), cast('ClientHandlerType', handler))
+
+    assert excinfo.value is rejection
+    assert excinfo.value.__cause__ is None
+
+
+@pytest.mark.asyncio
+async def test__middleware__e2e_real_session__rejection_is_caught_as_client_error(
+    fake_clock: FakeClock,
+) -> None:
+    """A real session must not mangle the rejection on its way out of the chain."""
+
+    async def unhealthy(_request: web.Request) -> web.Response:
+        return web.Response(status=503)
+
+    app = web.Application()
+    app.router.add_get('/', unhealthy)
+    server = TestServer(app)
+    await server.start_server()
+
+    middleware = CircuitBreakerMiddleware(config=_TRIP_FAST, clock=fake_clock)
+    try:
+        async with ClientSession(middlewares=(middleware,)) as session:
+            for _ in range(2):
+                async with session.get(server.make_url('/')) as response:
+                    assert response.status == 503
+
+            with pytest.raises(ClientConnectionError) as excinfo:
+                await session.get(server.make_url('/'))
+    finally:
+        await server.close()
+
+    assert isinstance(excinfo.value, CircuitOpenClientError)

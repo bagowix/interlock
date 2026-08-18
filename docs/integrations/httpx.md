@@ -86,9 +86,56 @@ transport configured for shadow mode would still create future hosts in
 
 Each host gets its own lazily created breaker. A failing
 `api.a.example.com` trips only that host; traffic to `api.b.example.com`
-continues normally. An open breaker raises `CircuitOpenError` before the
-wrapped transport performs I/O. A request URL without a host raises
+continues normally. An open breaker raises `CircuitOpenTransportError`
+before the wrapped transport performs I/O. A request URL without a host raises
 `ValueError` for the same reason: there is no dependency identity to key on.
+
+## What a rejection looks like
+
+An open circuit rejects the request with `CircuitOpenTransportError`, which is
+both an `httpx.TransportError` and interlock's `CircuitOpenError`:
+
+```python
+import httpx
+
+from interlock.integrations.httpx import CircuitOpenTransportError
+
+try:
+    response = client.get('https://api.example.com/v1/users')
+except httpx.TransportError as exc:
+    # The dependency being unreachable and the breaker rejecting both land here.
+    if isinstance(exc, CircuitOpenTransportError):
+        ...  # rejected before any I/O; the next probe is exc.retry_after away
+    raise
+```
+
+That is the point of the type: the degradation paths an application already
+writes in httpx's own idiom keep working the day a breaker leaves shadow mode.
+The rejection is still a `CircuitOpenError` too, so `except CircuitOpenError`,
+a `FallbackStrategy(on=(CircuitOpenError,))` or a framework exception handler
+registered for it catch exactly what they caught before. It carries
+`breaker_name`, `retry_after` and `last_failure`, plus httpx's own `.request`.
+
+The base type is deliberately `TransportError` and never a leaf such as
+`ConnectError` or `TimeoutException`: nothing was connected and nothing timed
+out, and those leaves are exactly what retry predicates key on — a retried
+rejection burns an attempt against a circuit that is still open.
+
+Two further types cover the other interlock errors that can reach the caller
+through the transport, raised when a layer of your own inside the wrapped
+transport (a pipeline timeout, a bulkhead) fails the request:
+
+| interlock error | dialect type | httpx base |
+|---|---|---|
+| `CircuitOpenError` | `CircuitOpenTransportError` | `httpx.TransportError` |
+| `CallTimeoutError` | `CallTimeoutTransportError` | `httpx.TimeoutException` |
+| `BulkheadFullError` | `BulkheadFullTransportError` | `httpx.PoolTimeout` |
+
+Those two describe transient *local* conditions — a deadline, a busy slot pool
+— so unlike a rejection they sit under httpx's timeout types on purpose, where
+retry predicates do fire on them. An error raised by the wrapped transport
+itself is never retyped, and neither is one that already carries an httpx
+hierarchy.
 
 ## Custom breaker keys
 
@@ -245,4 +292,6 @@ transport = CircuitBreakerTransport(
 ```
 
 The transport never retries. If another layer owns retries, keep them bounded
-and stop retrying when the breaker raises `CircuitOpenError`.
+and stop retrying when the breaker rejects: `CircuitOpenTransportError` sits
+outside the httpx leaf types retry predicates key on, so a predicate written
+against `ConnectError` or `TimeoutException` already leaves it alone.

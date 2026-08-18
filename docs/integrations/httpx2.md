@@ -93,8 +93,55 @@ Each host gets its own breaker, created lazily and cached. A failing
 `api.b.example.com` are unaffected. Per-instance, per-host state is usually more
 correct than global state — each host's health is observed independently.
 
-When a host's breaker is open, its requests raise `CircuitOpenError` before
-reaching the network.
+When a host's breaker is open, its requests raise `CircuitOpenTransportError`
+before reaching the network.
+
+## What a rejection looks like
+
+An open circuit rejects the request with `CircuitOpenTransportError`, which is
+both an `httpx2.TransportError` and interlock's `CircuitOpenError`:
+
+```python
+import httpx2
+
+from interlock.integrations.httpx2 import CircuitOpenTransportError
+
+try:
+    response = client.get('https://api.example.com/v1/users')
+except httpx2.TransportError as exc:
+    # The dependency being unreachable and the breaker rejecting both land here.
+    if isinstance(exc, CircuitOpenTransportError):
+        ...  # rejected before any I/O; the next probe is exc.retry_after away
+    raise
+```
+
+That is the point of the type: the degradation paths an application already
+writes in httpx2's own idiom keep working the day a breaker leaves shadow mode.
+The rejection is still a `CircuitOpenError` too, so `except CircuitOpenError`,
+a `FallbackStrategy(on=(CircuitOpenError,))` or a framework exception handler
+registered for it catch exactly what they caught before. It carries
+`breaker_name`, `retry_after` and `last_failure`, plus httpx2's own `.request`.
+
+The base type is deliberately `TransportError` and never a leaf such as
+`ConnectError` or `TimeoutException`: nothing was connected and nothing timed
+out, and those leaves are exactly what retry predicates key on — a retried
+rejection burns an attempt against a circuit that is still open.
+
+Two further types cover the other interlock errors that can reach the caller
+through the transport, raised when a layer of your own inside the wrapped
+transport (a pipeline timeout, a bulkhead) fails the request:
+
+| interlock error | dialect type | httpx2 base |
+|---|---|---|
+| `CircuitOpenError` | `CircuitOpenTransportError` | `httpx2.TransportError` |
+| `CallTimeoutError` | `CallTimeoutTransportError` | `httpx2.TimeoutException` |
+| `BulkheadFullError` | `BulkheadFullTransportError` | `httpx2.PoolTimeout` |
+
+Those two describe transient *local* conditions — a deadline, a busy slot pool
+— so unlike a rejection they sit under httpx2's timeout types on purpose, where
+retry predicates do fire on them. An error raised by the wrapped transport
+itself is never retyped, and neither is one that already carries an httpx2
+hierarchy.
 
 ## Custom breaker keys
 

@@ -14,7 +14,12 @@ sites::
 
 Each host gets its own breaker (a failing ``api.a`` must not trip ``api.b``),
 created lazily and shared across requests. When a host's circuit is open the
-request is rejected with ``CircuitOpenError`` before a connection is made.
+request is rejected before a connection is made, with
+``CircuitOpenRequestError``: a ``requests.exceptions.ConnectionError`` *and* a
+``CircuitOpenError``, so the requests idiom (``except
+requests.exceptions.RequestException``) degrades on it exactly as it degrades on
+the dependency being unreachable, and existing ``except CircuitOpenError``
+handlers keep working.
 
 By default a response counts as a failure when its status is in the canonical
 retryable set (``429, 500, 502, 503, 504``) and a transport exception
@@ -26,20 +31,22 @@ host); ``4xx`` client mistakes like ``404`` are successes. Supply a custom
 import http
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import ExitStack
-from typing import cast
+from typing import NoReturn, cast
 from urllib.parse import urlsplit
 
 from requests import PreparedRequest, Response
 from requests.adapters import HTTPAdapter
+from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import InvalidURL
 
 from interlock.config import Config
+from interlock.errors import CircuitOpenError
 from interlock.integrations._registry import reject_registry_options, resolve_registry
 from interlock.protocols import Clock, CoreEventListener, FailureClassifier, StorageEventListener
 from interlock.registry import Registry
 from interlock.state import State
 
-__all__ = ('CircuitBreakerAdapter', 'HttpStatusClassifier')
+__all__ = ('CircuitBreakerAdapter', 'CircuitOpenRequestError', 'HttpStatusClassifier')
 
 # Mirrors urllib3's recommended ``status_forcelist`` (also used by AWS/Google):
 # transient server-side conditions where the dependency is unhealthy or
@@ -131,6 +138,72 @@ class HttpStatusClassifier:
             return not isinstance(exception, self._excluded_exceptions)
 
         return cast('Response', result).status_code in self._failure_statuses
+
+
+# Application code degrades on the idiom its http client teaches — for requests
+# that is ``except requests.exceptions.RequestException`` (or its
+# ``ConnectionError`` branch). An error raised from outside that hierarchy sails
+# past every such handler, so the day a breaker leaves shadow mode every
+# degradation path stops working at once. The rejection is therefore both a
+# requests error and a ``CircuitOpenError``.
+#
+# The requests base is the broadest "the request never reached the dependency"
+# type and never a leaf like ``SSLError`` or ``ConnectTimeout``: a leaf promises
+# a physical cause that never happened, and leaves are exactly what retry
+# predicates key on — a retried rejection burns an attempt against a circuit
+# that is still open. urllib3's own ``Retry`` never sees it either: it runs
+# inside ``HTTPAdapter.send``, which this rejection replaces rather than enters.
+class CircuitOpenRequestError(RequestsConnectionError, CircuitOpenError):
+    """A request rejected by an open circuit, raised in requests' hierarchy.
+
+    Caught by ``except requests.exceptions.ConnectionError`` (and by ``except
+    requests.exceptions.RequestException``) and by ``except CircuitOpenError``
+    alike.
+
+    Args:
+        breaker_name: Name of the breaker that rejected the request.
+        retry_after: Seconds until the next probe is allowed, or ``None`` when
+            the breaker cannot estimate it.
+        last_failure: The most recent recorded failure, if any.
+        request: The rejected request, published as requests' ``.request``.
+    """
+
+    def __init__(
+        self,
+        breaker_name: str,
+        *,
+        retry_after: float | None = None,
+        last_failure: BaseException | None = None,
+        request: PreparedRequest | None = None,
+    ) -> None:
+        CircuitOpenError.__init__(
+            self, breaker_name, retry_after=retry_after, last_failure=last_failure
+        )
+        # ``RequestException.__init__`` is unreachable from here: its
+        # ``super()`` call follows *this* class's MRO into
+        # ``CircuitOpenError.__init__``, which would read the message as a
+        # breaker name. The two attributes it publishes are set directly, so a
+        # handler reading ``.request`` or ``.response`` finds what it expects.
+        self.request = request
+        self.response = None
+
+
+def _raise_in_dialect(error: CircuitOpenError, request: PreparedRequest) -> NoReturn:
+    """Re-raise ``error`` as its requests twin, or unchanged when it has none.
+
+    Only the exact core type is retyped. A subclass — including this dialect
+    type, raised by an interlock layer further in — already carries a host
+    hierarchy of its own and must not be wrapped a second time.
+    """
+    if type(error) is CircuitOpenError:
+        raise CircuitOpenRequestError(
+            error.breaker_name,
+            retry_after=error.retry_after,
+            last_failure=error.last_failure,
+            request=request,
+        ) from error
+
+    raise error
 
 
 def _host(request: PreparedRequest) -> str:
@@ -242,18 +315,23 @@ class CircuitBreakerAdapter(HTTPAdapter):
         """Run the request under its resolved dependency's breaker.
 
         Raises:
-            CircuitOpenError: If the resolved dependency's breaker is open.
+            CircuitOpenRequestError: If the resolved dependency's breaker is
+                open — a ``requests.exceptions.ConnectionError`` and a
+                ``CircuitOpenError``.
             ValueError: If the request URL has no host under the default
                 resolver, or the configured resolver returns a non-string or
                 empty name.
         """
         breaker = self._registry.get(_breaker_name(request, self._name_resolver))
-        return breaker.call_sync(
-            super().send,
-            request,
-            stream=stream,
-            timeout=timeout,
-            verify=verify,
-            cert=cert,
-            proxies=proxies,
-        )
+        try:
+            return breaker.call_sync(
+                super().send,
+                request,
+                stream=stream,
+                timeout=timeout,
+                verify=verify,
+                cert=cert,
+                proxies=proxies,
+            )
+        except CircuitOpenError as error:
+            _raise_in_dialect(error, request)

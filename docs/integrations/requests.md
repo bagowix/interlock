@@ -45,8 +45,42 @@ created.
 
 Each host gets its own breaker (a failing `api.a` never trips `api.b`),
 created lazily and shared across requests. When a host's circuit is open the
-request raises [`CircuitOpenError`](../reference.md) *before* a connection is
-made.
+request raises `CircuitOpenRequestError` *before* a connection is made.
+
+## What a rejection looks like
+
+An open circuit rejects the request with `CircuitOpenRequestError`, which is
+both a `requests.exceptions.ConnectionError` and interlock's
+`CircuitOpenError`:
+
+```python
+import requests
+
+from interlock.integrations.requests import CircuitOpenRequestError
+
+try:
+    response = session.get('https://api.example.com/v1/users')
+except requests.exceptions.RequestException as exc:
+    # The dependency being unreachable and the breaker rejecting both land here.
+    if isinstance(exc, CircuitOpenRequestError):
+        ...  # rejected before any I/O; the next probe is exc.retry_after away
+    raise
+```
+
+That is the point of the type: the degradation paths an application already
+writes in requests' own idiom keep working the day a breaker leaves shadow
+mode. The rejection is still a `CircuitOpenError` too, so `except
+CircuitOpenError`, a `FallbackStrategy(on=(CircuitOpenError,))` or a framework
+exception handler registered for it catch exactly what they caught before. It
+carries `breaker_name`, `retry_after` and `last_failure`, plus requests' own
+`.request` and `.response`.
+
+The base type is deliberately `ConnectionError` and never a leaf such as
+`SSLError` or `ConnectTimeout`: no connection was attempted and nothing timed
+out, and those leaves are exactly what retry predicates key on — a retried
+rejection burns an attempt against a circuit that is still open. urllib3's own
+`Retry` never sees it either: that runs inside `HTTPAdapter.send`, which the
+rejection replaces rather than enters.
 
 ## Custom breaker keys
 

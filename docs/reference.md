@@ -103,6 +103,13 @@ Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
 - **`InterlockDeprecationWarning`** — subclasses `UserWarning`, visible by
   default.
 
+Every HTTP client integration raises a subclass of these that is *also* a
+native error of the host library, so `except httpx.TransportError` and
+`except CircuitOpenError` both catch the same rejection:
+`CircuitOpenTransportError` (httpx, httpx2), `CircuitOpenClientError`
+(aiohttp), `CircuitOpenRequestError` (requests). See the integration sections
+below.
+
 ## `timeout` / `sync_timeout`
 
 ```python
@@ -195,6 +202,13 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
   (override the set via `failure_statuses`). `UnsupportedProtocol` and
   `LocalProtocolError` are caller-side and count as successes; replace that set
   via `excluded_exceptions`.
+- **`CircuitOpenTransportError(breaker_name, *, retry_after=None,
+  last_failure=None, request=None)`** — the rejection: an
+  `httpx2.TransportError` *and* a `CircuitOpenError`.
+- **`CallTimeoutTransportError(timeout, *, request=None)`** — an
+  `httpx2.TimeoutException` *and* a `CallTimeoutError`.
+- **`BulkheadFullTransportError(max_concurrent, *, max_wait=0.0,
+  request=None)`** — an `httpx2.PoolTimeout` *and* a `BulkheadFullError`.
 
 Both transports expose their per-host `registry` and the guarded transport as a
 read-only `wrapped`. `close()` / `aclose()` release the wrapped transport and,
@@ -213,6 +227,10 @@ Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same policy, including the caller-side `UnsupportedProtocol` /
   `LocalProtocolError` exclusions.
+- **`CircuitOpenTransportError`**, **`CallTimeoutTransportError`**,
+  **`BulkheadFullTransportError`** — the same three dialect errors as the
+  httpx2 adapters, built on `httpx.TransportError`, `httpx.TimeoutException`
+  and `httpx.PoolTimeout`.
 
 Both transports expose their per-host `registry` and the guarded transport as a
 read-only `wrapped`, and preserve streaming responses. `close()` / `aclose()`
@@ -231,6 +249,9 @@ Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same canonical HTTP policy, reading `ClientResponse.status`; nothing is
   excluded by default (aiohttp rejects bad URLs before the middleware runs).
+- **`CircuitOpenClientError(breaker_name, *, retry_after=None,
+  last_failure=None)`** — the rejection: an `aiohttp.ClientConnectionError`
+  *and* a `CircuitOpenError`.
 
 It exposes its `registry`; call `await middleware.aclose()` during application
 shutdown. See the [aiohttp integration](integrations/aiohttp.md).
@@ -246,6 +267,10 @@ Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same policy, reading `Response.status_code`; the caller-side `InvalidURL`
   counts as a success.
+- **`CircuitOpenRequestError(breaker_name, *, retry_after=None,
+  last_failure=None, request=None)`** — the rejection: a
+  `requests.exceptions.ConnectionError` *and* a `CircuitOpenError`; carries
+  requests' own `.request` and `.response`.
 
 It exposes its `registry`; closing the adapter or owning session releases both
 the connection pools and breaker resources. See the

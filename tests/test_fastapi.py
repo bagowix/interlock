@@ -13,6 +13,7 @@ from interlock.integrations.fastapi import (
     circuit_open_handler,
     install_exception_handler,
 )
+from interlock.integrations.httpx2 import CircuitOpenTransportError
 
 
 def _request() -> Request:
@@ -47,6 +48,24 @@ def test__breaker_dependency__returns_shared_breaker_from_registry() -> None:
 
     assert isinstance(first, CircuitBreaker)
     assert first is second  # the registry caches one breaker per name
+
+
+@pytest.mark.asyncio
+async def test__installed_handler__dialect_rejection__returns_503_with_retry_after() -> None:
+    """Starlette resolves a handler by walking the MRO; the httpx2 bases come first."""
+    app = FastAPI()
+    install_exception_handler(app)
+
+    @app.get('/down')
+    async def down() -> dict[str, str]:
+        raise CircuitOpenTransportError('payments', retry_after=2.2)
+
+    transport = httpx2.ASGITransport(app=app)
+    async with httpx2.AsyncClient(transport=transport, base_url='http://test') as client:
+        response = await client.get('/down')
+
+    assert response.status_code == 503
+    assert response.headers['retry-after'] == '3'  # ceil(2.2)
 
 
 def _build_app() -> FastAPI:

@@ -7,7 +7,11 @@ import pytest
 from tests.conftest import FakeClock, Upstream, closed_port
 
 from interlock import CircuitOpenError, Config
-from interlock.integrations.httpx import AsyncCircuitBreakerTransport, CircuitBreakerTransport
+from interlock.integrations.httpx import (
+    AsyncCircuitBreakerTransport,
+    CircuitBreakerTransport,
+    CircuitOpenTransportError,
+)
 
 _TRIP_FAST = Config(
     minimum_number_of_calls=2,
@@ -161,3 +165,22 @@ async def test__httpx_e2e_async__connection_refused__opens_breaker(fake_clock: F
 
         with pytest.raises(CircuitOpenError):
             await client.get(url)
+
+
+def test__httpx_e2e_sync__open_circuit__rejects_as_transport_error(
+    serve: Callable[..., str], fake_clock: FakeClock
+) -> None:
+    """A real client must deliver the rejection through httpx's own hierarchy."""
+    backend = Upstream(status=503)
+    url = serve(backend)
+
+    with _sync_client(fake_clock) as client:
+        assert client.get(url).status_code == 503
+        assert client.get(url).status_code == 503
+
+        with pytest.raises(httpx.TransportError) as rejected:
+            client.get(url)
+
+    assert isinstance(rejected.value, CircuitOpenTransportError)
+    assert rejected.value.request.url == httpx.URL(url)
+    assert not isinstance(rejected.value, httpx.ConnectError)

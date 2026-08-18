@@ -2539,10 +2539,18 @@ Every integration follows the same rules, so learning one means knowing all:
   before the middleware chain runs). Pass
   `HttpStatusClassifier(failure_statuses={...}, excluded_exceptions=(...))` or
   your own `FailureClassifier` to change the policy.
-- **One rejection signal.** An open circuit always raises
+- **One rejection signal, in two dialects.** An open circuit always raises
   [`CircuitOpenError`](../reference.md) — carrying the breaker name, a
   `retry_after` estimate and the last recorded failure — *before* a
-  connection is attempted.
+  connection is attempted. Each HTTP client integration raises a subclass that
+  is *also* a native error of that library, so an application's existing
+  degradation path catches it: `CircuitOpenTransportError`
+  (an `httpx.TransportError`), `CircuitOpenClientError`
+  (an `aiohttp.ClientConnectionError`), `CircuitOpenRequestError`
+  (a `requests.exceptions.ConnectionError`). The host base is always the
+  broadest "the request never completed" type, never a leaf such as
+  `ConnectError` — leaves are what retry predicates key on, and retrying a
+  rejection only burns an attempt against a circuit that is still open.
 - **Zero-dependency core.** Integrations live in `interlock.integrations.*`
   as optional extras; `import interlock` itself never pulls anything beyond
   the standard library.
@@ -2890,8 +2898,55 @@ Each host gets its own breaker, created lazily and cached. A failing
 `api.b.example.com` are unaffected. Per-instance, per-host state is usually more
 correct than global state — each host's health is observed independently.
 
-When a host's breaker is open, its requests raise `CircuitOpenError` before
-reaching the network.
+When a host's breaker is open, its requests raise `CircuitOpenTransportError`
+before reaching the network.
+
+## What a rejection looks like
+
+An open circuit rejects the request with `CircuitOpenTransportError`, which is
+both an `httpx2.TransportError` and interlock's `CircuitOpenError`:
+
+```python
+import httpx2
+
+from interlock.integrations.httpx2 import CircuitOpenTransportError
+
+try:
+    response = client.get('https://api.example.com/v1/users')
+except httpx2.TransportError as exc:
+    # The dependency being unreachable and the breaker rejecting both land here.
+    if isinstance(exc, CircuitOpenTransportError):
+        ...  # rejected before any I/O; the next probe is exc.retry_after away
+    raise
+```
+
+That is the point of the type: the degradation paths an application already
+writes in httpx2's own idiom keep working the day a breaker leaves shadow mode.
+The rejection is still a `CircuitOpenError` too, so `except CircuitOpenError`,
+a `FallbackStrategy(on=(CircuitOpenError,))` or a framework exception handler
+registered for it catch exactly what they caught before. It carries
+`breaker_name`, `retry_after` and `last_failure`, plus httpx2's own `.request`.
+
+The base type is deliberately `TransportError` and never a leaf such as
+`ConnectError` or `TimeoutException`: nothing was connected and nothing timed
+out, and those leaves are exactly what retry predicates key on — a retried
+rejection burns an attempt against a circuit that is still open.
+
+Two further types cover the other interlock errors that can reach the caller
+through the transport, raised when a layer of your own inside the wrapped
+transport (a pipeline timeout, a bulkhead) fails the request:
+
+| interlock error | dialect type | httpx2 base |
+|---|---|---|
+| `CircuitOpenError` | `CircuitOpenTransportError` | `httpx2.TransportError` |
+| `CallTimeoutError` | `CallTimeoutTransportError` | `httpx2.TimeoutException` |
+| `BulkheadFullError` | `BulkheadFullTransportError` | `httpx2.PoolTimeout` |
+
+Those two describe transient *local* conditions — a deadline, a busy slot pool
+— so unlike a rejection they sit under httpx2's timeout types on purpose, where
+retry predicates do fire on them. An error raised by the wrapped transport
+itself is never retyped, and neither is one that already carries an httpx2
+hierarchy.
 
 ## Custom breaker keys
 
@@ -3135,9 +3190,56 @@ transport configured for shadow mode would still create future hosts in
 
 Each host gets its own lazily created breaker. A failing
 `api.a.example.com` trips only that host; traffic to `api.b.example.com`
-continues normally. An open breaker raises `CircuitOpenError` before the
-wrapped transport performs I/O. A request URL without a host raises
+continues normally. An open breaker raises `CircuitOpenTransportError`
+before the wrapped transport performs I/O. A request URL without a host raises
 `ValueError` for the same reason: there is no dependency identity to key on.
+
+## What a rejection looks like
+
+An open circuit rejects the request with `CircuitOpenTransportError`, which is
+both an `httpx.TransportError` and interlock's `CircuitOpenError`:
+
+```python
+import httpx
+
+from interlock.integrations.httpx import CircuitOpenTransportError
+
+try:
+    response = client.get('https://api.example.com/v1/users')
+except httpx.TransportError as exc:
+    # The dependency being unreachable and the breaker rejecting both land here.
+    if isinstance(exc, CircuitOpenTransportError):
+        ...  # rejected before any I/O; the next probe is exc.retry_after away
+    raise
+```
+
+That is the point of the type: the degradation paths an application already
+writes in httpx's own idiom keep working the day a breaker leaves shadow mode.
+The rejection is still a `CircuitOpenError` too, so `except CircuitOpenError`,
+a `FallbackStrategy(on=(CircuitOpenError,))` or a framework exception handler
+registered for it catch exactly what they caught before. It carries
+`breaker_name`, `retry_after` and `last_failure`, plus httpx's own `.request`.
+
+The base type is deliberately `TransportError` and never a leaf such as
+`ConnectError` or `TimeoutException`: nothing was connected and nothing timed
+out, and those leaves are exactly what retry predicates key on — a retried
+rejection burns an attempt against a circuit that is still open.
+
+Two further types cover the other interlock errors that can reach the caller
+through the transport, raised when a layer of your own inside the wrapped
+transport (a pipeline timeout, a bulkhead) fails the request:
+
+| interlock error | dialect type | httpx base |
+|---|---|---|
+| `CircuitOpenError` | `CircuitOpenTransportError` | `httpx.TransportError` |
+| `CallTimeoutError` | `CallTimeoutTransportError` | `httpx.TimeoutException` |
+| `BulkheadFullError` | `BulkheadFullTransportError` | `httpx.PoolTimeout` |
+
+Those two describe transient *local* conditions — a deadline, a busy slot pool
+— so unlike a rejection they sit under httpx's timeout types on purpose, where
+retry predicates do fire on them. An error raised by the wrapped transport
+itself is never retyped, and neither is one that already carries an httpx
+hierarchy.
 
 ## Custom breaker keys
 
@@ -3294,7 +3396,9 @@ transport = CircuitBreakerTransport(
 ```
 
 The transport never retries. If another layer owns retries, keep them bounded
-and stop retrying when the breaker raises `CircuitOpenError`.
+and stop retrying when the breaker rejects: `CircuitOpenTransportError` sits
+outside the httpx leaf types retry predicates key on, so a predicate written
+against `ConnectError` or `TimeoutException` already leaves it alone.
 
 ---
 
@@ -3346,12 +3450,46 @@ idempotent.
 
 Each host gets its own breaker (a failing `api.a` never trips `api.b`),
 created lazily and shared across requests. When a host's circuit is open the
-request raises [`CircuitOpenError`](../reference.md) *before* a connection is
-made.
+request raises `CircuitOpenClientError` *before* a connection is made.
 
 The breaker observes the time to *response headers*; reading the body happens
 outside the guarded call — the same semantics as the
 [httpx2 transport](httpx2.md).
+
+## What a rejection looks like
+
+An open circuit rejects the request with `CircuitOpenClientError`, which is
+both an `aiohttp.ClientConnectionError` and interlock's `CircuitOpenError`:
+
+```python
+import aiohttp
+
+from interlock.integrations.aiohttp import CircuitOpenClientError
+
+try:
+    response = await session.get('https://api.example.com/v1/users')
+except aiohttp.ClientError as exc:
+    # The dependency being unreachable and the breaker rejecting both land here.
+    if isinstance(exc, CircuitOpenClientError):
+        ...  # rejected before any I/O; the next probe is exc.retry_after away
+    raise
+```
+
+That is the point of the type: the degradation paths an application already
+writes in aiohttp's own idiom keep working the day a breaker leaves shadow
+mode. The rejection is still a `CircuitOpenError` too, so `except
+CircuitOpenError`, a `FallbackStrategy(on=(CircuitOpenError,))` or a framework
+exception handler registered for it catch exactly what they caught before. It
+carries `breaker_name`, `retry_after` and `last_failure`. aiohttp re-raises a
+`ClientError` from the middleware chain untouched, so it reaches the caller
+exactly as raised.
+
+The base type is deliberately the broad `ClientConnectionError` and never a
+leaf such as `ClientOSError` or `ServerDisconnectedError`: nothing was
+connected and no server dropped anything, and those leaves are exactly what
+retry predicates key on — a retried rejection burns an attempt against a
+circuit that is still open. It also stays outside `ClientResponseError`, which
+would claim a response that never arrived.
 
 ## Custom breaker keys
 
@@ -3525,8 +3663,42 @@ created.
 
 Each host gets its own breaker (a failing `api.a` never trips `api.b`),
 created lazily and shared across requests. When a host's circuit is open the
-request raises [`CircuitOpenError`](../reference.md) *before* a connection is
-made.
+request raises `CircuitOpenRequestError` *before* a connection is made.
+
+## What a rejection looks like
+
+An open circuit rejects the request with `CircuitOpenRequestError`, which is
+both a `requests.exceptions.ConnectionError` and interlock's
+`CircuitOpenError`:
+
+```python
+import requests
+
+from interlock.integrations.requests import CircuitOpenRequestError
+
+try:
+    response = session.get('https://api.example.com/v1/users')
+except requests.exceptions.RequestException as exc:
+    # The dependency being unreachable and the breaker rejecting both land here.
+    if isinstance(exc, CircuitOpenRequestError):
+        ...  # rejected before any I/O; the next probe is exc.retry_after away
+    raise
+```
+
+That is the point of the type: the degradation paths an application already
+writes in requests' own idiom keep working the day a breaker leaves shadow
+mode. The rejection is still a `CircuitOpenError` too, so `except
+CircuitOpenError`, a `FallbackStrategy(on=(CircuitOpenError,))` or a framework
+exception handler registered for it catch exactly what they caught before. It
+carries `breaker_name`, `retry_after` and `last_failure`, plus requests' own
+`.request` and `.response`.
+
+The base type is deliberately `ConnectionError` and never a leaf such as
+`SSLError` or `ConnectTimeout`: no connection was attempted and nothing timed
+out, and those leaves are exactly what retry predicates key on — a retried
+rejection burns an attempt against a circuit that is still open. urllib3's own
+`Retry` never sees it either: that runs inside `HTTPAdapter.send`, which the
+rejection replaces rather than enters.
 
 ## Custom breaker keys
 
@@ -4455,6 +4627,13 @@ Frozen dataclass: `total_calls`, `failed_calls`, `slow_calls`, plus
 - **`InterlockDeprecationWarning`** — subclasses `UserWarning`, visible by
   default.
 
+Every HTTP client integration raises a subclass of these that is *also* a
+native error of the host library, so `except httpx.TransportError` and
+`except CircuitOpenError` both catch the same rejection:
+`CircuitOpenTransportError` (httpx, httpx2), `CircuitOpenClientError`
+(aiohttp), `CircuitOpenRequestError` (requests). See the integration sections
+below.
+
 ## `timeout` / `sync_timeout`
 
 ```python
@@ -4547,6 +4726,13 @@ Extra `interlock-cb[httpx2]`, module `interlock.integrations.httpx2`:
   (override the set via `failure_statuses`). `UnsupportedProtocol` and
   `LocalProtocolError` are caller-side and count as successes; replace that set
   via `excluded_exceptions`.
+- **`CircuitOpenTransportError(breaker_name, *, retry_after=None,
+  last_failure=None, request=None)`** — the rejection: an
+  `httpx2.TransportError` *and* a `CircuitOpenError`.
+- **`CallTimeoutTransportError(timeout, *, request=None)`** — an
+  `httpx2.TimeoutException` *and* a `CallTimeoutError`.
+- **`BulkheadFullTransportError(max_concurrent, *, max_wait=0.0,
+  request=None)`** — an `httpx2.PoolTimeout` *and* a `BulkheadFullError`.
 
 Both transports expose their per-host `registry` and the guarded transport as a
 read-only `wrapped`. `close()` / `aclose()` release the wrapped transport and,
@@ -4565,6 +4751,10 @@ Extra `interlock-cb[httpx]` (httpx ≥ 0.27.0), module
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same policy, including the caller-side `UnsupportedProtocol` /
   `LocalProtocolError` exclusions.
+- **`CircuitOpenTransportError`**, **`CallTimeoutTransportError`**,
+  **`BulkheadFullTransportError`** — the same three dialect errors as the
+  httpx2 adapters, built on `httpx.TransportError`, `httpx.TimeoutException`
+  and `httpx.PoolTimeout`.
 
 Both transports expose their per-host `registry` and the guarded transport as a
 read-only `wrapped`, and preserve streaming responses. `close()` / `aclose()`
@@ -4583,6 +4773,9 @@ Extra `interlock-cb[aiohttp]` (aiohttp ≥ 3.12), module `interlock.integrations
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same canonical HTTP policy, reading `ClientResponse.status`; nothing is
   excluded by default (aiohttp rejects bad URLs before the middleware runs).
+- **`CircuitOpenClientError(breaker_name, *, retry_after=None,
+  last_failure=None)`** — the rejection: an `aiohttp.ClientConnectionError`
+  *and* a `CircuitOpenError`.
 
 It exposes its `registry`; call `await middleware.aclose()` during application
 shutdown. See the [aiohttp integration](integrations/aiohttp.md).
@@ -4598,6 +4791,10 @@ Extra `interlock-cb[requests]`, module `interlock.integrations.requests`:
 - **`HttpStatusClassifier(*, failure_statuses=None, excluded_exceptions=None)`** —
   same policy, reading `Response.status_code`; the caller-side `InvalidURL`
   counts as a success.
+- **`CircuitOpenRequestError(breaker_name, *, retry_after=None,
+  last_failure=None, request=None)`** — the rejection: a
+  `requests.exceptions.ConnectionError` *and* a `CircuitOpenError`; carries
+  requests' own `.request` and `.response`.
 
 It exposes its `registry`; closing the adapter or owning session releases both
 the connection pools and breaker resources. See the

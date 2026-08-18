@@ -11,7 +11,11 @@ from requests.adapters import HTTPAdapter
 from tests.conftest import FakeClock
 
 from interlock import CircuitBreaker, CircuitOpenError, Config, Registry, State
-from interlock.integrations.requests import CircuitBreakerAdapter, HttpStatusClassifier
+from interlock.integrations.requests import (
+    CircuitBreakerAdapter,
+    CircuitOpenRequestError,
+    HttpStatusClassifier,
+)
 
 _TRIP_FAST = Config(minimum_number_of_calls=2, failure_rate_threshold=0.5)
 
@@ -365,3 +369,97 @@ def test__http_status_classifier__custom_statuses__override_default_set() -> Non
     assert classifier.is_failure(result=_response(404), exception=None) is True
     assert classifier.is_failure(result=_response(408), exception=None) is True
     assert classifier.is_failure(result=_response(500), exception=None) is False
+
+
+# --- dialect errors -----------------------------------------------------------
+
+
+def _tripped_adapter(mocker: MockerFixture, fake_clock: FakeClock) -> CircuitBreakerAdapter:
+    """An adapter whose ``api.a`` breaker has just been tripped open."""
+    _patch_transport(mocker, [_response(503), _response(503)])
+    adapter = CircuitBreakerAdapter(config=_TRIP_FAST, clock=fake_clock)
+    for _ in range(2):
+        adapter.send(_prepared('https://api.a/x'))
+
+    return adapter
+
+
+def test__adapter__open_circuit__rejects_inside_requests_hierarchy(
+    mocker: MockerFixture, fake_clock: FakeClock
+) -> None:
+    adapter = _tripped_adapter(mocker, fake_clock)
+
+    with pytest.raises(CircuitOpenRequestError) as excinfo:
+        adapter.send(_prepared('https://api.a/x'))
+
+    assert isinstance(excinfo.value, requests.exceptions.ConnectionError)
+    assert isinstance(excinfo.value, requests.exceptions.RequestException)
+    assert isinstance(excinfo.value, CircuitOpenError)
+
+
+def test__adapter__open_circuit__stays_outside_retryable_leaf_types(
+    mocker: MockerFixture, fake_clock: FakeClock
+) -> None:
+    adapter = _tripped_adapter(mocker, fake_clock)
+
+    with pytest.raises(CircuitOpenRequestError) as excinfo:
+        adapter.send(_prepared('https://api.a/x'))
+
+    assert not isinstance(excinfo.value, requests.exceptions.Timeout)
+    assert not isinstance(excinfo.value, requests.exceptions.SSLError)
+
+
+def test__adapter__open_circuit__carries_breaker_and_request_context(
+    mocker: MockerFixture, fake_clock: FakeClock
+) -> None:
+    adapter = _tripped_adapter(mocker, fake_clock)
+    request = _prepared('https://api.a/x')
+
+    with pytest.raises(CircuitOpenRequestError) as excinfo:
+        adapter.send(request)
+
+    error = excinfo.value
+    assert error.breaker_name == 'api.a'
+    assert error.retry_after == _TRIP_FAST.wait_duration_in_open
+    assert error.last_failure is None
+    assert error.request is request
+    assert error.response is None
+    assert str(error) == f"Circuit 'api.a' is open; retry in ~{error.retry_after:.3f}s"
+    assert type(error.__cause__) is CircuitOpenError
+
+
+def test__adapter__open_circuit__records_the_last_failure(
+    mocker: MockerFixture, fake_clock: FakeClock
+) -> None:
+    failure = requests.exceptions.ReadTimeout('slow')
+    _patch_transport(mocker, [failure, failure])
+    adapter = CircuitBreakerAdapter(config=_TRIP_FAST, clock=fake_clock)
+    for _ in range(2):
+        with pytest.raises(requests.exceptions.ReadTimeout):
+            adapter.send(_prepared('https://api.a/x'))
+
+    with pytest.raises(CircuitOpenRequestError) as excinfo:
+        adapter.send(_prepared('https://api.a/x'))
+
+    assert excinfo.value.last_failure is failure
+
+
+def test__adapter__inner_dialect_error__propagates_unchanged(
+    mocker: MockerFixture, fake_clock: FakeClock
+) -> None:
+    rejection = CircuitOpenRequestError('inner', retry_after=1.0)
+    _patch_transport(mocker, [rejection])
+    adapter = CircuitBreakerAdapter(config=_TRIP_FAST, clock=fake_clock)
+
+    with pytest.raises(CircuitOpenRequestError) as excinfo:
+        adapter.send(_prepared('https://api.a/x'))
+
+    assert excinfo.value is rejection
+    assert excinfo.value.__cause__ is None
+
+
+def test__circuit_open_request_error__constructed_bare__keeps_requests_attributes() -> None:
+    error = CircuitOpenRequestError('api')
+
+    assert error.request is None
+    assert error.response is None

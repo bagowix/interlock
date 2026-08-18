@@ -19,24 +19,34 @@ By default a response counts as a failure when its status is one of
 504`` — and a transport exception (connect/read errors) is a failure unless it
 is caller-side (a malformed URL, a local protocol violation). Supply a custom
 ``classifier`` to change that policy.
+
+A rejected request is raised as ``CircuitOpenTransportError``: an
+``httpx2.TransportError`` *and* a ``CircuitOpenError``, so the httpx2 idiom
+(``except httpx2.TransportError``) degrades on it exactly as it degrades on the
+dependency being unreachable, and existing ``except CircuitOpenError`` handlers
+keep working.
 """
 
 import http
 from collections.abc import Callable, Iterable
 from contextlib import AsyncExitStack, ExitStack
 from types import TracebackType
-from typing import Self, cast
+from typing import NoReturn, Self, cast
 
 from httpx2 import (
     AsyncBaseTransport,
     BaseTransport,
     LocalProtocolError,
+    PoolTimeout,
     Request,
     Response,
+    TimeoutException,
+    TransportError,
     UnsupportedProtocol,
 )
 
 from interlock.config import Config
+from interlock.errors import BulkheadFullError, CallTimeoutError, CircuitOpenError, InterlockError
 from interlock.integrations._registry import reject_registry_options, resolve_registry
 from interlock.protocols import Clock, CoreEventListener, FailureClassifier, StorageEventListener
 from interlock.registry import Registry
@@ -44,7 +54,10 @@ from interlock.state import State
 
 __all__ = (
     'AsyncCircuitBreakerTransport',
+    'BulkheadFullTransportError',
+    'CallTimeoutTransportError',
     'CircuitBreakerTransport',
+    'CircuitOpenTransportError',
     'HttpStatusClassifier',
 )
 
@@ -142,6 +155,126 @@ class HttpStatusClassifier:
         return cast('Response', result).status_code in self._failure_statuses
 
 
+# Application code degrades on the idiom its http client teaches — for httpx2
+# that is ``except httpx2.TransportError``. An error raised from outside that
+# hierarchy sails past every such handler, so the day a breaker leaves shadow
+# mode every degradation path stops working at once. Each type below is
+# therefore both an httpx2 error and the interlock error it retypes.
+#
+# The httpx2 base is always the broadest "the request never completed" type and
+# never a leaf like ``ConnectError`` or ``ReadTimeout``: a leaf promises a
+# physical cause that never happened, and leaves are exactly what retry
+# predicates key on — a retried rejection burns an attempt against a circuit
+# that is still open.
+class CircuitOpenTransportError(TransportError, CircuitOpenError):
+    """A request rejected by an open circuit, raised in httpx2's hierarchy.
+
+    Caught by ``except httpx2.TransportError`` and by ``except
+    CircuitOpenError`` alike; not by ``except httpx2.ConnectError`` or ``except
+    httpx2.TimeoutException``, so a retry predicate keyed on those does not fire
+    on a rejection no retry can satisfy.
+
+    Args:
+        breaker_name: Name of the breaker that rejected the request.
+        retry_after: Seconds until the next probe is allowed, or ``None`` when
+            the breaker cannot estimate it.
+        last_failure: The most recent recorded failure, if any.
+        request: The rejected request, published as httpx2's ``.request``.
+    """
+
+    # ``HTTPError.__init__`` is unreachable from here: its ``super()`` call
+    # follows *this* class's MRO into ``CircuitOpenError.__init__``, which would
+    # read the message as a breaker name. Declaring the attribute it would have
+    # set keeps ``.request`` failing the way httpx2 documents it instead of with
+    # an ``AttributeError``.
+    _request: Request | None = None
+
+    def __init__(
+        self,
+        breaker_name: str,
+        *,
+        retry_after: float | None = None,
+        last_failure: BaseException | None = None,
+        request: Request | None = None,
+    ) -> None:
+        CircuitOpenError.__init__(
+            self, breaker_name, retry_after=retry_after, last_failure=last_failure
+        )
+        if request is not None:
+            self.request = request
+
+
+class CallTimeoutTransportError(TimeoutException, CallTimeoutError):
+    """A guarded call that ran past its deadline, raised in httpx2's hierarchy.
+
+    ``httpx2.TimeoutException`` is the exact counterpart — a deadline expired
+    with no response — so unlike a rejection this one *is* meant to be caught
+    by timeout-shaped retry predicates.
+
+    Args:
+        timeout: The deadline, in seconds, that was exceeded.
+        request: The request that ran out of time, published as ``.request``.
+    """
+
+    _request: Request | None = None  # see CircuitOpenTransportError
+
+    def __init__(self, timeout: float, *, request: Request | None = None) -> None:
+        CallTimeoutError.__init__(self, timeout)
+        if request is not None:
+            self.request = request
+
+
+class BulkheadFullTransportError(PoolTimeout, BulkheadFullError):
+    """A request refused for want of a concurrency slot, in httpx2's hierarchy.
+
+    ``httpx2.PoolTimeout`` says the same thing about httpx2's own connection
+    pool: no local slot was free in time. The condition is local and transient,
+    so — again unlike a rejection — a retry can genuinely succeed.
+
+    Args:
+        max_concurrent: The bulkhead's concurrency limit.
+        max_wait: Seconds the call was willing to wait for a slot.
+        request: The refused request, published as httpx2's ``.request``.
+    """
+
+    _request: Request | None = None  # see CircuitOpenTransportError
+
+    def __init__(
+        self,
+        max_concurrent: int,
+        *,
+        max_wait: float = 0.0,
+        request: Request | None = None,
+    ) -> None:
+        BulkheadFullError.__init__(self, max_concurrent, max_wait=max_wait)
+        if request is not None:
+            self.request = request
+
+
+def _raise_in_dialect(error: InterlockError, request: Request) -> NoReturn:
+    """Re-raise ``error`` as its httpx2 twin, or unchanged when it has none.
+
+    Only the exact core types are retyped. A subclass — including these dialect
+    types, raised by an interlock layer further in — already carries a host
+    hierarchy of its own and must not be wrapped a second time.
+    """
+    if type(error) is CircuitOpenError:
+        raise CircuitOpenTransportError(
+            error.breaker_name,
+            retry_after=error.retry_after,
+            last_failure=error.last_failure,
+            request=request,
+        ) from error
+    if type(error) is CallTimeoutError:
+        raise CallTimeoutTransportError(error.timeout, request=request) from error
+    if type(error) is BulkheadFullError:
+        raise BulkheadFullTransportError(
+            error.max_concurrent, max_wait=error.max_wait, request=request
+        ) from error
+
+    raise error
+
+
 def _host(request: Request) -> str:
     """The host keying the request's breaker; empty hosts are rejected eagerly."""
     host = request.url.host
@@ -230,13 +363,19 @@ class CircuitBreakerTransport(BaseTransport):
         """Run the request under its resolved dependency's breaker.
 
         Raises:
-            CircuitOpenError: If the resolved dependency's breaker is open.
+            CircuitOpenTransportError: If the resolved dependency's breaker is
+                open — an ``httpx2.TransportError`` and a ``CircuitOpenError``.
+                A ``CallTimeoutError`` or ``BulkheadFullError`` coming out of
+                the wrapped transport is retyped the same way.
             ValueError: If the request URL has no host under the default
                 resolver, or the configured resolver returns a non-string or
                 empty name.
         """
         breaker = self._registry.get(_breaker_name(request, self._name_resolver))
-        return breaker.call_sync(self._transport.handle_request, request)
+        try:
+            return breaker.call_sync(self._transport.handle_request, request)
+        except InterlockError as error:
+            _raise_in_dialect(error, request)
 
     def __enter__(self) -> Self:
         """Enter the wrapped transport's context and return this wrapper."""
@@ -329,13 +468,19 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
         """Run the request under its resolved dependency's breaker.
 
         Raises:
-            CircuitOpenError: If the resolved dependency's breaker is open.
+            CircuitOpenTransportError: If the resolved dependency's breaker is
+                open — an ``httpx2.TransportError`` and a ``CircuitOpenError``.
+                A ``CallTimeoutError`` or ``BulkheadFullError`` coming out of
+                the wrapped transport is retyped the same way.
             ValueError: If the request URL has no host under the default
                 resolver, or the configured resolver returns a non-string or
                 empty name.
         """
         breaker = self._registry.get(_breaker_name(request, self._name_resolver))
-        return await breaker.call_async(self._transport.handle_async_request, request)
+        try:
+            return await breaker.call_async(self._transport.handle_async_request, request)
+        except InterlockError as error:
+            _raise_in_dialect(error, request)
 
     async def __aenter__(self) -> Self:
         """Enter the wrapped transport's context and return this wrapper."""
