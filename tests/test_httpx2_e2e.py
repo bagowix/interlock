@@ -19,7 +19,11 @@ import pytest
 from tests.conftest import FakeClock, Upstream, closed_port
 
 from interlock import CircuitOpenError, Config
-from interlock.integrations.httpx2 import AsyncCircuitBreakerTransport, CircuitBreakerTransport
+from interlock.integrations.httpx2 import (
+    AsyncCircuitBreakerTransport,
+    CircuitBreakerTransport,
+    CircuitOpenTransportError,
+)
 
 # Trip after two failures so scenarios stay short; the default 10-call minimum
 # would only add noise to an end-to-end flow test. One half-open probe decides
@@ -202,3 +206,22 @@ async def test__e2e_async__connection_refused__opens_breaker(fake_clock: FakeClo
 
         with pytest.raises(CircuitOpenError):
             await client.get(url)
+
+
+def test__httpx2_e2e_sync__open_circuit__rejects_as_transport_error(
+    serve: Callable[..., str], fake_clock: FakeClock
+) -> None:
+    """A real client must deliver the rejection through httpx2's own hierarchy."""
+    backend = Upstream(status=503)
+    url = serve(backend)
+
+    with _sync_client(fake_clock) as client:
+        assert client.get(url).status_code == 503
+        assert client.get(url).status_code == 503
+
+        with pytest.raises(httpx2.TransportError) as rejected:
+            client.get(url)
+
+    assert isinstance(rejected.value, CircuitOpenTransportError)
+    assert rejected.value.request.url == httpx2.URL(url)
+    assert not isinstance(rejected.value, httpx2.ConnectError)

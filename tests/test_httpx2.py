@@ -8,10 +8,22 @@ from httpx2 import AsyncBaseTransport, BaseTransport, Request, Response
 from pytest_mock import MockerFixture
 from tests.conftest import FakeClock, RecordingListener
 
-from interlock import CircuitBreaker, CircuitOpenError, Config, Outcome, Registry, State
+from interlock import (
+    BulkheadFullError,
+    CallTimeoutError,
+    CircuitBreaker,
+    CircuitOpenError,
+    Config,
+    Outcome,
+    Registry,
+    State,
+)
 from interlock.integrations.httpx2 import (
     AsyncCircuitBreakerTransport,
+    BulkheadFullTransportError,
+    CallTimeoutTransportError,
     CircuitBreakerTransport,
+    CircuitOpenTransportError,
     HttpStatusClassifier,
 )
 
@@ -576,3 +588,172 @@ async def test__async_transport__url_without_host__raises_value_error(
         await transport.handle_async_request(_request('/relative/path'))
 
     assert stub.calls == 0
+
+
+# --- dialect errors -----------------------------------------------------------
+
+
+def _tripped_sync_transport(fake_clock: FakeClock) -> CircuitBreakerTransport:
+    """A transport whose ``api.example.com`` breaker has just been tripped open."""
+
+    def boom(request: Request) -> Response:
+        raise httpx2.ReadError('down', request=request)
+
+    transport = CircuitBreakerTransport(_SyncStub(boom), config=_TRIP_FAST, clock=fake_clock)
+    for _ in range(2):
+        with pytest.raises(httpx2.ReadError):
+            transport.handle_request(_request())
+
+    return transport
+
+
+def test__sync_transport__open_circuit__rejects_inside_httpx2_hierarchy(
+    fake_clock: FakeClock,
+) -> None:
+    transport = _tripped_sync_transport(fake_clock)
+
+    with pytest.raises(CircuitOpenTransportError) as excinfo:
+        transport.handle_request(_request())
+
+    assert isinstance(excinfo.value, httpx2.TransportError)
+    assert isinstance(excinfo.value, CircuitOpenError)
+
+
+def test__sync_transport__open_circuit__stays_outside_retryable_leaf_types(
+    fake_clock: FakeClock,
+) -> None:
+    transport = _tripped_sync_transport(fake_clock)
+
+    with pytest.raises(CircuitOpenTransportError) as excinfo:
+        transport.handle_request(_request())
+
+    assert not isinstance(excinfo.value, httpx2.ConnectError)
+    assert not isinstance(excinfo.value, httpx2.TimeoutException)
+
+
+def test__sync_transport__open_circuit__carries_breaker_and_request_context(
+    fake_clock: FakeClock,
+) -> None:
+    transport = _tripped_sync_transport(fake_clock)
+    request = _request()
+
+    with pytest.raises(CircuitOpenTransportError) as excinfo:
+        transport.handle_request(request)
+
+    error = excinfo.value
+    assert error.breaker_name == 'api.example.com'
+    assert error.retry_after == _TRIP_FAST.wait_duration_in_open
+    assert isinstance(error.last_failure, httpx2.ReadError)
+    assert error.request is request
+    assert str(error) == f"Circuit 'api.example.com' is open; retry in ~{error.retry_after:.3f}s"
+    assert type(error.__cause__) is CircuitOpenError
+
+
+@pytest.mark.asyncio
+async def test__async_transport__open_circuit__rejects_inside_httpx2_hierarchy(
+    fake_clock: FakeClock,
+) -> None:
+    def boom(request: Request) -> Response:
+        raise httpx2.ReadError('down', request=request)
+
+    transport = AsyncCircuitBreakerTransport(_AsyncStub(boom), config=_TRIP_FAST, clock=fake_clock)
+    for _ in range(2):
+        with pytest.raises(httpx2.ReadError):
+            await transport.handle_async_request(_request())
+
+    request = _request()
+    with pytest.raises(CircuitOpenTransportError) as excinfo:
+        await transport.handle_async_request(request)
+
+    error = excinfo.value
+    assert isinstance(error, httpx2.TransportError)
+    assert isinstance(error, CircuitOpenError)
+    assert error.breaker_name == 'api.example.com'
+    assert error.request is request
+
+
+def test__sync_transport__inner_call_timeout__retyped_as_httpx2_timeout(
+    fake_clock: FakeClock,
+) -> None:
+    def boom(_request: Request) -> Response:
+        raise CallTimeoutError(1.5)
+
+    transport = CircuitBreakerTransport(_SyncStub(boom), config=_TRIP_FAST, clock=fake_clock)
+    request = _request()
+
+    with pytest.raises(CallTimeoutTransportError) as excinfo:
+        transport.handle_request(request)
+
+    error = excinfo.value
+    assert isinstance(error, httpx2.TimeoutException)
+    assert isinstance(error, CallTimeoutError)
+    assert error.timeout == 1.5
+    assert error.request is request
+    assert str(error) == 'Operation exceeded its 1.500s timeout'
+
+
+def test__sync_transport__inner_bulkhead_rejection__retyped_as_httpx2_pool_timeout(
+    fake_clock: FakeClock,
+) -> None:
+    def boom(_request: Request) -> Response:
+        raise BulkheadFullError(4, max_wait=0.25)
+
+    transport = CircuitBreakerTransport(_SyncStub(boom), config=_TRIP_FAST, clock=fake_clock)
+    request = _request()
+
+    with pytest.raises(BulkheadFullTransportError) as excinfo:
+        transport.handle_request(request)
+
+    error = excinfo.value
+    assert isinstance(error, httpx2.PoolTimeout)
+    assert isinstance(error, BulkheadFullError)
+    assert error.max_concurrent == 4
+    assert error.max_wait == 0.25
+    assert error.request is request
+
+
+def test__sync_transport__inner_dialect_error__propagates_unchanged(
+    fake_clock: FakeClock,
+) -> None:
+    rejection = CircuitOpenTransportError('inner', retry_after=1.0)
+
+    def boom(_request: Request) -> Response:
+        raise rejection
+
+    transport = CircuitBreakerTransport(_SyncStub(boom), config=_TRIP_FAST, clock=fake_clock)
+
+    with pytest.raises(CircuitOpenTransportError) as excinfo:
+        transport.handle_request(_request())
+
+    assert excinfo.value is rejection
+    assert excinfo.value.__cause__ is None
+
+
+@pytest.mark.asyncio
+async def test__async_transport__inner_dialect_error__propagates_unchanged(
+    fake_clock: FakeClock,
+) -> None:
+    rejection = CircuitOpenTransportError('inner', retry_after=1.0)
+
+    def boom(_request: Request) -> Response:
+        raise rejection
+
+    transport = AsyncCircuitBreakerTransport(_AsyncStub(boom), config=_TRIP_FAST, clock=fake_clock)
+
+    with pytest.raises(CircuitOpenTransportError) as excinfo:
+        await transport.handle_async_request(_request())
+
+    assert excinfo.value is rejection
+
+
+@pytest.mark.parametrize(
+    'error',
+    [
+        CircuitOpenTransportError('api'),
+        CallTimeoutTransportError(1.0),
+        BulkheadFullTransportError(2),
+    ],
+)
+def test__dialect_errors__request_not_set__keep_httpx2_contract(error: httpx2.HTTPError) -> None:
+    with pytest.raises(RuntimeError, match='has not been set'):
+        _ = error.request

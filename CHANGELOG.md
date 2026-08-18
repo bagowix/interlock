@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **A rejected request now lands in its client library's own exception
+  hierarchy.** Every HTTP integration raised a bare `CircuitOpenError`, a type
+  no handler written against httpx, aiohttp or requests catches. Application
+  code degrades on the idiom its client teaches — `except httpx.TransportError`,
+  `except requests.exceptions.RequestException`, `except aiohttp.ClientError` —
+  so the day a breaker left `METRICS_ONLY` and started rejecting, the rejection
+  flew past every one of those handlers at once and turned a partial outage into
+  a full one. The rejection is now `CircuitOpenTransportError` (httpx, httpx2),
+  `CircuitOpenClientError` (aiohttp) or `CircuitOpenRequestError` (requests):
+  each is both a native error of the host library and still a
+  `CircuitOpenError`, carrying `breaker_name`, `retry_after` and `last_failure`
+  plus the library's own request context (`.request` on httpx and httpx2,
+  `.request` / `.response` on requests).
+
+  The host base is deliberately the broadest "the request never completed" type
+  — `httpx.TransportError`, `aiohttp.ClientConnectionError`,
+  `requests.exceptions.ConnectionError` — and never a leaf such as
+  `ConnectError`, `ReadTimeout` or `SSLError`. A leaf promises a physical cause
+  that never happened, and leaves are exactly what retry predicates key on:
+  inheriting from one would make every rejection retryable, and each retry would
+  hit the same open circuit and burn an attempt for nothing. One choice puts the
+  rejection inside every degradation handler and outside every typical retry
+  predicate.
+
+- **The httpx and httpx2 transports retype the other two interlock errors as
+  well.** `CallTimeoutTransportError` (an `httpx.TimeoutException`) and
+  `BulkheadFullTransportError` (an `httpx.PoolTimeout`) surface a pipeline
+  timeout or bulkhead rejection raised by a layer sitting inside the wrapped
+  transport. Both describe transient *local* conditions, so — unlike a circuit
+  rejection — they sit under httpx's timeout types on purpose, where retry
+  predicates do fire on them. An error raised by the wrapped transport itself is
+  never retyped, and neither is one that already carries a host hierarchy.
+
+### Changed
+
+- **`except httpx.TransportError` — and `except httpx2.TransportError`,
+  `except aiohttp.ClientError`, `except requests.exceptions.RequestException` —
+  now catch circuit rejections.** That is the point of the change, but it is a
+  behavioural difference for code that already catches those types: a rejection
+  reaches such a handler where it previously escaped to an outer `except
+  Exception`. Nothing that catches `CircuitOpenError` changes, and no typical
+  retry predicate starts firing — see the note on base types above.
+
 ## [2.6.1] - 2026-08-17
 
 ### Added

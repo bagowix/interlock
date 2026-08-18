@@ -5,6 +5,7 @@ from litestar.di import NamedDependency, Provide
 from litestar.testing import RequestFactory, TestClient, create_test_client
 
 from interlock import CircuitBreaker, CircuitOpenError, Config, Registry
+from interlock.integrations.aiohttp import CircuitOpenClientError
 from interlock.integrations.litestar import breaker_dependency, circuit_open_handler
 
 
@@ -36,6 +37,24 @@ def test__breaker_dependency__returns_a_provide_with_the_shared_breaker() -> Non
     second = provided.dependency()
     assert isinstance(first, CircuitBreaker)
     assert first is second  # the registry caches one breaker per name
+
+
+def test__exception_handlers__dialect_rejection__returns_503_with_retry_after() -> None:
+    """Litestar resolves a handler by class hierarchy; an aiohttp base must not hide it."""
+
+    @get('/down', sync_to_thread=False)
+    def down() -> None:
+        raise CircuitOpenClientError('payments', retry_after=2.2)
+
+    with create_test_client(
+        route_handlers=[down],
+        exception_handlers={CircuitOpenError: circuit_open_handler},
+    ) as client:
+        response = client.get('/down')
+
+    assert response.status_code == 503
+    assert response.headers['Retry-After'] == '3'  # ceil(2.2)
+    assert response.json() == {'detail': "Circuit 'payments' is open"}
 
 
 def _client() -> TestClient:

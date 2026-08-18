@@ -14,8 +14,12 @@ sites::
 
 Client middlewares require aiohttp >= 3.12. Each host gets its own breaker
 (a failing ``api.a`` must not trip ``api.b``), created lazily and shared
-across requests. When a host's circuit is open the request is rejected with
-``CircuitOpenError`` before a connection is made.
+across requests. When a host's circuit is open the request is rejected before a
+connection is made, with ``CircuitOpenClientError``: an
+``aiohttp.ClientConnectionError`` *and* a ``CircuitOpenError``, so the aiohttp
+idiom (``except aiohttp.ClientError``) degrades on it exactly as it degrades on
+the dependency being unreachable, and existing ``except CircuitOpenError``
+handlers keep working.
 
 By default a response counts as a failure when its status is in the canonical
 retryable set (``429, 500, 502, 503, 504``) and any exception raised by the
@@ -28,17 +32,18 @@ outside the guarded call — the same semantics as the httpx2 transport.
 
 import http
 from collections.abc import Callable, Iterable
-from typing import cast
+from typing import NoReturn, cast
 
-from aiohttp import ClientHandlerType, ClientRequest, ClientResponse
+from aiohttp import ClientConnectionError, ClientHandlerType, ClientRequest, ClientResponse
 
 from interlock.config import Config
+from interlock.errors import CircuitOpenError
 from interlock.integrations._registry import reject_registry_options, resolve_registry
 from interlock.protocols import Clock, CoreEventListener, FailureClassifier, StorageEventListener
 from interlock.registry import Registry
 from interlock.state import State
 
-__all__ = ('CircuitBreakerMiddleware', 'HttpStatusClassifier')
+__all__ = ('CircuitBreakerMiddleware', 'CircuitOpenClientError', 'HttpStatusClassifier')
 
 # Mirrors urllib3's recommended ``status_forcelist`` (also used by AWS/Google):
 # transient server-side conditions where the dependency is unhealthy or
@@ -126,6 +131,59 @@ class HttpStatusClassifier:
             return not isinstance(exception, self._excluded_exceptions)
 
         return cast('ClientResponse', result).status in self._failure_statuses
+
+
+# Application code degrades on the idiom its http client teaches — for aiohttp
+# that is ``except aiohttp.ClientError``. An error raised from outside that
+# hierarchy sails past every such handler, so the day a breaker leaves shadow
+# mode every degradation path stops working at once. The rejection is therefore
+# both an aiohttp error and a ``CircuitOpenError``.
+#
+# The aiohttp base is the broadest "the connection never happened" type and
+# never a leaf like ``ClientOSError`` or ``ServerDisconnectedError``: a leaf
+# promises a physical cause that never happened, and leaves are exactly what
+# retry predicates key on — a retried rejection burns an attempt against a
+# circuit that is still open. It also keeps the rejection outside
+# ``ClientResponseError``, which would claim a response that never arrived.
+#
+# Only the rejection is retyped here, unlike the httpx transports, which also
+# pair ``CallTimeoutError`` with ``TimeoutException`` and ``BulkheadFullError``
+# with ``PoolTimeout``. aiohttp has no honest counterpart for "no local slot was
+# free": the nearest type is ``ClientConnectionError``, which this rejection
+# already uses, so the pairing would claim a distinction it cannot express.
+# A ``CallTimeoutError`` from an inner layer therefore stays an interlock error
+# on the way out — deliberately, not by omission.
+class CircuitOpenClientError(ClientConnectionError, CircuitOpenError):
+    """A request rejected by an open circuit, raised in aiohttp's hierarchy.
+
+    Caught by ``except aiohttp.ClientConnectionError`` (and by ``except
+    aiohttp.ClientError``) and by ``except CircuitOpenError`` alike. aiohttp
+    itself re-raises a ``ClientError`` from the middleware chain untouched, so
+    the rejection reaches the caller exactly as raised.
+
+    Args:
+        breaker_name: Name of the breaker that rejected the request.
+        retry_after: Seconds until the next probe is allowed, or ``None`` when
+            the breaker cannot estimate it.
+        last_failure: The most recent recorded failure, if any.
+    """
+
+
+def _raise_in_dialect(error: CircuitOpenError) -> NoReturn:
+    """Re-raise ``error`` as its aiohttp twin, or unchanged when it has none.
+
+    Only the exact core type is retyped. A subclass — including this dialect
+    type, raised by an interlock layer further in — already carries a host
+    hierarchy of its own and must not be wrapped a second time.
+    """
+    if type(error) is CircuitOpenError:
+        raise CircuitOpenClientError(
+            error.breaker_name,
+            retry_after=error.retry_after,
+            last_failure=error.last_failure,
+        ) from error
+
+    raise error
 
 
 def _host(request: ClientRequest) -> str:
@@ -216,7 +274,9 @@ class CircuitBreakerMiddleware:
         """Run the request under its resolved dependency's breaker.
 
         Raises:
-            CircuitOpenError: If the resolved dependency's breaker is open.
+            CircuitOpenClientError: If the resolved dependency's breaker is open
+                — an ``aiohttp.ClientConnectionError`` and a
+                ``CircuitOpenError``.
             ValueError: If the request URL has no host under the default
                 resolver, or the configured resolver returns a non-string or
                 empty name.
@@ -227,4 +287,7 @@ class CircuitBreakerMiddleware:
         # (middleware chains may hand over plain callables returning
         # awaitables), so the breaker's sync/async detection must not decide
         # here: call_async awaits whatever the handler returns.
-        return await breaker.call_async(handler, request)
+        try:
+            return await breaker.call_async(handler, request)
+        except CircuitOpenError as error:
+            _raise_in_dialect(error)

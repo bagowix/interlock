@@ -3,6 +3,7 @@
 import importlib
 import sys
 
+import httpx
 import pytest
 from tenacity import (
     RetryError,
@@ -15,6 +16,7 @@ from tenacity import (
 from tests.conftest import ExplodingListener, FakeClock
 
 from interlock import CircuitBreaker, CircuitOpenError, Config, State
+from interlock.integrations.httpx import CircuitOpenTransportError
 from interlock.integrations.tenacity import RetryStrategy, retry_unless_open, wait_probe
 from interlock.pipeline import CircuitBreakerStrategy, Pipeline, Strategy
 
@@ -71,6 +73,30 @@ def test__retry_unless_open__circuit_open_error__stops_immediately() -> None:
     )
 
     with pytest.raises(CircuitOpenError):
+        retrying(rejected)
+    assert attempts == 1
+
+
+def test__retry_unless_open__dialect_rejection__stops_immediately() -> None:
+    """An integration's rejection is a host-library error too, and still not retried."""
+    attempts = 0
+
+    def rejected() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise CircuitOpenTransportError('payments', retry_after=1.0)
+
+    # The retryable type deliberately covers the rejection's own httpx base: the
+    # predicate must still refuse it, or every rejection would burn an attempt
+    # against a circuit that is open anyway.
+    retrying = Retrying(
+        retry=retry_unless_open(httpx.TransportError),
+        stop=stop_after_attempt(5),
+        sleep=_noop_sleep,
+        reraise=True,
+    )
+
+    with pytest.raises(CircuitOpenTransportError):
         retrying(rejected)
     assert attempts == 1
 

@@ -45,10 +45,19 @@ Every integration follows the same rules, so learning one means knowing all:
   before the middleware chain runs). Pass
   `HttpStatusClassifier(failure_statuses={...}, excluded_exceptions=(...))` or
   your own `FailureClassifier` to change the policy.
-- **One rejection signal.** An open circuit always raises
+- **One rejection signal, in two dialects.** An open circuit always raises
   [`CircuitOpenError`](../reference.md) — carrying the breaker name, a
   `retry_after` estimate and the last recorded failure — *before* a
-  connection is attempted.
+  connection is attempted. Each HTTP client integration raises a subclass that
+  is *also* a native error of that library, so an application's existing
+  degradation path catches it: `CircuitOpenTransportError` (an
+  `httpx.TransportError` for the httpx integration, an `httpx2.TransportError`
+  for the httpx2 one), `CircuitOpenClientError`
+  (an `aiohttp.ClientConnectionError`), `CircuitOpenRequestError`
+  (a `requests.exceptions.ConnectionError`). The host base is always the
+  broadest "the request never completed" type, never a leaf such as
+  `ConnectError` — leaves are what retry predicates key on, and retrying a
+  rejection only burns an attempt against a circuit that is still open.
 - **Zero-dependency core.** Integrations live in `interlock.integrations.*`
   as optional extras; `import interlock` itself never pulls anything beyond
   the standard library.
