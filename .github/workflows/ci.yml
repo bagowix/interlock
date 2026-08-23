@@ -297,12 +297,19 @@ jobs:
           uv run pytest --cov --cov-report=xml
           --junitxml=junit.xml -o junit_family=legacy
 
+      # `fail_ci_if_error` is not a flat `true`: a Dependabot run resolves
+      # `secrets.*` against a separate secret store, so a `CODECOV_TOKEN` drift
+      # there turns the required check red on every bump PR at once. The gate is
+      # `fail_under = 100`, which the step above already enforced — Codecov only
+      # mirrors it — so a rejected upload on a bot PR is a reporting outage;
+      # human PRs and pushes to main still fail hard on one. `github.actor`
+      # survives a manual re-run, `github.triggering_actor` does not.
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
-          fail_ci_if_error: true
+          fail_ci_if_error: ${{ github.actor != 'dependabot[bot]' }}
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
@@ -310,4 +317,4 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: junit.xml
-          fail_ci_if_error: true
+          fail_ci_if_error: ${{ github.actor != 'dependabot[bot]' }}
