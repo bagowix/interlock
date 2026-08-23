@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Dependabot pull request no longer fails CI on the Codecov upload.** A run
+  triggered by Dependabot resolves `secrets.*` against the separate Dependabot
+  secret store, so `CODECOV_TOKEN` has to be maintained in two places — and a
+  drift between them is invisible until the upload is rejected and the required
+  `Coverage` check turns red on every open bump PR at once, with nothing wrong
+  in any of the diffs. The coverage gate is `fail_under = 100`, which `pytest`
+  enforces in that same job before the upload runs, so the upload is now
+  non-fatal on bot pull requests only; human pull requests and pushes to `main`
+  still fail hard when Codecov rejects a report.
+
 ## [2.7.0] - 2026-08-18
 
 ### Added
