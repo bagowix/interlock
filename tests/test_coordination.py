@@ -1487,3 +1487,49 @@ def test__shared_view__closed_at_the_same_version__does_not_reset_the_local_mach
 
     # Same version: a duplicate or out-of-order delivery, not a recovery.
     assert breaker.state is State.OPEN
+
+
+def test__breaker__backoff_with_shared_storage__rejected(fake_clock: FakeClock) -> None:
+    """The combination has to fail loudly: the coordinated lane cannot honour a backoff.
+
+    Reopening is decided by the backend from ``wait_duration_in_open``, and no
+    failed-round count crosses the wire, so a multiplier set here would be read,
+    validated and then quietly ignored — the exact trap the option exists to
+    remove.
+    """
+    with pytest.raises(ValueError, match='wait_duration_backoff_multiplier'):
+        CircuitBreaker(
+            name='payments',
+            config=Config(wait_duration_backoff_multiplier=2.0),
+            clock=fake_clock,
+            storage=InMemoryStorage(clock=fake_clock),
+        )
+
+
+def test__registry__backoff_with_shared_storage__rejected(fake_clock: FakeClock) -> None:
+    """Fail at registry construction, not at the first ``get`` that happens to run."""
+    with pytest.raises(ValueError, match='wait_duration_backoff_multiplier'):
+        Registry(
+            config=Config(wait_duration_backoff_multiplier=2.0),
+            clock=fake_clock,
+            storage=InMemoryStorage(clock=fake_clock),
+        )
+
+
+def test__registry__backoff_in_a_per_breaker_config__rejected(fake_clock: FakeClock) -> None:
+    """``get`` takes a config override, and that route must not slip past the guard."""
+    registry = Registry(clock=fake_clock, storage=InMemoryStorage(clock=fake_clock))
+
+    with pytest.raises(ValueError, match='wait_duration_backoff_multiplier'):
+        registry.get('payments', config=Config(wait_duration_backoff_multiplier=2.0))
+
+
+def test__breaker__backoff_without_storage__accepted(fake_clock: FakeClock) -> None:
+    """Only the combination is refused; a local breaker keeps its backoff."""
+    breaker = CircuitBreaker(
+        name='payments',
+        config=Config(wait_duration_backoff_multiplier=2.0),
+        clock=fake_clock,
+    )
+
+    assert breaker.state is State.CLOSED

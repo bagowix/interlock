@@ -9,7 +9,7 @@ import threading
 from contextlib import AsyncExitStack, ExitStack
 
 from interlock._clock import SystemClock
-from interlock._engine import validate_unreachable_exceptions
+from interlock._engine import validate_backoff_support, validate_unreachable_exceptions
 from interlock._initial_state import validate_initial_state
 from interlock.breaker import CircuitBreaker
 from interlock.config import Config
@@ -53,7 +53,11 @@ class Registry:
     Raises:
         TypeError: If ``unreachable_exceptions`` is not a tuple of ``Exception``
             subclasses.
-        ValueError: If ``initial_state`` is not a supported stable state.
+        ValueError: If ``initial_state`` is not a supported stable state, or if
+            ``config`` asks for a backoff (``wait_duration_backoff_multiplier``
+            above ``1.0``) alongside a ``storage``: reopening is then the
+            backend's decision and no failed-round count is shared, so the
+            backoff could not be honoured.
     """
 
     def __init__(
@@ -75,6 +79,7 @@ class Registry:
         self._listener = listener
         self._storage = storage
         self._unreachable_exceptions = validate_unreachable_exceptions(unreachable_exceptions)
+        validate_backoff_support(config=self._config, storage=storage)
         self._breakers: dict[str, CircuitBreaker] = {}
         self._lock = threading.Lock()
 
@@ -88,6 +93,11 @@ class Registry:
 
         Returns:
             The cached or newly created breaker.
+
+        Raises:
+            ValueError: If ``config`` asks for a backoff on a registry that holds a
+                storage. The override route reaches the same constraint as the
+                registry's own config.
         """
         # A hit reads the dict without the lock: this is the per-request path of
         # every transport integration, and a breaker is never replaced or

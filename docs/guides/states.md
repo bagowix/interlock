@@ -84,10 +84,13 @@ breaker = CircuitBreaker(
 The growing interval is also a signal in its own right: a breaker waiting out a
 blip looks nothing like one that has failed ten rounds in a row.
 
-The backoff is local. Under a shared [storage](../integrations/redis.md) the
-coordinated lane reopens on `wait_duration_in_open` and keeps no failed-round
-count, so a coordinated breaker retries on the base wait no matter how many
-rounds have failed.
+The backoff is local, and deliberately refuses to pretend otherwise. Reopening
+a coordinated breaker is decided by the backend from `wait_duration_in_open` and
+its own clock, and no failed-round count crosses the wire, so a multiplier above
+`1.0` alongside a shared [storage](../integrations/redis.md) raises `ValueError`
+at construction rather than being accepted and ignored. Coordinated backoff is
+[under discussion](https://github.com/bagowix/interlock/issues); until then a
+coordinated breaker waits a constant interval.
 
 Growth stops after 64 consecutive failed rounds. Any sane multiplier has long
 since passed `wait_duration_in_open_max` by then, and an unbounded exponent
