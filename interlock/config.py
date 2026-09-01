@@ -1,10 +1,19 @@
 """Immutable circuit breaker configuration with eager validation."""
 
+import math
 from dataclasses import dataclass
+from typing import Final
 
 from interlock.window import WindowType
 
 __all__ = ('Config',)
+
+# The exponent stops here. Sixty-four rounds of any sane multiplier already dwarf
+# every ceiling a caller would set, while an unbounded count walks a long-broken
+# dependency into float's range: the wait becomes infinite, never elapses, and the
+# breaker can never leave OPEN again. With wait_duration_in_open_max set the wait
+# itself stops growing but the count does not, so days of failure get there.
+MAX_BACKOFF_ROUNDS: Final[int] = 64
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -25,6 +34,11 @@ class Config:
     a breaker can fail its probes for a reason waiting alone will not fix: a
     constant wait then retries forever at full rate, and the growing interval is
     itself the signal that the dependency is not merely slow to recover.
+
+    The backoff is a local decision: with a shared ``Storage`` the coordinated
+    lane asks the backend to reopen after ``wait_duration_in_open``, and the
+    failed-round count lives in no shared state, so a coordinated breaker retries
+    on the base wait however many rounds have failed.
 
     ``auto_transition`` opts into a timer that proactively moves a breaker from
     ``OPEN`` to ``HALF_OPEN`` once ``wait_duration_in_open`` elapses, emitting the
@@ -75,6 +89,13 @@ class Config:
                 f'wait_duration_backoff_multiplier must be >= 1, '
                 f'got {self.wait_duration_backoff_multiplier!r}'
             )
+        if not math.isfinite(self._peak_wait_duration()):
+            raise ValueError(
+                f'wait_duration_backoff_multiplier is too large for '
+                f'wait_duration_in_open={self.wait_duration_in_open!r}: after '
+                f'{MAX_BACKOFF_ROUNDS} rounds the wait stops being a finite number, '
+                f'got {self.wait_duration_backoff_multiplier!r}'
+            )
         if (
             self.wait_duration_in_open_max is not None
             and self.wait_duration_in_open_max < self.wait_duration_in_open
@@ -95,3 +116,17 @@ class Config:
             )
         if self.window_size < 1:
             raise ValueError(f'window_size must be >= 1, got {self.window_size!r}')
+
+    def _peak_wait_duration(self) -> float:
+        """The longest wait the backoff can produce, or infinity if it overruns.
+
+        A wait that is not a finite number never elapses, so the breaker it
+        governs could never leave ``OPEN``. Catching that here keeps the failure
+        at construction, where the offending value is in front of the caller.
+        """
+        try:
+            return self.wait_duration_in_open * (
+                self.wait_duration_backoff_multiplier**MAX_BACKOFF_ROUNDS
+            )
+        except OverflowError:
+            return math.inf

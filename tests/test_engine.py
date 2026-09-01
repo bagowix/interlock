@@ -533,3 +533,16 @@ def test__unreachable_exceptions__not_an_exception_type__rejected_at_constructio
                 clock=fake_clock,
                 unreachable_exceptions=cast('tuple[type[Exception], ...]', (bad,)),
             )
+
+
+def test__unreachable_exceptions__not_a_tuple__rejected_at_construction(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    """``isinstance`` refuses a list of types, so refuse it here with a clear message."""
+    with pytest.raises(TypeError, match='must be a tuple'):
+        Engine(
+            name='test',
+            config=config,
+            clock=fake_clock,
+            unreachable_exceptions=cast('tuple[type[Exception], ...]', [_NoLocalSlot]),
+        )

@@ -64,9 +64,17 @@ def validate_unreachable_exceptions(
     first real failure — masking the protected exception and stranding the probe
     slot it should have returned.
 
+    The container is checked too: ``isinstance`` rejects a list of types with a
+    ``TypeError`` of its own, so a caller who passes one would hit it on the
+    first real failure rather than here.
+
     Raises:
-        TypeError: If an entry is not an ``Exception`` subclass.
+        TypeError: If the container is not a tuple, or an entry is not an
+            ``Exception`` subclass.
     """
+    if not isinstance(cast('object', types), tuple):
+        raise TypeError(f'unreachable_exceptions must be a tuple, got: {type(types).__name__}')
+
     for entry in cast('tuple[object, ...]', types):
         if not (isinstance(entry, type) and issubclass(entry, Exception)):
             raise TypeError(
@@ -488,18 +496,19 @@ class Engine:
         failure = self._classifier.is_failure(result=result, exception=exception)
         slow = duration >= self._config.slow_call_duration_threshold
         outcome = _OUTCOME_BY_FLAGS[failure, slow]
-        coordinator = self._sync_coordinator or self._async_coordinator
         # Only HALF_OPEN cares; the machine owns that check because only it knows
         # its own state. Outside a probe the same exception stays an ordinary
         # failure — shedding load is the point. The ``is not None`` guard keeps
         # the common path — a call that returned — off ``isinstance``.
         #
-        # A coordinated probe holds a lease that only an outcome returns, and
-        # ``Storage`` has no way to hand one back unspent, so dropping the verdict
-        # there would strand the shared budget until its TTL. Until the protocol
-        # grows that operation, a shared probe keeps the old behaviour.
+        # A *leased* probe is the exception: it holds a remote grant that only an
+        # outcome returns, and ``Storage`` has no way to hand one back unspent, so
+        # dropping the verdict would strand the shared budget until its TTL.
+        # ``admission.probe`` marks exactly those, which also keeps the local
+        # fallback covered — when storage degrades the admission comes from the
+        # local machine, with no lease to strand.
         unreachable = (
-            coordinator is None
+            not admission.probe
             and exception is not None
             and isinstance(exception, self._unreachable_exceptions)
         )
@@ -520,6 +529,7 @@ class Engine:
             notify(self._listener, 'on_call', name=self._name, outcome=outcome, duration=duration)
         self._emit_transitions(before, after, effective_before, effective_after)
 
+        coordinator = self._sync_coordinator or self._async_coordinator
         if coordinator is not None:
             if admission.probe:
                 coordinator.notify_probe_outcome(outcome)

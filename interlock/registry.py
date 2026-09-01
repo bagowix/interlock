@@ -51,6 +51,8 @@ class Registry:
             outcome.
 
     Raises:
+        TypeError: If ``unreachable_exceptions`` is not a tuple of ``Exception``
+            subclasses.
         ValueError: If ``initial_state`` is not a supported stable state.
     """
 

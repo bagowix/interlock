@@ -22,11 +22,9 @@ Three special states are operator overrides: ``FORCED_OPEN`` (reject all),
 (admit all, record metrics, never trip).
 """
 
-from typing import Final
-
 from interlock._initial_state import validate_initial_state
 from interlock._windows import build_window
-from interlock.config import Config
+from interlock.config import MAX_BACKOFF_ROUNDS, Config
 from interlock.outcome import Outcome
 from interlock.protocols import Clock
 from interlock.state import State
@@ -35,14 +33,6 @@ from interlock.window import WindowSnapshot
 __all__ = ('StateMachine',)
 
 _PERMIT_ALL = frozenset({State.CLOSED, State.DISABLED, State.METRICS_ONLY})
-
-# The exponent stops here. Sixty-four rounds of any sane multiplier already dwarf
-# every ceiling a caller would set, while an unbounded count walks a long-broken
-# dependency into float's ceiling: the wait becomes ``inf``, never elapses, and
-# the breaker can never leave OPEN again. With ``wait_duration_in_open_max`` set
-# the wait itself stops growing but the count does not, so days of failure are
-# enough to get there.
-_MAX_BACKOFF_ROUNDS: Final[int] = 64
 
 
 class StateMachine:
@@ -312,7 +302,7 @@ class StateMachine:
         # back to OPEN from a probe round feeds the backoff, including a round
         # that ended with nothing learned.
         if self._state is State.HALF_OPEN:
-            self._failed_rounds = min(self._failed_rounds + 1, _MAX_BACKOFF_ROUNDS)
+            self._failed_rounds = min(self._failed_rounds + 1, MAX_BACKOFF_ROUNDS)
         self._state = State.OPEN
         self._opened_at = self._clock.monotonic()
         self._generation += 1

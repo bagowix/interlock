@@ -84,6 +84,11 @@ breaker = CircuitBreaker(
 The growing interval is also a signal in its own right: a breaker waiting out a
 blip looks nothing like one that has failed ten rounds in a row.
 
+The backoff is local. Under a shared [storage](../integrations/redis.md) the
+coordinated lane reopens on `wait_duration_in_open` and keeps no failed-round
+count, so a coordinated breaker retries on the base wait no matter how many
+rounds have failed.
+
 Growth stops after 64 consecutive failed rounds. Any sane multiplier has long
 since passed `wait_duration_in_open_max` by then, and an unbounded exponent
 would eventually overflow to an infinite wait that never elapses — leaving the
