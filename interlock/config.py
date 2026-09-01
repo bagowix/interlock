@@ -84,18 +84,22 @@ class Config:
             raise ValueError(
                 f'wait_duration_in_open must be > 0, got {self.wait_duration_in_open!r}'
             )
-        if self.wait_duration_backoff_multiplier < 1.0:
-            raise ValueError(
-                f'wait_duration_backoff_multiplier must be >= 1, '
-                f'got {self.wait_duration_backoff_multiplier!r}'
-            )
-        if not math.isfinite(self._peak_wait_duration()):
-            raise ValueError(
-                f'wait_duration_backoff_multiplier is too large for '
-                f'wait_duration_in_open={self.wait_duration_in_open!r}: after '
-                f'{MAX_BACKOFF_ROUNDS} rounds the wait stops being a finite number, '
-                f'got {self.wait_duration_backoff_multiplier!r}'
-            )
+        # Both multiplier guards sit behind one comparison: at the default of 1.0
+        # there is no backoff to check, and the exponentiation would be a no-op
+        # computed on every construction.
+        if self.wait_duration_backoff_multiplier != 1.0:
+            if self.wait_duration_backoff_multiplier < 1.0:
+                raise ValueError(
+                    f'wait_duration_backoff_multiplier must be >= 1, '
+                    f'got {self.wait_duration_backoff_multiplier!r}'
+                )
+            if not math.isfinite(self._peak_wait_duration()):
+                raise ValueError(
+                    f'wait_duration_backoff_multiplier is too large for '
+                    f'wait_duration_in_open={self.wait_duration_in_open!r}: after '
+                    f'{MAX_BACKOFF_ROUNDS} rounds the wait stops being a finite number, '
+                    f'got {self.wait_duration_backoff_multiplier!r}'
+                )
         if (
             self.wait_duration_in_open_max is not None
             and self.wait_duration_in_open_max < self.wait_duration_in_open
