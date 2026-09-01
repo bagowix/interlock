@@ -9,7 +9,7 @@ import threading
 from contextlib import AsyncExitStack, ExitStack
 
 from interlock._clock import SystemClock
-from interlock._engine import validate_unreachable_exceptions
+from interlock._engine import validate_backoff_support, validate_unreachable_exceptions
 from interlock._initial_state import validate_initial_state
 from interlock.breaker import CircuitBreaker
 from interlock.config import Config
@@ -75,6 +75,7 @@ class Registry:
         self._listener = listener
         self._storage = storage
         self._unreachable_exceptions = validate_unreachable_exceptions(unreachable_exceptions)
+        validate_backoff_support(config=self._config, storage=storage)
         self._breakers: dict[str, CircuitBreaker] = {}
         self._lock = threading.Lock()
 

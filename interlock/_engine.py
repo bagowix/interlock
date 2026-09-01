@@ -84,6 +84,32 @@ def validate_unreachable_exceptions(
     return types
 
 
+def validate_backoff_support(*, config: Config, storage: Storage | AsyncStorage | None) -> None:
+    """Refuse a backoff the coordinated lane cannot honour.
+
+    Reopening a coordinated breaker is the backend's decision, taken from
+    ``wait_duration_in_open`` and its own clock, and no failed-round count
+    crosses the wire — ``SharedState`` carries mechanism, not policy, and has no
+    field for one. A multiplier set alongside a storage would therefore be read,
+    validated, and then quietly ignored: the option would look enabled while
+    every round waited exactly as long as the last.
+
+    Silence is the worst of the three possible answers here, so this is an
+    error. Coordinated backoff is tracked as a separate change; until then the
+    honest options are a constant wait or a local breaker.
+
+    Raises:
+        ValueError: If a backoff multiplier is set on a coordinated breaker.
+    """
+    if storage is not None and config.wait_duration_backoff_multiplier != 1.0:
+        raise ValueError(
+            'wait_duration_backoff_multiplier has no effect on a breaker with shared '
+            'storage: reopening is decided by the backend from wait_duration_in_open, '
+            'and no failed-round count is shared. Leave it at 1.0, or drop the storage '
+            f'to run this breaker locally. Got {config.wait_duration_backoff_multiplier!r}.'
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Admission:
     """What ``_admit`` granted: the era it happened in, and probe provenance."""
@@ -128,6 +154,7 @@ class Engine:
         self._clock = clock
         self._classifier = classifier if classifier is not None else DefaultFailureClassifier()
         self._unreachable_exceptions = validate_unreachable_exceptions(unreachable_exceptions)
+        validate_backoff_support(config=config, storage=storage)
         self._listener = listener
         self._machine = StateMachine(
             config=config,

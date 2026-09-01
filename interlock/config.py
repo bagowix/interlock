@@ -35,10 +35,11 @@ class Config:
     constant wait then retries forever at full rate, and the growing interval is
     itself the signal that the dependency is not merely slow to recover.
 
-    The backoff is a local decision: with a shared ``Storage`` the coordinated
-    lane asks the backend to reopen after ``wait_duration_in_open``, and the
-    failed-round count lives in no shared state, so a coordinated breaker retries
-    on the base wait however many rounds have failed.
+    The backoff is a local decision. Reopening a coordinated breaker is the
+    backend's, taken from ``wait_duration_in_open`` and its own clock, and no
+    failed-round count crosses the wire — so a multiplier above ``1.0`` is
+    **refused** on a breaker with a shared ``Storage`` rather than accepted and
+    ignored.
 
     ``auto_transition`` opts into a timer that proactively moves a breaker from
     ``OPEN`` to ``HALF_OPEN`` once ``wait_duration_in_open`` elapses, emitting the

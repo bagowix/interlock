@@ -1516,7 +1516,7 @@ config = Config(
 | `permitted_calls_in_half_open` | `10` | Probe calls allowed while `HALF_OPEN`. |
 | `max_concurrent_probes` | `1` | Cap on **simultaneous** probes in `HALF_OPEN`. Must be in `[1, permitted_calls_in_half_open]`. |
 | `wait_duration_in_open` | `60.0` | Seconds to stay `OPEN` before the first probe is allowed. |
-| `wait_duration_backoff_multiplier` | `1.0` | Multiplies the open wait after each consecutive failed probe round. `1.0` keeps it constant. Must be `>= 1`. |
+| `wait_duration_backoff_multiplier` | `1.0` | Multiplies the open wait after each consecutive failed probe round. `1.0` keeps it constant. Must be `>= 1`, and must stay `1.0` on a breaker with a shared storage. |
 | `wait_duration_in_open_max` | `None` | Ceiling for the backed-off wait, in seconds. `None` leaves it uncapped; when set, must be `>= wait_duration_in_open`. |
 | `auto_transition` | `False` | When `True`, a timer moves the breaker `OPEN → HALF_OPEN` once the wait elapses, instead of waiting for the next call. See [States](states.md#proactive-transition-auto_transition). |
 | `window_type` | `COUNT_BASED` | `COUNT_BASED` or `TIME_BASED`. |
@@ -1658,10 +1658,13 @@ breaker = CircuitBreaker(
 The growing interval is also a signal in its own right: a breaker waiting out a
 blip looks nothing like one that has failed ten rounds in a row.
 
-The backoff is local. Under a shared [storage](../integrations/redis.md) the
-coordinated lane reopens on `wait_duration_in_open` and keeps no failed-round
-count, so a coordinated breaker retries on the base wait no matter how many
-rounds have failed.
+The backoff is local, and deliberately refuses to pretend otherwise. Reopening
+a coordinated breaker is decided by the backend from `wait_duration_in_open` and
+its own clock, and no failed-round count crosses the wire, so a multiplier above
+`1.0` alongside a shared [storage](../integrations/redis.md) raises `ValueError`
+at construction rather than being accepted and ignored. Coordinated backoff is
+[under discussion](https://github.com/bagowix/interlock/issues); until then a
+coordinated breaker waits a constant interval.
 
 Growth stops after 64 consecutive failed rounds. Any sane multiplier has long
 since passed `wait_duration_in_open_max` by then, and an unbounded exponent

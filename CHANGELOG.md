@@ -8,6 +8,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A backoff the coordinated lane cannot honour is now refused instead of
+  ignored.** Reopening a breaker with a shared `Storage` is the backend's
+  decision, taken from `wait_duration_in_open` and its own clock; no
+  failed-round count crosses the wire, because `SharedState` carries mechanism
+  rather than policy and has no field for one. A
+  `wait_duration_backoff_multiplier` above `1.0` alongside a storage was
+  therefore read, validated and then silently dropped — the option looked
+  enabled while every round waited exactly as long as the last. It now raises
+  `ValueError` at construction, on `CircuitBreaker`, `Registry` and the
+  per-breaker `Registry.get(config=...)` override alike.
+
 - **A probe that never reached the dependency no longer decides the round.** A
   `HALF_OPEN` probe asks one question — has the dependency recovered? — and
   every failure was taken as its answer, including failures that never left the
