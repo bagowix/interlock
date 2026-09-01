@@ -87,6 +87,11 @@ _EXCLUDED_EXCEPTIONS: tuple[type[Exception], ...] = (
     UnsupportedProtocol,
 )
 
+# See the httpx integration for the reasoning: an exhausted pool is a real
+# signal in CLOSED, but a HALF_OPEN probe that never got a connection never
+# reached the dependency and cannot report on it.
+_UNREACHABLE_EXCEPTIONS: tuple[type[Exception], ...] = (PoolTimeout,)
+
 
 def _exception_types(
     excluded: Iterable[type[Exception]] | None,
@@ -350,6 +355,7 @@ class CircuitBreakerTransport(BaseTransport):
             classifier=classifier,
             listener=listener,
             default_classifier=HttpStatusClassifier(),
+            unreachable_exceptions=_UNREACHABLE_EXCEPTIONS,
         )
 
     @property
@@ -455,6 +461,7 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
             classifier=classifier,
             listener=listener,
             default_classifier=HttpStatusClassifier(),
+            unreachable_exceptions=_UNREACHABLE_EXCEPTIONS,
         )
 
     @property

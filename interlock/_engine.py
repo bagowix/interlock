@@ -54,6 +54,28 @@ _SHARED_AUTHORITATIVE = frozenset({State.OPEN, State.HALF_OPEN})
 _MANUAL_STATES = frozenset({State.FORCED_OPEN, State.DISABLED, State.METRICS_ONLY})
 
 
+def validate_unreachable_exceptions(
+    types: tuple[type[Exception], ...],
+) -> tuple[type[Exception], ...]:
+    """Reject entries that could never be classified, before any call runs.
+
+    The annotation is a promise, not a guarantee: an untyped caller can still
+    pass a string. Left to ``_settle``, the ``isinstance`` would raise on the
+    first real failure — masking the protected exception and stranding the probe
+    slot it should have returned.
+
+    Raises:
+        TypeError: If an entry is not an ``Exception`` subclass.
+    """
+    for entry in cast('tuple[object, ...]', types):
+        if not (isinstance(entry, type) and issubclass(entry, Exception)):
+            raise TypeError(
+                f'unreachable_exceptions must hold Exception subclasses, got: {entry!r}'
+            )
+
+    return types
+
+
 @dataclass(frozen=True, slots=True)
 class Admission:
     """What ``_admit`` granted: the era it happened in, and probe provenance."""
@@ -91,11 +113,13 @@ class Engine:
         classifier: FailureClassifier | None = None,
         listener: CoreEventListener | StorageEventListener | None = None,
         storage: Storage | AsyncStorage | None = None,
+        unreachable_exceptions: tuple[type[Exception], ...] = (),
     ) -> None:
         self._name = name
         self._config = config
         self._clock = clock
         self._classifier = classifier if classifier is not None else DefaultFailureClassifier()
+        self._unreachable_exceptions = validate_unreachable_exceptions(unreachable_exceptions)
         self._listener = listener
         self._machine = StateMachine(
             config=config,
@@ -464,11 +488,26 @@ class Engine:
         failure = self._classifier.is_failure(result=result, exception=exception)
         slow = duration >= self._config.slow_call_duration_threshold
         outcome = _OUTCOME_BY_FLAGS[failure, slow]
+        coordinator = self._sync_coordinator or self._async_coordinator
+        # Only HALF_OPEN cares; the machine owns that check because only it knows
+        # its own state. Outside a probe the same exception stays an ordinary
+        # failure — shedding load is the point. The ``is not None`` guard keeps
+        # the common path — a call that returned — off ``isinstance``.
+        #
+        # A coordinated probe holds a lease that only an outcome returns, and
+        # ``Storage`` has no way to hand one back unspent, so dropping the verdict
+        # there would strand the shared budget until its TTL. Until the protocol
+        # grows that operation, a shared probe keeps the old behaviour.
+        unreachable = (
+            coordinator is None
+            and exception is not None
+            and isinstance(exception, self._unreachable_exceptions)
+        )
 
         with self._lock:
             effective_before = self._effective_state_locked()
             before = self._machine.state
-            self._machine.record(outcome, generation=admission.generation)
+            self._machine.record(outcome, generation=admission.generation, unreachable=unreachable)
             after = self._machine.state
             effective_after = self._effective_state_locked()
             if failure and exception is not None:
@@ -481,7 +520,6 @@ class Engine:
             notify(self._listener, 'on_call', name=self._name, outcome=outcome, duration=duration)
         self._emit_transitions(before, after, effective_before, effective_after)
 
-        coordinator = self._sync_coordinator or self._async_coordinator
         if coordinator is not None:
             if admission.probe:
                 coordinator.notify_probe_outcome(outcome)
@@ -590,11 +628,21 @@ class Engine:
         pending one never blocks interpreter shutdown, and it is cancelled the
         moment the breaker leaves ``OPEN`` by any path (a real probe, ``reset``,
         ``force_open`` or the timer itself).
+
+        The delay comes from ``retry_after()`` rather than the configured wait:
+        with a backoff in play they differ, and a timer armed for the base wait
+        would fire early, be refused, and leave nothing scheduled for the rest of
+        the interval.
         """
         if not self._config.auto_transition:
             return
 
-        timer = threading.Timer(self._config.wait_duration_in_open, self._fire_auto_transition)
+        with self._lock:
+            delay = self._machine.retry_after()
+        if delay is None:
+            return  # left OPEN before the timer could be armed
+
+        timer = threading.Timer(delay, self._fire_auto_transition)
         timer.daemon = True
         with self._timer_lock:
             if self._closed:

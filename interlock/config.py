@@ -19,6 +19,13 @@ class Config:
     treat calls slower than 60s as slow (but never trip on slowness alone until
     tuned), stay open 60s before a single probe is allowed.
 
+    ``wait_duration_backoff_multiplier`` lengthens the open wait after each probe
+    round that fails back-to-back, capped by ``wait_duration_in_open_max``. It
+    defaults to ``1.0`` — a constant wait, the historical behaviour. Raise it when
+    a breaker can fail its probes for a reason waiting alone will not fix: a
+    constant wait then retries forever at full rate, and the growing interval is
+    itself the signal that the dependency is not merely slow to recover.
+
     ``auto_transition`` opts into a timer that proactively moves a breaker from
     ``OPEN`` to ``HALF_OPEN`` once ``wait_duration_in_open`` elapses, emitting the
     state change without waiting for the next call. It defaults to ``False``,
@@ -35,11 +42,13 @@ class Config:
     permitted_calls_in_half_open: int = 10
     max_concurrent_probes: int = 1
     wait_duration_in_open: float = 60.0
+    wait_duration_backoff_multiplier: float = 1.0
+    wait_duration_in_open_max: float | None = None
     auto_transition: bool = False
     window_type: WindowType = WindowType.COUNT_BASED
     window_size: int = 100
 
-    def __post_init__(self) -> None:
+    def __post_init__(self) -> None:  # noqa: C901 - a flat list of guards, not branching logic
         if not 0.0 < self.failure_rate_threshold <= 1.0:
             raise ValueError(
                 f'failure_rate_threshold must be in (0, 1], got {self.failure_rate_threshold!r}'
@@ -60,6 +69,19 @@ class Config:
         if self.wait_duration_in_open <= 0.0:
             raise ValueError(
                 f'wait_duration_in_open must be > 0, got {self.wait_duration_in_open!r}'
+            )
+        if self.wait_duration_backoff_multiplier < 1.0:
+            raise ValueError(
+                f'wait_duration_backoff_multiplier must be >= 1, '
+                f'got {self.wait_duration_backoff_multiplier!r}'
+            )
+        if (
+            self.wait_duration_in_open_max is not None
+            and self.wait_duration_in_open_max < self.wait_duration_in_open
+        ):
+            raise ValueError(
+                f'wait_duration_in_open_max must be >= wait_duration_in_open '
+                f'({self.wait_duration_in_open!r}), got {self.wait_duration_in_open_max!r}'
             )
         if self.permitted_calls_in_half_open < 1:
             raise ValueError(

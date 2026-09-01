@@ -26,6 +26,64 @@ stateDiagram-v2
   thresholds as `CLOSED`: rates below the thresholds close it, at or above
   re-open it. Calls beyond the probe caps are rejected while the round runs.
 
+## When a probe cannot reach the dependency
+
+A probe asks one question: has the dependency recovered? Some failures cannot
+answer it, because the call never left the process — no free connection in the
+local pool, no bulkhead permit. Counting one as a probe failure re-opens the
+breaker on evidence it does not have, and if the local cause outlives the outage
+that opened the breaker, every round fails the same way and the breaker never
+closes again.
+
+Integrations mark those failures for you. The httpx and httpx2 transports treat
+`PoolTimeout` this way: in `HALF_OPEN` the probe hands its slot back without a
+verdict, and the round continues. `CLOSED` is untouched — there an exhausted
+pool usually *is* the dependency holding connections open, and shedding load is
+exactly what should happen.
+
+A round still has to end. Once as many probes have come back inconclusive as the
+round permits, the breaker re-opens: nothing was learned, so waiting is the only
+honest move left.
+
+Other guards pass their own set:
+
+```python
+from interlock import CircuitBreaker, Registry
+
+
+class NoLocalSlot(Exception):
+    """Raised by the guard's own pool when it has no permit to give out."""
+
+
+breaker = CircuitBreaker(name='payments', unreachable_exceptions=(NoLocalSlot,))
+registry = Registry(unreachable_exceptions=(NoLocalSlot,))
+```
+
+## Backing off between probe rounds
+
+`wait_duration_in_open` is constant by default: a breaker that cannot recover
+retries at exactly the same rate forever, hammering a dependency that is already
+in trouble. Set `wait_duration_backoff_multiplier` above `1.0` to lengthen the
+wait after each consecutive failed round, and `wait_duration_in_open_max` to cap
+it. A round that passes resets both.
+
+```python
+from interlock import CircuitBreaker, Config
+
+breaker = CircuitBreaker(
+    name='payments',
+    config=Config(
+        wait_duration_in_open=5.0,
+        wait_duration_backoff_multiplier=2.0,
+        wait_duration_in_open_max=120.0,
+    ),
+)
+# Failed rounds wait 5s, then 10s, 20s, 40s… up to 120s.
+```
+
+The growing interval is also a signal in its own right: a breaker waiting out a
+blip looks nothing like one that has failed ten rounds in a row.
+
 ## Proactive transition (`auto_transition`)
 
 By default the `OPEN → HALF_OPEN` move is **lazy**: it happens on the first call

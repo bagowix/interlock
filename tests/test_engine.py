@@ -1,4 +1,5 @@
 import asyncio
+from typing import cast
 
 import pytest
 
@@ -407,3 +408,128 @@ async def test__call_async__forwards_positional_and_keyword_arguments(engine: En
         return first, second
 
     assert await engine.call_async(echo, 1, second=2) == (1, 2)
+
+
+class _NoLocalSlot(Exception):
+    """Stands in for a pool/bulkhead exhaustion that never reaches the dependency."""
+
+
+def _unreachable_engine(config: Config, clock: FakeClock) -> Engine:
+    return Engine(
+        name='test',
+        config=config,
+        clock=clock,
+        classifier=DefaultFailureClassifier(),
+        unreachable_exceptions=(_NoLocalSlot,),
+    )
+
+
+def _raise_no_slot() -> None:
+    raise _NoLocalSlot
+
+
+def test__closed__unreachable_exception__still_trips_the_breaker(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    engine = _unreachable_engine(config, fake_clock)
+
+    for _ in range(2):
+        with pytest.raises(_NoLocalSlot):
+            engine.call_sync(_raise_no_slot)
+
+    assert engine.state is State.OPEN
+
+
+def test__half_open__unreachable_probe__does_not_reopen(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    engine = _unreachable_engine(config, fake_clock)
+    _trip_to_open(engine)
+    fake_clock.advance(5.0)
+
+    with pytest.raises(_NoLocalSlot):
+        engine.call_sync(_raise_no_slot)
+
+    assert engine.state is State.HALF_OPEN
+
+
+def test__half_open__unreachable_probe_then_success__closes(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    engine = _unreachable_engine(config, fake_clock)
+    _trip_to_open(engine)
+    fake_clock.advance(5.0)
+    with pytest.raises(_NoLocalSlot):
+        engine.call_sync(_raise_no_slot)
+
+    for _ in range(2):
+        engine.call_sync(lambda: 'ok')
+
+    assert engine.state is State.CLOSED
+
+
+def test__half_open__every_probe_unreachable__reopens(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    engine = _unreachable_engine(config, fake_clock)
+    _trip_to_open(engine)
+    fake_clock.advance(5.0)
+
+    for _ in range(config.permitted_calls_in_half_open):
+        with pytest.raises(_NoLocalSlot):
+            engine.call_sync(_raise_no_slot)
+
+    assert engine.state is State.OPEN
+
+
+def test__unreachable_not_configured__probe_reopens_as_before(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    engine = Engine(
+        name='test', config=config, clock=fake_clock, classifier=DefaultFailureClassifier()
+    )
+    _trip_to_open(engine)
+    fake_clock.advance(5.0)
+
+    for _ in range(config.permitted_calls_in_half_open):
+        with pytest.raises(_NoLocalSlot):
+            engine.call_sync(_raise_no_slot)
+
+    assert engine.state is State.OPEN
+
+
+@pytest.mark.asyncio
+async def test__half_open__unreachable_async_probe__does_not_reopen(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    engine = _unreachable_engine(config, fake_clock)
+
+    async def boom() -> None:
+        raise ValueError('boom')
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match='boom'):
+            await engine.call_async(boom)
+    fake_clock.advance(5.0)
+
+    async def no_slot() -> None:
+        raise _NoLocalSlot
+
+    with pytest.raises(_NoLocalSlot):
+        await engine.call_async(no_slot)
+
+    assert engine.state is State.HALF_OPEN
+
+
+def test__unreachable_exceptions__not_an_exception_type__rejected_at_construction(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    """A bad entry must fail here, not from inside ``isinstance`` on a real failure."""
+    for bad in ('nope', int):  # not a type at all, and a type that is not an Exception
+        with pytest.raises(TypeError, match='unreachable_exceptions'):
+            Engine(
+                name='test',
+                config=config,
+                clock=fake_clock,
+                unreachable_exceptions=cast('tuple[type[Exception], ...]', (bad,)),
+            )

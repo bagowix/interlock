@@ -262,3 +262,60 @@ def test__timer__survives_storage_degradation_and_recovery(timed_engine: Engine)
 
     timed_engine._on_storage_recovered()
     assert timed_engine._timer is armed
+
+
+def test__schedule__backoff_in_play__timer_waits_the_grown_interval(
+    fake_clock: FakeClock,
+) -> None:
+    """The timer must follow ``retry_after()``, not the configured base wait.
+
+    Armed for the base wait, it would fire while the backoff still had time to
+    run, be refused by ``attempt_auto_transition``, and leave nothing scheduled
+    for the remainder — the breaker would then sit in ``OPEN`` until a caller
+    happened to arrive.
+    """
+    engine = Engine(
+        name='t',
+        config=Config(
+            minimum_number_of_calls=2,
+            window_size=10,
+            permitted_calls_in_half_open=1,
+            max_concurrent_probes=1,
+            wait_duration_in_open=100.0,
+            wait_duration_backoff_multiplier=3.0,
+            auto_transition=True,
+        ),
+        clock=fake_clock,
+    )
+
+    def boom() -> None:
+        raise ValueError('boom')
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match='boom'):
+            engine.call_sync(boom)
+    assert engine._timer is not None
+    assert engine._timer.interval == pytest.approx(100.0)
+
+    fake_clock.advance(100.0)
+    with pytest.raises(ValueError, match='boom'):
+        engine.call_sync(boom)  # the probe fails, the round with it
+
+    assert engine.state is State.OPEN
+    assert engine._timer is not None
+    assert engine._timer.interval == pytest.approx(300.0)
+    engine.close()
+
+
+def test__schedule__no_longer_open__arms_nothing(fake_clock: FakeClock) -> None:
+    """``retry_after()`` is estimable only in ``OPEN``; anywhere else, stand down."""
+    engine = Engine(
+        name='t',
+        config=Config(wait_duration_in_open=100.0, auto_transition=True),
+        clock=fake_clock,
+    )
+
+    engine._schedule_auto_transition()  # the machine is CLOSED
+
+    assert engine._timer is None
+    engine.close()

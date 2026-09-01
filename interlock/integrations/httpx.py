@@ -88,6 +88,16 @@ _EXCLUDED_EXCEPTIONS: tuple[type[Exception], ...] = (
     UnsupportedProtocol,
 )
 
+# A ``PoolTimeout`` in CLOSED is a real signal — see ``_EXCLUDED_EXCEPTIONS``,
+# an exhausted pool is usually the dependency holding connections open, and
+# shedding load then is the point. A HALF_OPEN probe asks a narrower question:
+# has the dependency recovered? A request that never got a connection out of
+# the local pool never asked it, so it cannot answer. Counting it re-opens the
+# breaker on evidence it does not have, and a pool that stays saturated (a
+# noisy neighbour on the same client, a leak) then wedges the breaker open for
+# good. Listed here, such a probe returns its slot instead.
+_UNREACHABLE_EXCEPTIONS: tuple[type[Exception], ...] = (PoolTimeout,)
+
 
 def _exception_types(
     excluded: Iterable[type[Exception]] | None,
@@ -350,6 +360,7 @@ class CircuitBreakerTransport(BaseTransport):
             classifier=classifier,
             listener=listener,
             default_classifier=HttpStatusClassifier(),
+            unreachable_exceptions=_UNREACHABLE_EXCEPTIONS,
         )
 
     @property
@@ -454,6 +465,7 @@ class AsyncCircuitBreakerTransport(AsyncBaseTransport):
             classifier=classifier,
             listener=listener,
             default_classifier=HttpStatusClassifier(),
+            unreachable_exceptions=_UNREACHABLE_EXCEPTIONS,
         )
 
     @property

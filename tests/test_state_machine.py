@@ -646,3 +646,227 @@ def test__close__time_based_window__is_rebuilt_with_the_injected_clock(
     machine.record(Outcome.SUCCESS)
 
     assert machine.snapshot().total_calls == 1
+
+
+def _fail_probe_round(machine: StateMachine, clock: FakeClock, *, wait: float) -> None:
+    """Advance past the open wait, then fail every probe of the resulting round."""
+    clock.advance(wait)
+    machine.acquire()
+    for _ in range(machine._config.permitted_calls_in_half_open):
+        machine.record(Outcome.FAILURE)
+
+
+def test__open__default_multiplier__wait_duration_stays_constant(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+
+    for _ in range(3):
+        _fail_probe_round(machine, fake_clock, wait=5.0)
+
+    assert machine.state is State.OPEN
+    assert machine.retry_after() == pytest.approx(5.0)
+
+
+def test__open__consecutive_failed_rounds__wait_duration_grows(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(
+        config=replace(config, wait_duration_backoff_multiplier=2.0), clock=fake_clock
+    )
+    _trip_to_open(machine, 2)
+
+    assert machine.retry_after() == pytest.approx(5.0)
+
+    _fail_probe_round(machine, fake_clock, wait=5.0)
+    assert machine.retry_after() == pytest.approx(10.0)
+
+    _fail_probe_round(machine, fake_clock, wait=10.0)
+    assert machine.retry_after() == pytest.approx(20.0)
+
+    # The third round separates growth from mere multiplication: 5 * 2**3 is 40,
+    # while 5 * (2 * 3) would be 30.
+    _fail_probe_round(machine, fake_clock, wait=20.0)
+    assert machine.retry_after() == pytest.approx(40.0)
+
+
+def test__open__backoff__capped_at_configured_max(config: Config, fake_clock: FakeClock) -> None:
+    machine = StateMachine(
+        config=replace(
+            config, wait_duration_backoff_multiplier=10.0, wait_duration_in_open_max=12.0
+        ),
+        clock=fake_clock,
+    )
+    _trip_to_open(machine, 2)
+    _fail_probe_round(machine, fake_clock, wait=5.0)
+
+    assert machine.retry_after() == pytest.approx(12.0)
+
+
+def test__half_open__probe_round_passes__backoff_resets(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(
+        config=replace(config, wait_duration_backoff_multiplier=2.0), clock=fake_clock
+    )
+    _trip_to_open(machine, 2)
+    _fail_probe_round(machine, fake_clock, wait=5.0)
+    assert machine.retry_after() == pytest.approx(10.0)
+
+    fake_clock.advance(10.0)
+    machine.acquire()
+    for _ in range(config.permitted_calls_in_half_open):
+        machine.record(Outcome.SUCCESS)
+    assert machine.state is State.CLOSED
+
+    _trip_to_open(machine, 2)
+    assert machine.retry_after() == pytest.approx(5.0)
+
+
+def test__open__grown_wait__probe_not_admitted_before_it_elapses(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(
+        config=replace(config, wait_duration_backoff_multiplier=2.0), clock=fake_clock
+    )
+    _trip_to_open(machine, 2)
+    _fail_probe_round(machine, fake_clock, wait=5.0)
+
+    fake_clock.advance(5.0)  # enough for the base wait, not for the doubled one
+
+    assert machine.acquire() is False
+    assert machine.state is State.OPEN
+
+
+def test__reset__clears_backoff(config: Config, fake_clock: FakeClock) -> None:
+    machine = StateMachine(
+        config=replace(config, wait_duration_backoff_multiplier=2.0), clock=fake_clock
+    )
+    _trip_to_open(machine, 2)
+    _fail_probe_round(machine, fake_clock, wait=5.0)
+
+    machine.reset()
+    _trip_to_open(machine, 2)
+
+    assert machine.retry_after() == pytest.approx(5.0)
+
+
+def test__half_open__inconclusive_probe__returns_slot_without_verdict(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    machine.acquire()
+
+    machine.record(Outcome.FAILURE, generation=machine.generation, unreachable=True)
+
+    assert machine.state is State.HALF_OPEN
+    assert machine.acquire() is True
+
+
+def test__half_open__inconclusive_then_successful_probes__closes(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    machine.record(Outcome.FAILURE, generation=machine.generation, unreachable=True)
+
+    for _ in range(config.permitted_calls_in_half_open):
+        assert machine.acquire() is True
+        machine.record(Outcome.SUCCESS)
+
+    assert machine.state is State.CLOSED
+
+
+def test__half_open__every_probe_inconclusive__reopens(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+
+    for _ in range(config.permitted_calls_in_half_open):
+        assert machine.acquire() is True
+        machine.record(Outcome.FAILURE, generation=machine.generation, unreachable=True)
+
+    assert machine.state is State.OPEN
+
+
+def test__half_open__inconclusive_probe__stale_generation_ignored(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    machine.acquire()
+    stale = machine.generation - 1
+
+    machine.record(Outcome.FAILURE, generation=stale, unreachable=True)
+
+    assert machine.state is State.HALF_OPEN
+
+
+def test__closed__unreachable_outcome__still_counted_in_window(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock)
+
+    for _ in range(2):
+        machine.record(Outcome.FAILURE, unreachable=True)
+
+    assert machine.state is State.OPEN
+
+
+def test__metrics_only__unreachable_outcome__recorded_without_tripping(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(config=config, clock=fake_clock, initial_state=State.METRICS_ONLY)
+
+    for _ in range(2):
+        machine.record(Outcome.FAILURE, unreachable=True)
+
+    assert machine.state is State.METRICS_ONLY
+    assert machine.snapshot().failure_rate == 1.0
+
+
+def test__half_open__inconclusive_probe__frees_exactly_one_concurrency_slot(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(
+        config=replace(config, permitted_calls_in_half_open=10, max_concurrent_probes=1),
+        clock=fake_clock,
+    )
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    assert machine.acquire() is True
+    assert machine.acquire() is False  # concurrency cap reached
+
+    machine.record(Outcome.FAILURE, generation=machine.generation, unreachable=True)
+
+    assert machine.acquire() is True  # the in-flight slot came back
+    assert machine.acquire() is False  # and only the one
+
+
+def test__half_open__inconclusive_probe__frees_exactly_one_round_slot(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    machine = StateMachine(
+        config=replace(config, permitted_calls_in_half_open=3, max_concurrent_probes=3),
+        clock=fake_clock,
+    )
+    _trip_to_open(machine, 2)
+    fake_clock.advance(5.0)
+    for _ in range(3):
+        assert machine.acquire() is True
+    for _ in range(2):
+        machine.record(Outcome.SUCCESS, generation=machine.generation)
+    assert machine.acquire() is False  # the round's admission budget is spent
+
+    machine.record(Outcome.FAILURE, generation=machine.generation, unreachable=True)
+
+    assert machine.acquire() is True  # one admission returned to the round
+    assert machine.acquire() is False  # and only the one

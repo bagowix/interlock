@@ -61,6 +61,13 @@ class CircuitBreaker:
             state. A coordinated breaker matches its storage's runtime: a sync
             ``Storage`` serves only the sync API, an ``AsyncStorage`` only the
             async one; without a storage the breaker stays fully dual.
+        unreachable_exceptions: Exception types that mean the call never reached
+            the dependency — no local connection slot, no bulkhead permit. In
+            ``HALF_OPEN`` such a probe returns its slot without a verdict rather
+            than counting as a failure it never observed; ``CLOSED`` is
+            unaffected. Defaults to none. A coordinated (storage-backed) probe
+            keeps the plain behaviour: its lease can only be returned by an
+            outcome.
 
     Raises:
         ValueError: If ``initial_state`` is not a supported stable state.
@@ -76,6 +83,7 @@ class CircuitBreaker:
         classifier: FailureClassifier | None = None,
         listener: CoreEventListener | StorageEventListener | None = None,
         storage: Storage | AsyncStorage | None = None,
+        unreachable_exceptions: tuple[type[Exception], ...] = (),
     ) -> None:
         self._name = name
         self._engine = Engine(
@@ -86,6 +94,7 @@ class CircuitBreaker:
             classifier=classifier,
             listener=listener,
             storage=storage,
+            unreachable_exceptions=unreachable_exceptions,
         )
         # Guarded-block bookkeeping lives in a ContextVar, not on the instance:
         # each thread and each asyncio task sees its own stack, so overlapping

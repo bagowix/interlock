@@ -757,3 +757,36 @@ async def test__async_transport__inner_dialect_error__propagates_unchanged(
 def test__dialect_errors__request_not_set__keep_httpx2_contract(error: httpx2.HTTPError) -> None:
     with pytest.raises(RuntimeError, match='has not been set'):
         _ = error.request
+
+
+def test__half_open__pool_timeout_probe__does_not_reopen_the_breaker() -> None:
+    """A probe that never got a connection carries no verdict about the host."""
+    clock = FakeClock()
+    config = Config(
+        minimum_number_of_calls=2,
+        window_size=10,
+        permitted_calls_in_half_open=2,
+        max_concurrent_probes=1,
+        wait_duration_in_open=5.0,
+    )
+    responses: list[object] = [
+        httpx2.Response(500),
+        httpx2.Response(500),
+        httpx2.PoolTimeout('no connection available'),
+    ]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        outcome = responses.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return cast('httpx2.Response', outcome)
+
+    transport = CircuitBreakerTransport(httpx2.MockTransport(handler), config=config, clock=clock)
+    with httpx2.Client(transport=transport) as client:
+        for _ in range(2):
+            client.get('https://service.test/path')
+        clock.advance(5.0)
+        with pytest.raises(httpx2.PoolTimeout):
+            client.get('https://service.test/path')
+
+    assert transport.registry.get('service.test').state is State.HALF_OPEN

@@ -32,6 +32,8 @@ config = Config(
 | `permitted_calls_in_half_open` | `10` | Probe calls allowed while `HALF_OPEN`. |
 | `max_concurrent_probes` | `1` | Cap on **simultaneous** probes in `HALF_OPEN`. Must be in `[1, permitted_calls_in_half_open]`. |
 | `wait_duration_in_open` | `60.0` | Seconds to stay `OPEN` before the first probe is allowed. |
+| `wait_duration_backoff_multiplier` | `1.0` | Multiplies the open wait after each consecutive failed probe round. `1.0` keeps it constant. Must be `>= 1`. |
+| `wait_duration_in_open_max` | `None` | Ceiling for the backed-off wait, in seconds. `None` leaves it uncapped; when set, must be `>= wait_duration_in_open`. |
 | `auto_transition` | `False` | When `True`, a timer moves the breaker `OPEN → HALF_OPEN` once the wait elapses, instead of waiting for the next call. See [States](states.md#proactive-transition-auto_transition). |
 | `window_type` | `COUNT_BASED` | `COUNT_BASED` or `TIME_BASED`. |
 | `window_size` | `100` | Last N calls (count-based) or last N seconds (time-based). |

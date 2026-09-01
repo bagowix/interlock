@@ -57,6 +57,7 @@ class StateMachine:
         self._state = initial_state
         self._opened_at = 0.0
         self._generation = 0
+        self._failed_rounds = 0
         self._reset_probes()
 
     @property
@@ -91,7 +92,7 @@ class StateMachine:
             return None
 
         elapsed = self._clock.monotonic() - self._opened_at
-        return max(0.0, self._config.wait_duration_in_open - elapsed)
+        return max(0.0, self._wait_duration() - elapsed)
 
     def acquire(self) -> bool:
         """Decide whether one call may proceed, mutating state lazily.
@@ -111,11 +112,20 @@ class StateMachine:
 
         return False  # FORCED_OPEN
 
-    def record(self, outcome: Outcome, *, generation: int | None = None) -> None:
+    def record(
+        self, outcome: Outcome, *, generation: int | None = None, unreachable: bool = False
+    ) -> None:
         """Record one completed call's outcome and evaluate any transition.
 
         ``generation`` is the era captured at admission; an outcome from an
         earlier era is dropped (see ``generation``). ``None`` skips the check.
+
+        ``unreachable`` marks a call that failed without reaching the dependency
+        — no local connection slot, no bulkhead permit. In ``CLOSED`` it changes
+        nothing: the caller cannot serve traffic either way, and shedding load is
+        the point. It only matters for a probe, which asks the narrower question
+        "has the dependency recovered?" and cannot answer it from a call that
+        never left the process.
         """
         if generation is not None and generation != self._generation:
             return
@@ -124,7 +134,10 @@ class StateMachine:
             self._window.record(outcome)
             self._evaluate_closed()
         elif self._state is State.HALF_OPEN:
-            self._record_probe(outcome)
+            if unreachable:
+                self._record_inconclusive_probe()
+            else:
+                self._record_probe(outcome)
         elif self._state is State.METRICS_ONLY:
             self._window.record(outcome)
 
@@ -195,7 +208,23 @@ class StateMachine:
         return self._admit_probe()
 
     def _wait_elapsed(self) -> bool:
-        return self._clock.monotonic() - self._opened_at >= self._config.wait_duration_in_open
+        return self._clock.monotonic() - self._opened_at >= self._wait_duration()
+
+    def _wait_duration(self) -> float:
+        """How long this OPEN spell lasts, lengthened by consecutive failed rounds.
+
+        The first spell after a trip — every spell, with the default multiplier
+        of ``1.0`` — is exactly ``wait_duration_in_open``, so the exponentiation
+        is skipped rather than computed as a no-op on the rejection path.
+        """
+        if not self._failed_rounds:
+            return self._config.wait_duration_in_open
+
+        duration = self._config.wait_duration_in_open * (
+            self._config.wait_duration_backoff_multiplier**self._failed_rounds
+        )
+        ceiling = self._config.wait_duration_in_open_max
+        return duration if ceiling is None else min(duration, ceiling)
 
     def _admit_probe(self) -> bool:
         # Cap total probes (don't hammer a barely-recovered dependency) and how
@@ -230,6 +259,28 @@ class StateMachine:
         if self._probes_completed >= self._config.permitted_calls_in_half_open:
             self._evaluate_probes()
 
+    def _record_inconclusive_probe(self) -> None:
+        """Hand a probe's slot back without a verdict, and count it against the round.
+
+        Counting an unreachable probe as a failure re-opens the breaker on
+        evidence it does not have; counting it as a success would be the
+        mirror-image lie. So the outcome is dropped and the slot returned — but
+        the round still has to end. Once as many probes have come back
+        inconclusive as the round permits, waiting is the only honest move left,
+        so the breaker re-opens, and the backoff applies because nothing was
+        learned. A probe still running is left to answer first: re-opening now
+        would bump the generation and throw its verdict away.
+        """
+        self._probes_in_flight -= 1
+        self._probes_admitted -= 1
+        self._probes_inconclusive += 1
+
+        if (
+            self._probes_inconclusive >= self._config.permitted_calls_in_half_open
+            and not self._probes_in_flight
+        ):
+            self._open()
+
     def _evaluate_probes(self) -> None:
         completed = self._probes_completed
         if self._exceeds_threshold(
@@ -247,6 +298,11 @@ class StateMachine:
         )
 
     def _open(self) -> None:
+        # Counted here rather than in ``_evaluate_probes`` so that every route
+        # back to OPEN from a probe round feeds the backoff, including a round
+        # that ended with nothing learned.
+        if self._state is State.HALF_OPEN:
+            self._failed_rounds += 1
         self._state = State.OPEN
         self._opened_at = self._clock.monotonic()
         self._generation += 1
@@ -258,6 +314,7 @@ class StateMachine:
 
     def _close(self) -> None:
         self._state = State.CLOSED
+        self._failed_rounds = 0
         self._window = build_window(config=self._config, clock=self._clock)
         self._generation += 1
         self._reset_probes()
@@ -268,3 +325,4 @@ class StateMachine:
         self._probes_completed = 0
         self._probe_failures = 0
         self._probe_slows = 0
+        self._probes_inconclusive = 0
