@@ -870,3 +870,31 @@ def test__half_open__inconclusive_probe__frees_exactly_one_round_slot(
 
     assert machine.acquire() is True  # one admission returned to the round
     assert machine.acquire() is False  # and only the one
+
+
+def test__open__endless_failed_rounds__wait_stays_finite(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    """The growth has to stop somewhere: a float that reached infinity never elapses.
+
+    With a ceiling in play the wait itself stops growing, but the round counter
+    does not — so a dependency broken for days walks the exponent up until the
+    multiplication overflows, ``retry_after()`` returns infinity, and the breaker
+    can never leave ``OPEN`` again.
+    """
+    machine = StateMachine(
+        config=replace(
+            config, wait_duration_backoff_multiplier=2.0, wait_duration_in_open_max=20.0
+        ),
+        clock=fake_clock,
+    )
+    _trip_to_open(machine, 2)
+
+    for _ in range(1100):
+        wait = machine.retry_after()
+        assert wait is not None
+        _fail_probe_round(machine, fake_clock, wait=wait)
+
+    remaining = machine.retry_after()
+    assert remaining is not None
+    assert remaining == pytest.approx(20.0)  # pinned at the ceiling, not infinite

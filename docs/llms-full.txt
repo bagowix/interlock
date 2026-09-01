@@ -1658,6 +1658,12 @@ breaker = CircuitBreaker(
 The growing interval is also a signal in its own right: a breaker waiting out a
 blip looks nothing like one that has failed ten rounds in a row.
 
+Growth stops after 64 consecutive failed rounds. Any sane multiplier has long
+since passed `wait_duration_in_open_max` by then, and an unbounded exponent
+would eventually overflow to an infinite wait that never elapses — leaving the
+breaker open for good, which is precisely the failure this release set out to
+remove.
+
 ## Proactive transition (`auto_transition`)
 
 By default the `OPEN → HALF_OPEN` move is **lazy**: it happens on the first call
