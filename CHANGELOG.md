@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-09-01
+
+### Added
+
+- **The open wait can now grow while probe rounds keep failing.**
+  `wait_duration_in_open` was a constant, so a breaker that could not recover
+  retried at full rate indefinitely, each round hammering a dependency already
+  in trouble. `Config.wait_duration_backoff_multiplier` lengthens the wait
+  after each consecutive failed round and `Config.wait_duration_in_open_max`
+  caps it; a passing round resets both. The default multiplier of `1.0` keeps
+  the historical constant wait, so nothing changes until it is raised. The
+  growing interval doubles as a signal: a breaker that is merely waiting out a
+  blip looks nothing like one that has failed ten rounds in a row.
+
+- **A Dependabot pull request no longer fails CI on the Codecov upload.** A run
+  triggered by Dependabot resolves `secrets.*` against the separate Dependabot
+  secret store, so `CODECOV_TOKEN` has to be maintained in two places — and a
+  drift between them is invisible until the upload is rejected and the required
+  `Coverage` check turns red on every open bump PR at once, with nothing wrong
+  in any of the diffs. The coverage gate is `fail_under = 100`, which `pytest`
+  enforces in that same job before the upload runs, so the upload is now
+  non-fatal on bot pull requests only; human pull requests and pushes to `main`
+  still fail hard when Codecov rejects a report.
+
 ### Fixed
 
 - **A backoff the coordinated lane cannot honour is now refused instead of
@@ -33,28 +57,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   through `unreachable_exceptions` on `CircuitBreaker`, `Registry` and
   `Engine`. `CLOSED` is deliberately untouched — an exhausted pool is a real
   signal there, and shedding load is the point.
-
-### Added
-
-- **The open wait can now grow while probe rounds keep failing.**
-  `wait_duration_in_open` was a constant, so a breaker that could not recover
-  retried at full rate indefinitely, each round hammering a dependency already
-  in trouble. `Config.wait_duration_backoff_multiplier` lengthens the wait
-  after each consecutive failed round and `Config.wait_duration_in_open_max`
-  caps it; a passing round resets both. The default multiplier of `1.0` keeps
-  the historical constant wait, so nothing changes until it is raised. The
-  growing interval doubles as a signal: a breaker that is merely waiting out a
-  blip looks nothing like one that has failed ten rounds in a row.
-
-- **A Dependabot pull request no longer fails CI on the Codecov upload.** A run
-  triggered by Dependabot resolves `secrets.*` against the separate Dependabot
-  secret store, so `CODECOV_TOKEN` has to be maintained in two places — and a
-  drift between them is invisible until the upload is rejected and the required
-  `Coverage` check turns red on every open bump PR at once, with nothing wrong
-  in any of the diffs. The coverage gate is `fail_under = 100`, which `pytest`
-  enforces in that same job before the upload runs, so the upload is now
-  non-fatal on bot pull requests only; human pull requests and pushes to `main`
-  still fail hard when Codecov rejects a report.
 
 ## [2.7.0] - 2026-08-18
 
@@ -968,7 +970,8 @@ The major version marks the scope of what is added, not a migration burden.
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/bagowix/interlock/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/bagowix/interlock/compare/v2.6.1...v2.7.0
 [2.6.1]: https://github.com/bagowix/interlock/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/bagowix/interlock/compare/v2.5.0...v2.6.0
