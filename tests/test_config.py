@@ -63,3 +63,33 @@ def test__config__auto_transition__defaults_to_false() -> None:
 
 def test__config__auto_transition__can_be_enabled() -> None:
     assert Config(auto_transition=True).auto_transition is True
+
+
+def test__config__backoff_multiplier_below_one__raises() -> None:
+    with pytest.raises(ValueError, match='wait_duration_backoff_multiplier'):
+        Config(wait_duration_backoff_multiplier=0.9)
+
+
+def test__config__wait_duration_max_below_base__raises() -> None:
+    with pytest.raises(ValueError, match='wait_duration_in_open_max'):
+        Config(wait_duration_in_open=60.0, wait_duration_in_open_max=30.0)
+
+
+def test__config__backoff_defaults__preserve_constant_wait() -> None:
+    config = Config()
+
+    assert config.wait_duration_backoff_multiplier == 1.0
+    assert config.wait_duration_in_open_max is None
+
+
+def test__config__multiplier_overflowing_the_bounded_backoff__raises() -> None:
+    """A wait that stops being a finite number never elapses, so refuse it here."""
+    with pytest.raises(ValueError, match='too large'):
+        Config(wait_duration_in_open=60.0, wait_duration_backoff_multiplier=1e308)
+
+
+def test__config__multiplier_at_the_edge__accepted() -> None:
+    """The bound is on the peak wait, not on the multiplier in isolation."""
+    config = Config(wait_duration_in_open=60.0, wait_duration_backoff_multiplier=2.0)
+
+    assert config.wait_duration_backoff_multiplier == 2.0

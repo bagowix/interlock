@@ -9,6 +9,7 @@ import threading
 from contextlib import AsyncExitStack, ExitStack
 
 from interlock._clock import SystemClock
+from interlock._engine import validate_unreachable_exceptions
 from interlock._initial_state import validate_initial_state
 from interlock.breaker import CircuitBreaker
 from interlock.config import Config
@@ -41,8 +42,17 @@ class Registry:
             no observation.
         storage: Shared backend for coordinated state, handed to every breaker
             (each coordinates under its own name). Defaults to local state.
+        unreachable_exceptions: Exception types that mean the call never reached
+            the dependency — no local connection slot, no bulkhead permit. In
+            ``HALF_OPEN`` such a probe returns its slot without a verdict rather
+            than counting as a failure it never observed; ``CLOSED`` is
+            unaffected. Defaults to none. A coordinated (storage-backed) probe
+            keeps the plain behaviour: its lease can only be returned by an
+            outcome.
 
     Raises:
+        TypeError: If ``unreachable_exceptions`` is not a tuple of ``Exception``
+            subclasses.
         ValueError: If ``initial_state`` is not a supported stable state.
     """
 
@@ -55,6 +65,7 @@ class Registry:
         classifier: FailureClassifier | None = None,
         listener: CoreEventListener | StorageEventListener | None = None,
         storage: Storage | AsyncStorage | None = None,
+        unreachable_exceptions: tuple[type[Exception], ...] = (),
     ) -> None:
         validate_initial_state(initial_state)
         self._config = config if config is not None else Config()
@@ -63,6 +74,7 @@ class Registry:
         self._classifier = classifier
         self._listener = listener
         self._storage = storage
+        self._unreachable_exceptions = validate_unreachable_exceptions(unreachable_exceptions)
         self._breakers: dict[str, CircuitBreaker] = {}
         self._lock = threading.Lock()
 
@@ -96,6 +108,7 @@ class Registry:
                     classifier=self._classifier,
                     listener=self._listener,
                     storage=self._storage,
+                    unreachable_exceptions=self._unreachable_exceptions,
                 )
                 self._breakers[name] = breaker
 

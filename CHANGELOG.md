@@ -8,6 +8,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A probe that never reached the dependency no longer decides the round.** A
+  `HALF_OPEN` probe asks one question — has the dependency recovered? — and
+  every failure was taken as its answer, including failures that never left the
+  process: no free connection in the local pool, no bulkhead permit. A single
+  such probe could re-open the breaker on evidence it did not have, and while
+  the local cause persisted every round failed the same way, however healthy
+  the dependency had become. Such a call
+  is now recorded through the new `unreachable` flag on `StateMachine.record`,
+  which hands the probe's slot back without a verdict instead of counting a
+  failure the probe never observed. The httpx and httpx2 transports pass
+  `PoolTimeout` that way out of the box; other integrations take the set
+  through `unreachable_exceptions` on `CircuitBreaker`, `Registry` and
+  `Engine`. `CLOSED` is deliberately untouched — an exhausted pool is a real
+  signal there, and shedding load is the point.
+
+### Added
+
+- **The open wait can now grow while probe rounds keep failing.**
+  `wait_duration_in_open` was a constant, so a breaker that could not recover
+  retried at full rate indefinitely, each round hammering a dependency already
+  in trouble. `Config.wait_duration_backoff_multiplier` lengthens the wait
+  after each consecutive failed round and `Config.wait_duration_in_open_max`
+  caps it; a passing round resets both. The default multiplier of `1.0` keeps
+  the historical constant wait, so nothing changes until it is raised. The
+  growing interval doubles as a signal: a breaker that is merely waiting out a
+  blip looks nothing like one that has failed ten rounds in a row.
+
 - **A Dependabot pull request no longer fails CI on the Codecov upload.** A run
   triggered by Dependabot resolves `secrets.*` against the separate Dependabot
   secret store, so `CODECOV_TOKEN` has to be maintained in two places — and a

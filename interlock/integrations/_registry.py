@@ -45,6 +45,7 @@ def resolve_registry(  # noqa: PLR0913 - mirrors the integration constructors
     classifier: FailureClassifier | None,
     listener: CoreEventListener | StorageEventListener | None,
     default_classifier: FailureClassifier,
+    unreachable_exceptions: tuple[type[Exception], ...] = (),
 ) -> tuple[Registry, bool]:
     """Return the effective registry and whether the integration owns it."""
     if registry is not None:
@@ -57,6 +58,7 @@ def resolve_registry(  # noqa: PLR0913 - mirrors the integration constructors
             initial_state=initial_state,
             classifier=classifier if classifier is not None else default_classifier,
             listener=listener,
+            unreachable_exceptions=unreachable_exceptions,
         ),
         True,
     )
