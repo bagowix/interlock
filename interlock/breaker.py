@@ -72,7 +72,11 @@ class CircuitBreaker:
     Raises:
         TypeError: If ``unreachable_exceptions`` is not a tuple of ``Exception``
             subclasses.
-        ValueError: If ``initial_state`` is not a supported stable state.
+        ValueError: If ``initial_state`` is not a supported stable state, or if
+            ``config`` asks for a backoff (``wait_duration_backoff_multiplier``
+            above ``1.0``) alongside a ``storage``: reopening is then the
+            backend's decision and no failed-round count is shared, so the
+            backoff could not be honoured.
     """
 
     def __init__(
