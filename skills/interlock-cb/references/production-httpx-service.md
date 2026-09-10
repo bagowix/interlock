@@ -53,7 +53,7 @@ Decisions behind it:
 
 - `mode` is a `Literal` over `State` values: one source of truth, no parallel enum. `FORCED_OPEN` is deliberately absent. As the initial state of every breaker it turns a healthy process into one that rejects every outgoing call from startup, a silent failure where a crash would be honest.
 - The default mode is shadow, so a fresh environment observes before it enforces. The half-open and open-wait fields are exposed from day one even though shadow mode ignores them: enabling `CLOSED` later touches only configuration.
-- Thresholds a process reads at startup must exist in every environment before the first deployment of this code. A missing key fails the rollout; it does not fall back to the model default.
+- With the model above, an omitted deployment key silently uses the model default. A deployment that injects these values from a secret store resolved at process start fails on a missing key. Create the keys in every environment before the first deployment either way, so the values in production are the ones you tuned.
 - A time-based window of 60 seconds suits uneven traffic; the slow-call duration sits near the client read timeout; a backoff multiplier of 2 capped at 300 seconds stops a dead dependency from being probed at full rate.
 - `failure_statuses` can live in the model, but it is a classifier. Keep it out of the per-environment operational config.
 
