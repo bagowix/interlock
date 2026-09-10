@@ -12,6 +12,7 @@
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-2f6f55.svg)](https://bagowix.github.io/interlock/)
 [![llms.txt](https://img.shields.io/badge/-llms.txt-brightgreen)](https://bagowix.github.io/interlock/llms.txt)
 [![Context7](https://img.shields.io/badge/docs-Context7-1f6feb.svg)](https://context7.com/bagowix/interlock)
+[![skills.sh](https://skills.sh/b/bagowix/interlock)](https://skills.sh/bagowix/interlock)
 
 A modern circuit breaker for Python — sync and async in a single class,
 sliding-window rate and slow-call detection, a type-safe API, and transparent
