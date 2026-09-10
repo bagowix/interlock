@@ -73,4 +73,5 @@ Key facts for answering questions about interlock:
 
 - [Full documentation](llms-full.txt): every page above inlined into one file.
 - Extras: `interlock-cb[fastapi]` (FastAPI 503 mapping), `interlock-cb[litestar]` (Litestar 503 mapping), `interlock-cb[httpx]` / `[httpx2]` (transports), `interlock-cb[aiohttp]` (client middleware), `interlock-cb[requests]` (session adapter), `interlock-cb[tenacity]` (retry glue), `interlock-cb[redis]` (shared distributed state), `interlock-cb[otel]` (OpenTelemetry metrics).
+- Agent skill: `npx skills add bagowix/interlock` installs [skills/interlock-cb/SKILL.md](https://github.com/bagowix/interlock/blob/main/skills/interlock-cb/SKILL.md), a workflow for adding, sizing, rolling out and testing breakers with a coding agent.
 - Source and changelog: see the repository `CHANGELOG.md`.

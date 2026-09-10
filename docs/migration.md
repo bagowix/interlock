@@ -367,8 +367,9 @@ After migrating, expect these behavioural differences — all intended:
   Conversely, a single burst of failures below `minimum_number_of_calls` will
   *not* trip — the window has to fill first.
 - **Slow calls can trip too, but only when you opt in.**
-  `slow_call_rate_threshold` defaults to `1.0`, so latency alone never trips
-  until you tune it down ([configuration](guides/configuration.md#why-slow-calls-matter)).
+  `slow_call_rate_threshold` defaults to `1.0`, which trips only when every call
+  in the window is slow, so latency is effectively off until you tune it down
+  ([configuration](guides/configuration.md#why-slow-calls-matter)).
 - **Half-open is a budgeted probe round, not a single trial call.** Up to
   `permitted_calls_in_half_open` probes run (with a concurrency cap), and the
   breaker re-decides from their rate ([states](guides/states.md)).

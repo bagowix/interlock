@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **An Agent Skill for coding agents.** A model trained before 2026 has never
+  seen interlock, so an agent asked for a circuit breaker reaches for a
+  consecutive-failure counter and guesses at the API.
+  `skills/interlock-cb/SKILL.md` follows the open
+  [Agent Skills](https://agentskills.io/) format and installs with
+  `npx skills add bagowix/interlock` into Claude Code, Cursor, Codex, GitHub
+  Copilot, Gemini CLI and the other clients that read it. The skill is a
+  procedure: inventory the outbound calls, pick the integration per dependency,
+  size `Config` from observed traffic, roll out in `METRICS_ONLY`, map
+  rejections to `503 + Retry-After`, test with an injected clock, and migrate
+  from pybreaker, circuitbreaker, aiobreaker or purgatory. The reference
+  material stays in the docs, which the skill links. The README and the docs
+  landing page point to the install command.
+
+### Fixed
+
+- **The source distribution no longer carries the Hypothesis example
+  database.** The release job runs the test suite before `uv build`, and
+  Hypothesis leaves its `.hypothesis/` cache in the checkout. Git ignores it
+  through the nested `.gitignore` Hypothesis writes there, while hatchling
+  reads only the root one, so the 2.8.0 sdist shipped 37 opaque cache files.
+  The sdist target now excludes the directory explicitly.
+
 ## [2.8.0] - 2026-09-01
 
 ### Added
