@@ -256,6 +256,25 @@ the [`examples/`](https://github.com/bagowix/interlock/tree/main/examples)
 scripts or follow the
 [walkthrough](https://bagowix.github.io/interlock/demo/).
 
+## Using with AI coding agents
+
+The repository ships an [Agent Skill](https://agentskills.io/) that walks a
+coding agent through adding interlock to a codebase: an inventory of outbound
+calls, the integration to use for each, threshold sizing, a shadow-mode
+rollout, tests driven by a fake clock, and the migration from pybreaker or
+circuitbreaker. It installs into Claude Code, Cursor, Codex, GitHub Copilot,
+Gemini CLI and the other agents that read the open skills format:
+
+```bash
+npx skills add bagowix/interlock
+```
+
+Then ask the agent to add circuit breakers to a service. Agents that read
+documentation directly can use
+[llms.txt](https://bagowix.github.io/interlock/llms.txt), the fully inlined
+[llms-full.txt](https://bagowix.github.io/interlock/llms-full.txt) or
+[Context7](https://context7.com/bagowix/interlock).
+
 ## Contributing
 
 Bug reports and pull requests are welcome. See

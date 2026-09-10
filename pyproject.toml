@@ -190,6 +190,7 @@ plugins.MD029.style = "ordered" # consistent ordered list numbering
 plugins.MD033.enabled = false   # allow inline HTML (useful for docs)
 plugins.MD046.enabled = false   # pymdownx.tabbed indents fenced blocks; the style check misfires
 plugins.MD041.enabled = false   # do not require an H1 at the top of every file
+extensions.front-matter.enabled = true  # SKILL.md carries YAML front matter (Agent Skills spec)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
