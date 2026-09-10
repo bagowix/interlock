@@ -101,7 +101,7 @@ The decorator keeps the wrapped signature for type checkers. The context manager
 | `minimum_number_of_calls` | `10` | Calls needed before the rate is trusted. Raise it for busy dependencies (50), lower it for quiet ones (5). |
 | `window_type`, `window_size` | `COUNT_BASED`, `100` | Last N calls, or last N seconds with `WindowType.TIME_BASED`. Time-based suits high throughput. |
 | `slow_call_duration_threshold` | `60.0` | Seconds at or above which a call is slow. Set it to the client timeout or just above the p99 latency. |
-| `slow_call_rate_threshold` | `1.0` | Fraction of slow calls that trips. `1.0` means latency alone never trips; try `0.5` to `0.8` once shadow data exists. |
+| `slow_call_rate_threshold` | `1.0` | Fraction of slow calls that trips. `1.0` trips only when every call in the window is slow, so latency is effectively off until you tune it down; try `0.5` to `0.8` once shadow data exists. |
 | `wait_duration_in_open` | `60.0` | Seconds to stay open before the first probe. |
 | `wait_duration_backoff_multiplier`, `wait_duration_in_open_max` | `1.0`, `None` | Grow the wait after each failed probe round and cap it. The multiplier must stay `1.0` with a shared storage. |
 | `permitted_calls_in_half_open`, `max_concurrent_probes` | `10`, `1` | Probe budget per half-open round, and how many probes run at once. `max_concurrent_probes` must stay within `[1, permitted_calls_in_half_open]`. |
@@ -129,7 +129,7 @@ Pass it as `classifier=`. For LLM SDKs, count `429, 500, 502, 503, 504, 529` and
 - Put retries outside the breaker and stop the moment the circuit opens. `retry_unless_open(*transient)` from `interlock.integrations.tenacity` is the tenacity predicate for that; `CircuitOpenError` is never transient. The one exception is background work that prefers waiting for the next probe over failing: there the predicate must include `CircuitOpenError` (`retry_if_exception_type((TimeoutError, CircuitOpenError))`) and the wait is `wait_probe(wait_exponential_jitter())`, which sleeps `retry_after` after a rejection and defers to the wrapped strategy otherwise. Pick one mode per call site.
 - An existing tenacity decorator stays where it is: change its `retry=` to `retry_unless_open(<transient types>)` and keep its `stop`. With a transport, middleware or adapter, a retry decorator on the calling function already sits outside the breaker.
 - Keep one retry layer. Disable SDK retries (`max_retries=0`) and urllib3 `Retry` when tenacity owns retrying.
-- Retry predicates must not match the rejection. The typed rejections subclass the client library's base error class, so a predicate on `httpx.TransportError`, `requests.exceptions.RequestException` or `aiohttp.ClientError` retries every rejection; key it on leaf types (`httpx.ConnectError`, `httpx.ReadTimeout`) or use `retry_unless_open`.
+- Retry predicates must not match the rejection. The typed rejections descend from the client library's error hierarchy, so a predicate on `httpx.TransportError`, `requests.exceptions.RequestException` or `aiohttp.ClientError` retries every rejection; key it on leaf types (`httpx.ConnectError`, `httpx.ReadTimeout`) or use `retry_unless_open`.
 - When several concerns stack, use the pipeline. Order is explicit and the first strategy is the outermost:
 
 ```python
@@ -239,7 +239,7 @@ Keep the old breaker in place until shadow-mode data supports the new thresholds
 - A shared storage together with `wait_duration_backoff_multiplier` above `1.0`, or a sync storage on an async call path. Both raise.
 - Passing `registry=` together with `config`, `clock`, `initial_state`, `classifier` or `listener` to an integration. It raises; configure the registry instead.
 - Handing an HTTP integration a registry built without `HttpStatusClassifier`: returned error statuses become successes.
-- A retry predicate keyed on the client's base error class: it retries the typed rejection.
+- A retry predicate keyed on the client library's broad error base: it retries the typed rejection.
 
 ## Report back
 

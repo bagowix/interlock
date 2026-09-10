@@ -59,9 +59,10 @@ Config(window_type=WindowType.TIME_BASED, window_size=30)
 
 A dependency that answers slowly but never errors will never trip a
 failure-rate breaker, yet it still exhausts your timeouts and threads.
-Slow-call detection treats latency as a first-class failure signal. By default
-`slow_call_rate_threshold=1.0` means slowness alone never trips the breaker
-until you tune it down — safe to leave on while you observe.
+Slow-call detection treats latency as a first-class failure signal. The default
+`slow_call_rate_threshold=1.0` trips only when every call in the window is slow,
+so latency is effectively off until you tune it down — safe to leave on while
+you observe.
 
 ## Sharing config with a Registry
 

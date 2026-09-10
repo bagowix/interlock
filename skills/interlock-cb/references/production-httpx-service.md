@@ -51,7 +51,7 @@ class BreakerSettings(BaseModel):
 
 Decisions behind it:
 
-- `mode` is a `Literal` over `State` values: one source of truth, no parallel enum. `FORCED_OPEN` is deliberately absent. As the initial state of every breaker it turns a healthy process into one that rejects every outgoing call from startup, a silent failure where a crash would be honest.
+- `mode` is a `Literal` over `State` values: one source of truth, no parallel enum. `FORCED_OPEN` is deliberately absent. As the initial state of every breaker, it turns a healthy process into one that rejects every outgoing call from startup, a silent failure where a crash would be honest.
 - The default mode is shadow, so a fresh environment observes before it enforces. The half-open and open-wait fields are exposed from day one even though shadow mode ignores them: enabling `CLOSED` later touches only configuration.
 - With the model above, an omitted deployment key silently uses the model default. A deployment that injects these values from a secret store resolved at process start fails on a missing key. Create the keys in every environment before the first deployment either way, so the values in production are the ones you tuned.
 - A time-based window of 60 seconds suits uneven traffic; the slow-call duration sits near the client read timeout; a backoff multiplier of 2 capped at 300 seconds stops a dead dependency from being probed at full rate.
@@ -94,8 +94,9 @@ class BreakerTransportFactory:
         verify: ssl.SSLContext | str | bool = True,
     ) -> AsyncCircuitBreakerTransport:
         # httpx applies limits, verify and proxy settings only to a transport it
-        # creates itself. A client given transport= drops them silently, so
-        # they are configured here, on the inner transport.
+        # creates itself; a client given transport= drops them silently. limits
+        # and verify are configured here. A proxy is not: pass a transport built
+        # with proxy=... as the argument when the deployment needs one.
         if transport is None:
             transport = (
                 httpx.AsyncHTTPTransport(verify=verify)
@@ -212,7 +213,7 @@ Register the collector once per process with `prometheus_client.REGISTRY.registe
 
 `DISABLED` stops only the sliding window; listener events keep flowing, so switching a breaker off does not blank the dashboards. That is intended: an empty panel reads as "no traffic".
 
-## 5. Rollout stages that worked
+## 5. Rollout stages
 
 1. Pin the version (`interlock-cb[httpx]~=2.8`).
 2. Settings, factory, listener, unit tests (section 6).
@@ -221,7 +222,7 @@ Register the collector once per process with `prometheus_client.REGISTRY.registe
 5. Observe at least one full business cycle. Treat low-traffic dependencies separately: their window may never reach `minimum_number_of_calls`. Record a baseline per host: volume, failure and slow-call rates, retry amplification, typical degradation windows.
 6. A separate, reviewed change enables `CLOSED`, with a canary and a rollback path.
 
-## 6. Tests that caught real mistakes
+## 6. Tests to write
 
 All run against `httpx.MockTransport`, no network:
 
