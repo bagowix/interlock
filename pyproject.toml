@@ -54,6 +54,12 @@ default = true
 [tool.hatch.build.targets.wheel]
 packages = ["interlock"]
 
+[tool.hatch.build.targets.sdist]
+# The release job runs the tests before `uv build`, and Hypothesis leaves its
+# example database in the checkout. Git ignores it through the nested
+# .gitignore Hypothesis writes there; hatchling reads only the root one.
+exclude = [".hypothesis/"]
+
 [tool.ruff]
 src = ["interlock", "tests"]
 line-length = 100

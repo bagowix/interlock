@@ -22,6 +22,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   material stays in the docs, which the skill links. The README and the docs
   landing page point to the install command.
 
+### Fixed
+
+- **The source distribution no longer carries the Hypothesis example
+  database.** The release job runs the test suite before `uv build`, and
+  Hypothesis leaves its `.hypothesis/` cache in the checkout. Git ignores it
+  through the nested `.gitignore` Hypothesis writes there, while hatchling
+  reads only the root one, so the 2.8.0 sdist shipped 37 opaque cache files.
+  The sdist target now excludes the directory explicitly.
+
 ## [2.8.0] - 2026-09-01
 
 ### Added
