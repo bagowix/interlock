@@ -239,7 +239,7 @@ All run against `httpx.MockTransport`, no network:
 The first one, as a pattern for the rest:
 
 ```python
-async def test_shadow_mode_records_failures_without_rejecting() -> None:
+async def test__shadow_mode__records_failures_without_rejecting() -> None:
     settings = BreakerSettings(minimum_number_of_calls=2, window_size=10)
     factory = BreakerTransportFactory(settings, listener=PrometheusBreakerListener())
     transport = factory.create(httpx.MockTransport(lambda _request: httpx.Response(503)))
