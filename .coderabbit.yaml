@@ -253,9 +253,10 @@ reviews:
         instructions: >-
           PASS if the PR is a release preparation (title matches
           `chore: prepare the * release`), or touches only .github/, benchmarks/,
-          planning/, test files, or developer tooling configuration that never
-          reaches the published package (dot-files in the repository root such as
-          .coderabbit.yaml, .pre-commit-config.yaml, .gitignore).
+          planning/, CONTRIBUTING.md, test files, or developer tooling
+          configuration that never reaches the published package (dot-files in
+          the repository root such as .coderabbit.yaml, .pre-commit-config.yaml,
+          .gitignore).
           Otherwise FAIL unless CHANGELOG.md gains at
           least one bullet under the `## [Unreleased]` heading describing the
           user-visible effect of the change.

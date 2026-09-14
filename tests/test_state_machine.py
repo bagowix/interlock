@@ -723,6 +723,10 @@ def test__half_open__probe_round_passes__backoff_resets(
     _trip_to_open(machine, 2)
     assert machine.retry_after() == pytest.approx(5.0)
 
+    # Counting again from one, not resuming from three: 5 * 2, never 5 * 2**3.
+    _fail_probe_round(machine, fake_clock, wait=5.0)
+    assert machine.retry_after() == pytest.approx(10.0)
+
 
 def test__open__grown_wait__probe_not_admitted_before_it_elapses(
     config: Config, fake_clock: FakeClock
