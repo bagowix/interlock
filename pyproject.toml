@@ -245,16 +245,20 @@ do_not_mutate_patterns = ["cast\\("]
 # mutmut runs pytest in-process and copies pyproject.toml into `mutants/`, so
 # the `-n auto` default would fork the collector away from it.
 pytest_add_cli_args = ["-n", "0", "-p", "no:cacheprovider"]
-# Excluded from the mutation suite, for three different reasons:
+# Excluded from the mutation suite, for four different reasons:
 #   - the wall-clock example runner and the extras integration tests cost
 #     minutes and exercise third-party code, not the two modules under mutation;
 #   - the hypothesis suites are randomised, and mutmut maps tests to functions
 #     from a single stats run — a test that reaches a branch only sometimes
 #     makes both that mapping and the score irreproducible. The score is a
 #     tracked number, so it is measured against the deterministic suite: a
-#     survivor then means a missing example-based test, every time.
+#     survivor then means a missing example-based test, every time;
+#   - the README link checks read repository files that mutmut does not copy
+#     into `mutants/`, so collection fails there; they import no library code
+#     and could not kill a mutant anyway.
 pytest_add_cli_args_test_selection = [
   "tests",
+  "--ignore=tests/test_readme.py",
   "--ignore=tests/test_examples.py",
   "--ignore=tests/test_aiohttp.py",
   "--ignore=tests/test_fastapi.py",
