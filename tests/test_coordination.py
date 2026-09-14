@@ -1509,7 +1509,7 @@ def test__breaker__backoff_with_shared_storage__rejected(fake_clock: FakeClock) 
         'to run this breaker locally. Got 2.0.'
     )
 
-    with pytest.raises(ValueError, match=re.escape(refusal)):
+    with pytest.raises(ValueError, match=rf'\A{re.escape(refusal)}\Z'):
         CircuitBreaker(
             name='payments',
             config=Config(wait_duration_backoff_multiplier=2.0),

@@ -563,7 +563,7 @@ def test__unreachable_exceptions__not_a_tuple__rejected_at_construction(
     config: Config, fake_clock: FakeClock
 ) -> None:
     """``isinstance`` refuses a list of types, so refuse it here with a clear message."""
-    with pytest.raises(TypeError, match='must be a tuple, got: list'):
+    with pytest.raises(TypeError, match=r'\Aunreachable_exceptions must be a tuple, got: list\Z'):
         Engine(
             name='test',
             config=config,
