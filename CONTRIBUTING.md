@@ -137,7 +137,7 @@ deterministic suite only — the hypothesis suites are excluded, because a test
 that reaches a branch only sometimes makes both mutmut's test-selection mapping
 and the score itself irreproducible.
 
-Baseline: **526 of 549 mutants killed (95.8%)**. Every survivor is an equivalent
+Baseline: **614 of 637 mutants killed (96.4%)**. Every survivor is an equivalent
 mutant, in one of five classes:
 
 | Class | Why it cannot be killed |
