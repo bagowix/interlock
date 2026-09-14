@@ -482,6 +482,30 @@ def test__half_open__every_probe_unreachable__reopens(
     assert engine.state is State.OPEN
 
 
+def test__half_open__ordinary_exception__stays_a_probe_verdict(
+    config: Config, fake_clock: FakeClock
+) -> None:
+    """Configuring unreachable exceptions must not turn every failure into one.
+
+    An inconclusive probe hands its slot back and ends no round, so a breaker
+    that mistook an ordinary failure for one would sit in HALF_OPEN while the
+    dependency kept failing.
+    """
+
+    def boom() -> None:
+        raise ValueError('boom')
+
+    engine = _unreachable_engine(config, fake_clock)
+    _trip_to_open(engine)
+    fake_clock.advance(5.0)
+
+    with pytest.raises(ValueError, match='boom'):
+        engine.call_sync(boom)
+    engine.call_sync(lambda: 'ok')
+
+    assert engine.state is State.OPEN
+
+
 def test__unreachable_not_configured__probe_reopens_as_before(
     config: Config, fake_clock: FakeClock
 ) -> None:
@@ -539,7 +563,7 @@ def test__unreachable_exceptions__not_a_tuple__rejected_at_construction(
     config: Config, fake_clock: FakeClock
 ) -> None:
     """``isinstance`` refuses a list of types, so refuse it here with a clear message."""
-    with pytest.raises(TypeError, match='must be a tuple'):
+    with pytest.raises(TypeError, match='must be a tuple, got: list'):
         Engine(
             name='test',
             config=config,

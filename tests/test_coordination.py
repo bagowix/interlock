@@ -8,6 +8,7 @@ ticks run via ``poll_once()``, and fire-and-forget writes are awaited with
 
 import asyncio
 import gc
+import re
 import threading
 import weakref
 from dataclasses import replace
@@ -1496,8 +1497,19 @@ def test__breaker__backoff_with_shared_storage__rejected(fake_clock: FakeClock) 
     failed-round count crosses the wire, so a multiplier set here would be read,
     validated and then quietly ignored — the exact trap the option exists to
     remove.
+
+    The whole message is asserted because it is the whole remedy: a caller who
+    hits this has to learn which two ways out exist, and half a sentence would
+    leave them guessing.
     """
-    with pytest.raises(ValueError, match='wait_duration_backoff_multiplier'):
+    refusal = (
+        'wait_duration_backoff_multiplier has no effect on a breaker with shared '
+        'storage: reopening is decided by the backend from wait_duration_in_open, '
+        'and no failed-round count is shared. Leave it at 1.0, or drop the storage '
+        'to run this breaker locally. Got 2.0.'
+    )
+
+    with pytest.raises(ValueError, match=re.escape(refusal)):
         CircuitBreaker(
             name='payments',
             config=Config(wait_duration_backoff_multiplier=2.0),
