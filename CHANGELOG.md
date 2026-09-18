@@ -19,8 +19,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   size `Config` from observed traffic, roll out in `METRICS_ONLY`, map
   rejections to `503 + Retry-After`, test with an injected clock, and migrate
   from pybreaker, circuitbreaker, aiobreaker or purgatory. The reference
-  material stays in the docs, which the skill links. The README and the docs
-  landing page point to the install command.
+  material stays in the docs, which the skill links. The install command sits
+  in the README quickstart and on the docs landing page.
 
 ### Fixed
 
