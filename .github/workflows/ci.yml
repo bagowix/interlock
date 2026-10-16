@@ -27,6 +27,9 @@ jobs:
     env:
       UV_PYTHON: ${{ matrix.python-version }}
       INTERLOCK_TEST_REDIS_URL: redis://localhost:6379/0
+      # Keeps every `uv run` below from syncing back the packages the install
+      # step skips.
+      UV_NO_SYNC: '1'
     services:
       redis:
         image: redis:7
@@ -42,13 +45,20 @@ jobs:
         with:
           persist-credentials: false
 
+      # The default cache key ignores UV_PYTHON, so the whole matrix shared one
+      # entry: the first job to finish saved it, and the wheels 3.14t, 3.15 and
+      # 3.15t build from source were never kept.
       - name: Install uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
+          cache-suffix: ${{ matrix.python-version }}
 
+      # lupa (fakeredis' Lua engine) and zensical (the docs build) are the
+      # slowest source builds on the newest interpreters, and this job uses
+      # neither: Redis tests hit the service container, the Docs job builds docs.
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --no-install-package lupa --no-install-package zensical
 
       # The token buys the online audits, which are the ones that make a SHA pin
       # mean anything: impostor-commit, ref-confusion, known-vulnerable-actions
@@ -96,6 +106,7 @@ jobs:
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
+          cache-suffix: ${{ matrix.python-version }}
 
       # lupa is fakeredis' Lua engine, used only by the Redis tests this job
       # skips. It ships no 3.15 wheels and its sdist fails to link on Windows.
