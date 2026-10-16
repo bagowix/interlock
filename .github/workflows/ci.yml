@@ -97,8 +97,11 @@ jobs:
         with:
           enable-cache: true
 
+      # lupa is fakeredis' Lua engine, used only by the Redis tests this job
+      # skips. It ships no 3.15 wheels and its sdist fails to link on Windows.
+      # ponytail: drop the flag once lupa publishes cp315 wheels.
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --no-install-package lupa
 
       # Service containers are unavailable on Windows and macOS hosted runners,
       # so Redis tests stay in the full Ubuntu matrix. Static quality checks also
