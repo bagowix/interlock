@@ -26,7 +26,7 @@ uv run mypy                   # type checking
 uv run pyright                # type checking (strict)
 uv run pyrefly check          # type checking (strict, third opinion)
 uv run pytest --cov           # tests with coverage
-uv run zizmor .github/workflows/   # GitHub Actions audit
+uv run zizmor .github/        # GitHub Actions + Dependabot audit
 uv run zensical build --strict # docs, including broken links
 ```
 
@@ -39,7 +39,7 @@ except a bad pin.
 
 Every action in `.github/workflows/` is pinned to a commit SHA with the version
 in a trailing comment. Adding one? Write the tag and let zizmor rewrite it —
-`GH_TOKEN=$(gh auth token) uv run zizmor --fix=all .github/workflows/` resolves
+`GH_TOKEN=$(gh auth token) uv run zizmor --fix=all .github/` resolves
 the SHA and the comment for you. Routine bumps come from Dependabot.
 
 The pre-commit hooks run the fast subset automatically:

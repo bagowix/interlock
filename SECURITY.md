@@ -36,11 +36,13 @@ badge in the README is the summary of it.
   time. PyPI serves it from
   `https://pypi.org/integrity/interlock-cb/<version>/<filename>/provenance`.
 - **Pinned actions.** Every `uses:` in `.github/workflows/` is pinned to a full
-  commit SHA with the version in a trailing comment; Dependabot bumps both.
+  commit SHA with the version in a trailing comment; Dependabot bumps both,
+  after a seven-day cooldown.
 - **Audited workflows.** [zizmor](https://docs.zizmor.sh) runs over
-  `.github/workflows/` on every pull request, with a token so that the audits
-  which resolve a pinned SHA against the upstream repository (`impostor-commit`,
-  `ref-confusion`, `known-vulnerable-actions`, `stale-action-refs`) are included.
+  `.github/` (the workflows and the Dependabot config) on every pull request,
+  with a token so that the audits which resolve a pinned SHA against the
+  upstream repository (`impostor-commit`, `ref-confusion`,
+  `known-vulnerable-actions`, `stale-action-refs`) are included.
   Suppressions live in `.github/zizmor.yml`, each with a reason.
 - **Static analysis.** CodeQL default setup (`python` and `actions`) plus
   ruff's `S` ruleset (flake8-bandit), which is part of `select = ["ALL"]`.
