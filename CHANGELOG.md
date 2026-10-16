@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-10-17
+
 ### Added
 
 - **Python 3.15 is a tested and declared target.** CPython 3.15.0 shipped on
@@ -1048,7 +1050,8 @@ The major version marks the scope of what is added, not a migration burden.
 - `InterlockDeprecationWarning` (subclasses `UserWarning`, visible by default).
 - `py.typed`; strict mypy and pyright; 100% test coverage.
 
-[Unreleased]: https://github.com/bagowix/interlock/compare/v2.8.1...HEAD
+[Unreleased]: https://github.com/bagowix/interlock/compare/v2.8.2...HEAD
+[2.8.2]: https://github.com/bagowix/interlock/compare/v2.8.1...v2.8.2
 [2.8.1]: https://github.com/bagowix/interlock/compare/v2.8.0...v2.8.1
 [2.8.0]: https://github.com/bagowix/interlock/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/bagowix/interlock/compare/v2.6.1...v2.7.0
