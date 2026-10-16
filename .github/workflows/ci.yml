@@ -268,6 +268,10 @@ jobs:
       - name: Build site (strict)
         run: uv run zensical build --strict
 
+      # Same step as docs.yml: the deploy publishes what this gate checked.
+      - name: Mirror Markdown pages and check llms.txt links
+        run: uv run python scripts/mirror_markdown.py
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

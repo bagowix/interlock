@@ -20,6 +20,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and macOS smoke jobs move from 3.14 to 3.15, keeping the oldest and newest
   supported versions.
 
+### Fixed
+
+- **The page links in the published `llms.txt` now resolve.** The index
+  points agents at `getting-started.md`, `guides/*.md` and `integrations/*.md`,
+  but Zensical publishes each page only as HTML, so 24 of its 25 links returned
+  404 on the docs site. A coding agent or a docs indexer that followed the index
+  got nothing past `llms-full.txt`. The docs build now publishes every listed
+  page as Markdown at the linked path, with its snippet includes expanded, and
+  the CI docs job fails when a link in `llms.txt` has no file behind it.
+
 ## [2.8.1] - 2026-09-18
 
 ### Added
