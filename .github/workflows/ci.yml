@@ -99,7 +99,8 @@ jobs:
 
       # lupa is fakeredis' Lua engine, used only by the Redis tests this job
       # skips. It ships no 3.15 wheels and its sdist fails to link on Windows.
-      # ponytail: drop the flag once lupa publishes cp315 wheels.
+      # The tests below run with `--no-sync`, or `uv run` would install it back.
+      # ponytail: drop both once lupa publishes cp315 wheels.
       - name: Install dependencies
         run: uv sync --frozen --no-install-package lupa
 
@@ -108,7 +109,7 @@ jobs:
       # stay there; this job targets platform-sensitive runtime behaviour only.
       - name: Platform-sensitive runtime tests
         run: >-
-          uv run pytest
+          uv run --no-sync pytest
           tests/test_breaker.py
           tests/test_concurrency.py
           tests/test_engine.py
