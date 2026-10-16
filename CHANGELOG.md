@@ -20,6 +20,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and macOS smoke jobs move from 3.14 to 3.15, keeping the oldest and newest
   supported versions.
 
+- **The package metadata now names its import.** The distribution is
+  `interlock-cb` and the import is `interlock`, so a tool that guesses one from
+  the other lands on `interlock_cb`, which does not exist. Wheels and sdists
+  now carry `Import-Name: interlock` (PEP 794, core metadata 2.5), which lets
+  an installer, an IDE or a coding agent map `import interlock` back to
+  `interlock-cb` without a lookup table. Tool support for the field is still
+  early; it costs nothing where it is unread. The build now requires
+  `hatchling>=1.30`, the first release that writes the field, and the
+  packaging smoke test fails a wheel that lacks it.
+
+- **Documentation and Security links on PyPI.** `[project.urls]` gains the
+  `Documentation` and `Security` labels from the well-known project URL list
+  (PEP 753), so the PyPI sidebar links the docs site and the security policy
+  with its private vulnerability reporting.
+
 ### Fixed
 
 - **The page links in the published `llms.txt` now resolve.** The index

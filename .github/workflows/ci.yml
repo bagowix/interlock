@@ -208,10 +208,12 @@ jobs:
           uv pip install --no-deps --python "${RUNNER_TEMP}/smoke-env" dist/*.whl
 
       # `interlock.__version__` must match the installed distribution's
-      # metadata, and `py.typed` plus every `interlock/integrations/*.py`
-      # module must have survived the build — an accidental import of an
-      # optional dependency from the core, or a packaging config that drops a
-      # subpackage, would pass the dev-env test suite but break here.
+      # metadata, which must also declare `Import-Name: interlock` (PEP 794;
+      # a hatchling below the floor drops it silently), and `py.typed` plus
+      # every `interlock/integrations/*.py` module must have survived the
+      # build — an accidental import of an optional dependency from the core,
+      # or a packaging config that drops a subpackage, would pass the dev-env
+      # test suite but break here.
       - name: Import smoke test
         run: |
           "${RUNNER_TEMP}/smoke-env/bin/python" - <<'PY'
@@ -227,6 +229,9 @@ jobs:
               interlock.__version__,
               installed_version,
           )
+
+          import_names = importlib.metadata.metadata('interlock-cb').get_all('Import-Name')
+          assert import_names == ['interlock'], import_names
 
           assert (resources.files('interlock') / 'py.typed').is_file(), (
               'py.typed missing from the wheel'
