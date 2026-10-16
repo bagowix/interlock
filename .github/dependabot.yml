@@ -2,12 +2,18 @@ version: 2
 updates:
   # The cooldown gives a compromised or broken release a week to be yanked
   # before a bump PR picks it up. Security updates are exempt from it.
+  # Groups batch each week's version bumps into one PR per ecosystem, so the
+  # full CI matrix runs once instead of once per package. Security updates
+  # still arrive as their own PRs.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     cooldown:
       default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
     commit-message:
       prefix: "ci"
 
@@ -17,5 +23,8 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+    groups:
+      uv:
+        patterns: ["*"]
     commit-message:
       prefix: "chore"
