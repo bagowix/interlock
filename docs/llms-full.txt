@@ -1362,14 +1362,15 @@ too slow to run against a real clock.
   drives one breaker from many real threads at once and checks window counts
   add up, `snapshot()` is never torn, the `HALF_OPEN` caps hold, and a
   concurrent trip emits exactly one `CLOSED → OPEN` event.
-- **CI runs the full matrix on `3.14t`, the free-threaded build, as a required
-  job** — Python 3.11, 3.12, 3.13, 3.14 and 3.14t, `fail-fast: false`
+- **CI runs the full matrix on `3.14t` and `3.15t`, the free-threaded builds,
+  as required jobs** — Python 3.11, 3.12, 3.13, 3.14, 3.14t, 3.15 and 3.15t,
+  `fail-fast: false`
   ([`ci.yml`](https://github.com/bagowix/interlock/blob/main/.github/workflows/ci.yml)).
   A GIL-enabled interpreter cannot falsify a thread-safety claim resting on one
-  lock: with `Engine._lock` removed, `test_concurrency.py` fails on 3.14t and
-  passes everywhere else. This is the reason the job exists rather than being
-  aspirational — it is the only Python build in the matrix that can actually
-  disprove the claim.
+  lock: with `Engine._lock` removed, `test_concurrency.py` fails on the
+  free-threaded builds and passes everywhere else. This is the reason the jobs
+  exist rather than being aspirational — they are the only Python builds in
+  the matrix that can actually disprove the claim.
 
 ## Storage contract and coordinated (distributed) breakers
 
@@ -1386,10 +1387,10 @@ too slow to run against a real clock.
 - [`tests/test_redis_storage.py`](https://github.com/bagowix/interlock/blob/main/tests/test_redis_storage.py)
   runs against in-process `fakeredis` by default (so `uv run pytest` needs no
   server) and against a real Redis service container in CI, which is the
-  authoritative check for Lua-script atomicity under concurrency. `3.14t`
-  specifically requires the real server: `fakeredis`'s Lua engine (`lupa`)
-  re-enables the GIL on import, which `filterwarnings = "error"` turns into a
-  collection failure.
+  authoritative check for Lua-script atomicity under concurrency. The
+  free-threaded builds specifically require the real server: `fakeredis`'s Lua
+  engine (`lupa`) re-enables the GIL on import, which `filterwarnings = "error"`
+  turns into a collection failure.
 
 ## Lower-bound dependency versions are tested, not guessed
 
@@ -1408,7 +1409,7 @@ separately by the main matrix.
 ([`pyproject.toml`](https://github.com/bagowix/interlock/blob/main/pyproject.toml))
 turns every `DeprecationWarning` and `RuntimeWarning` raised during a test run
 into a failure, with one narrow, commented exception for a third-party import
-warning on CPython 3.11. This is what makes the `3.14t` / `fakeredis` /
+warning on CPython 3.11. This is what makes the free-threaded / `fakeredis` /
 `lupa` interaction above a hard collection failure instead of a silent GIL
 re-enable, and it means an internal deprecation (`InterlockDeprecationWarning`)
 must be explicitly asserted in the test that triggers it, never silenced.
@@ -1464,8 +1465,8 @@ An honest boundary is more persuasive than a claimed clean sweep:
   property test does in fact cover it.
 - **Free-threaded coverage is one test file's job.** `test_concurrency.py` is
   the suite specifically designed to fail without the engine's lock; the rest
-  of the suite runs on 3.14t too, but is not designed to detect races the way
-  that file is.
+  of the suite runs on 3.14t and 3.15t too, but is not designed to detect races
+  the way that file is.
 - **No production track record.** interlock-cb was first released in 2026 —
   see [Comparison](comparison.md). None of the above substitutes for years of
   real-world traffic; it is what can be verified today in place of that

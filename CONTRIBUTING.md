@@ -16,8 +16,8 @@ uv sync            # creates the venv and installs dev + all extras
 
 ## Running the checks
 
-CI runs exactly these on Python 3.11–3.14 and on the free-threaded 3.14t. Run
-them locally before opening a PR:
+CI runs exactly these on Python 3.11–3.15 and on the free-threaded 3.14t and
+3.15t. Run them locally before opening a PR:
 
 ```bash
 uv run ruff format --check    # formatting
@@ -50,7 +50,7 @@ uv run prek install           # one-time, installs the git hook
 
 ### Supported platforms
 
-interlock supports Python 3.11–3.14 on Linux, Windows and macOS. The full test,
+interlock supports Python 3.11–3.15 on Linux, Windows and macOS. The full test,
 coverage, static-analysis and Redis matrix runs on Ubuntu. A smaller runtime matrix
 runs on Windows and macOS with the oldest and newest supported Python versions. It
 covers the core breaker, concurrency and shutdown paths, timeouts, the resilience
@@ -98,23 +98,23 @@ CI runs both.
 
 The breaker's thread-safety rests on a single `threading.Lock`, and a GIL-enabled
 interpreter cannot falsify that claim — so CI runs the whole suite on the
-free-threaded build (`3.14t`) as well. `tests/test_concurrency.py` is the part
-that matters there: it drives one breaker from many threads and asserts what the
-lock exists to provide (window counts add up, no torn snapshot, HALF_OPEN probe
-caps hold, one name means one breaker). It runs on every interpreter, but only
-on `3.14t` does failing it become likely.
+free-threaded builds (`3.14t` and `3.15t`) as well. `tests/test_concurrency.py`
+is the part that matters there: it drives one breaker from many threads and
+asserts what the lock exists to provide (window counts add up, no torn snapshot,
+HALF_OPEN probe caps hold, one name means one breaker). It runs on every
+interpreter, but only on a free-threaded build does failing it become likely.
 
 Use a second environment so your main `.venv` is left alone:
 
 ```bash
-UV_PROJECT_ENVIRONMENT=.venv-ft uv sync --python 3.14t
+UV_PROJECT_ENVIRONMENT=.venv-ft uv sync --python 3.15t
 UV_PROJECT_ENVIRONMENT=.venv-ft uv run pytest
 ```
 
-One caveat: `tests/test_redis_storage.py` needs a **real** server on `3.14t`.
-Its `fakeredis` fallback pulls in `lupa`, whose Lua engine has not declared
-free-threading support, so importing it re-enables the GIL — and
-`filterwarnings = "error"` turns that warning into a collection error. Set
+One caveat: `tests/test_redis_storage.py` needs a **real** server on a
+free-threaded build. Its `fakeredis` fallback pulls in `lupa`, whose Lua engine
+has not declared free-threading support, so importing it re-enables the GIL —
+and `filterwarnings = "error"` turns that warning into a collection error. Set
 `INTERLOCK_TEST_REDIS_URL` (CI does) and `fakeredis` is never imported.
 
 ### Mutation testing

@@ -19,7 +19,7 @@ bar for simplicity, reliability and dependency hygiene is higher than usual.
 ## Technology
 
 - **Python 3.11+** — the minimum supported version (`asyncio.timeout`, `TaskGroup`, exception
-  groups, `Self` are required). Development and CI run on 3.11–3.14. The floor is deliberately
+  groups, `Self` are required). Development and CI run on 3.11–3.15. The floor is deliberately
   below the usual 3.12 default: a foundational library values reach.
 - **Zero-dependency core** — stdlib only. A fault-tolerance tool must not depend on someone
   else's reliability. Everything external goes through optional extras

@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Python 3.15 is a tested and declared target.** CPython 3.15.0 shipped on
+  2026-10-09. The full CI matrix (tests at 100% branch coverage, the three type
+  checkers, a real Redis server) now runs on 3.15 and on the free-threaded
+  3.15t, next to 3.11–3.14 and 3.14t, and the package carries the
+  `Programming Language :: Python :: 3.15` classifier. The library code did not
+  change: the suite passed on both builds with warnings turned into errors, so
+  earlier releases already run on 3.15. What changes is that a 3.15 regression
+  now fails CI before a release ships, and the thread-safety checks in
+  `tests/test_concurrency.py` run on a GIL-free 3.15 interpreter. The Windows
+  and macOS smoke jobs move from 3.14 to 3.15, keeping the oldest and newest
+  supported versions.
+
 ## [2.8.1] - 2026-09-18
 
 ### Added

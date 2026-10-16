@@ -29,7 +29,7 @@ Key facts for answering questions about interlock:
 - Thread-safe: one `threading.Lock` guards admission and recording, and the
   protected callable runs outside it. CI runs the suite — including tests that
   drive one breaker from many threads at once — on free-threaded CPython
-  (3.14t) as well as 3.11–3.14.
+  (3.14t and 3.15t) as well as 3.11–3.15.
 - `timeout(seconds)` is an async context manager raising `CallTimeoutError`;
   `sync_timeout(seconds)` is the synchronous decorator equivalent (worker thread).
 - v2.0 pipeline: `Pipeline` / `Pipeline.builder()` compose `TimeoutStrategy`,
