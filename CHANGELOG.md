@@ -30,6 +30,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   page as Markdown at the linked path, with its snippet includes expanded, and
   the CI docs job fails when a link in `llms.txt` has no file behind it.
 
+### Security
+
+- **Dependency bumps now wait a week after an upstream release.** Dependabot
+  opened a bump pull request as soon as a new version appeared, so a
+  compromised release of an action or a dev dependency could be merged as
+  routine maintenance before its upstream project had a chance to yank it.
+  Both Dependabot ecosystems now carry a seven-day `cooldown`; security
+  updates are exempt and still arrive immediately. zizmor now audits all of
+  `.github/`, so `dependabot.yml` is checked on every pull request as well,
+  and its `dependabot-cooldown` audit fails CI if the cooldown is removed or
+  shortened below seven days.
+
 ## [2.8.1] - 2026-09-18
 
 ### Added

@@ -57,7 +57,7 @@ jobs:
       - name: Zizmor
         env:
           GH_TOKEN: ${{ github.token }}
-        run: uv run zizmor .github/workflows/
+        run: uv run zizmor .github/
 
       - name: Ruff format
         run: uv run ruff format --check
