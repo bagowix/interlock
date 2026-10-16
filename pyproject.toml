@@ -1,9 +1,11 @@
 [build-system]
-requires = ["hatchling"]
+# 1.30 is the first release that writes `import-names` (PEP 794); older ones drop it silently.
+requires = ["hatchling>=1.30"]
 build-backend = "hatchling.build"
 
 [project]
 name = "interlock-cb"
+import-names = ["interlock"]
 dynamic = ["version"]
 description = "A modern circuit breaker for Python: sync + async in one class, sliding-window rate, slow-call detection, a Polly-style resilience pipeline, type-safe API."
 readme = "README.md"
@@ -41,9 +43,11 @@ aiohttp = ["aiohttp>=3.12.0"]
 
 [project.urls]
 Homepage = "https://bagowix.github.io/interlock/"
+Documentation = "https://bagowix.github.io/interlock/"
 Repository = "https://github.com/bagowix/interlock"
 Changelog = "https://github.com/bagowix/interlock/blob/main/CHANGELOG.md"
 Issues = "https://github.com/bagowix/interlock/issues"
+Security = "https://github.com/bagowix/interlock/security/policy"
 
 [tool.hatch.version]
 path = "interlock/version.py"
