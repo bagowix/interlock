@@ -41,6 +41,22 @@ config = Config(
 Validation raises `ValueError` eagerly for out-of-range or inconsistent values,
 so a misconfigured breaker fails at construction rather than in production.
 
+## Choosing values
+
+Start from the defaults and tune them on real traffic. Run the breaker in
+[shadow mode](states.md#safe-rollout) first: `METRICS_ONLY` records every call
+and never trips, so `snapshot()` shows the rates your thresholds would act on
+before they reject anything.
+
+| Field | How to choose |
+|-------|---------------|
+| `minimum_number_of_calls` | Raise it for a busy dependency (around 50), so a short burst of errors cannot trip the breaker. Lower it for a quiet one (around 5), so the breaker can trip while the outage is still going on. |
+| `failure_rate_threshold` | The share of failures at which failing fast serves your callers better than waiting. Keep business errors (a `404`, a validation error) out of the rate with a [classifier](failure-classification.md). |
+| `slow_call_duration_threshold` | The client timeout, or just above the dependency's p99 latency. |
+| `slow_call_rate_threshold` | Lower it to `0.5`–`0.8` once shadow data shows the normal slow-call rate. |
+| `wait_duration_in_open` | How long the dependency usually needs to recover. When outages vary in length, grow the wait with `wait_duration_backoff_multiplier` and cap it with `wait_duration_in_open_max`. |
+| `permitted_calls_in_half_open`, `max_concurrent_probes` | A larger round gives a surer verdict but sends more traffic to a dependency that may still be down. Keep `max_concurrent_probes` low for a fragile one. |
+
 ## Windows
 
 - **Count-based** keeps the last `window_size` calls. Predictable memory,

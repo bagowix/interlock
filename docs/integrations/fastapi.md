@@ -108,3 +108,82 @@ from interlock import CircuitOpenError
 @app.exception_handler(CircuitOpenError)
 async def on_open(request: Request, exc: CircuitOpenError) -> Response: ...
 ```
+
+## Testing the lifecycle
+
+The breaker reads time only through its `Clock`, so a test can take a route
+through an outage and the recovery after it without sleeping. Give the
+`Registry` a fake clock; every breaker it creates uses it.
+
+```python
+from typing import Annotated
+
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
+from interlock import CircuitBreaker, Config, Registry, State
+from interlock.integrations.fastapi import breaker_dependency, install_exception_handler
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+class OrdersDb:
+    def __init__(self) -> None:
+        self.healthy = False
+
+    async def fetch_orders(self) -> list[dict]:
+        if not self.healthy:
+            raise ConnectionError('orders-db is down')
+        return [{'id': 1}]
+
+
+def test__orders_db_outage__opens_then_recovers() -> None:
+    clock = FakeClock()
+    db = OrdersDb()
+    registry = Registry(
+        config=Config(
+            minimum_number_of_calls=5,
+            window_size=5,
+            wait_duration_in_open=30.0,
+            permitted_calls_in_half_open=1,
+        ),
+        clock=clock,
+    )
+    app = FastAPI()
+    install_exception_handler(app)
+    orders_db = breaker_dependency('orders-db', registry=registry)
+
+    @app.get('/orders')
+    async def orders(breaker: Annotated[CircuitBreaker, Depends(orders_db)]) -> list[dict]:
+        return await breaker.call(db.fetch_orders)
+
+    client = TestClient(app, raise_server_exceptions=False)
+
+    for _ in range(5):
+        assert client.get('/orders').status_code == 500
+
+    rejected = client.get('/orders')
+    assert rejected.status_code == 503
+    assert rejected.headers['Retry-After'] == '30'
+
+    db.healthy = True
+    clock.now += 30.0
+    assert client.get('/orders').status_code == 200
+    assert registry.get('orders-db').state is State.CLOSED
+```
+
+The five failed requests fill the window and trip the breaker. The sixth is
+rejected with `503` before `fetch_orders` runs, and `Retry-After` carries the
+remaining open wait. Once the dependency is back and the clock has passed
+`wait_duration_in_open`, the next request is admitted as a probe. With
+`permitted_calls_in_half_open=1` that probe is the whole round, so its success
+closes the circuit. `raise_server_exceptions=False` turns the failing requests
+into `500` responses instead of exceptions inside the test.
+
+To watch the same lifecycle event by event outside a web framework, run the
+[lifecycle demo](../demo.md).

@@ -34,6 +34,12 @@ Now a request that exceeds 2 seconds raises `CallTimeoutError`; the breaker
 counts it as a failure and, once the failure rate crosses the threshold, opens
 the circuit — converting slow hangs into fast rejections.
 
+The placement matters. A timeout wrapped around `breaker.call(...)` — this
+`timeout` or `asyncio.timeout` — cancels the call, and a cancellation says
+nothing about the dependency, so the breaker
+[records nothing](failure-classification.md#classify-by-result). A dependency
+that hangs then never trips the breaker.
+
 ## Synchronous code
 
 `timeout` relies on asyncio cancelling the coroutine in place, which has no
