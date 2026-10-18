@@ -1584,8 +1584,10 @@ so a misconfigured breaker fails at construction rather than in production.
 
 Start from the defaults and tune them on real traffic. Run the breaker in
 [shadow mode](states.md#safe-rollout) first: `METRICS_ONLY` records every call
-and never trips, so `snapshot()` shows the rates your thresholds would act on
-before they reject anything.
+that completes and never trips, so `snapshot()` shows the rates your thresholds
+would act on before they reject anything. A call cancelled from outside, such as
+by a [timeout around the breaker](timeout.md#composing-with-a-breaker), is not
+recorded, so it is missing from those rates too.
 
 | Field | How to choose |
 |-------|---------------|
