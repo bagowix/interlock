@@ -146,6 +146,59 @@ breaker.snapshot()  # WindowSnapshot: total_calls, failed_calls, slow_calls,
 # .failure_rate, .slow_call_rate
 ```
 
+## Test without sleeping
+
+Time enters the breaker only through the injected `Clock`, an object with a
+`monotonic()` method. A fake one lets a test drive every transition directly:
+
+```python
+import pytest
+
+from interlock import CircuitBreaker, CircuitOpenError, Config, State
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+def test__failures_open_then_probe_closes() -> None:
+    clock = FakeClock()
+    breaker = CircuitBreaker(
+        name='orders-api',
+        config=Config(
+            minimum_number_of_calls=5,
+            window_size=5,
+            wait_duration_in_open=30.0,
+            permitted_calls_in_half_open=1,
+        ),
+        clock=clock,
+    )
+
+    def fail() -> None:
+        raise ConnectionError
+
+    for _ in range(5):
+        with pytest.raises(ConnectionError):
+            breaker.call(fail)
+    assert breaker.state is State.OPEN
+
+    with pytest.raises(CircuitOpenError):
+        breaker.call(fail)
+
+    clock.now += 30.0
+    assert breaker.call(lambda: 'ok') == 'ok'
+    assert breaker.state is State.CLOSED
+```
+
+After `wait_duration_in_open` the next call is admitted as a probe. With
+`permitted_calls_in_half_open=1` that probe is the whole round, so its success
+closes the circuit. The same test through a FastAPI route is on the
+[FastAPI page](integrations/fastapi.md#testing-the-lifecycle).
+
 ## Next steps
 
 - [Runnable demo](demo.md) — watch a breaker trip and recover, then debug it

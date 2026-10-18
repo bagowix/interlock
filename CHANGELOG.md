@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The FastAPI page shows the whole lifecycle in one test.** It explained how
+  to wire a breaker into a route and what an open circuit returns, but never
+  showed the sequence happen: a failing dependency, the `503` with
+  `Retry-After`, and the recovery once the dependency is back. A new
+  `Testing the lifecycle` section drives a route through all three with
+  `TestClient` and a fake clock, without sleeping. Getting started gains the
+  same test without a web framework, so a test of the open-then-probe path is
+  one copy away for any project.
+
+- **The configuration guide says how to choose each value.** It listed every
+  field with its default and meaning, so a first config was a guess, and a
+  guessed config either opens on a short burst of errors or never opens at all.
+  The new `Choosing values` section gives a starting point per field and sends
+  the reader to shadow mode to find the real numbers. The same guidance already
+  shipped in the agent skill; readers who do not use an agent now get it too.
+
+### Changed
+
+- **The timeout guide explains why the timeout goes inside the breaker.** It
+  said where to put it, but not what breaks otherwise: a timeout wrapped around
+  `breaker.call(...)` cancels the call, a cancellation is never recorded, and a
+  dependency that hangs never trips the breaker.
+
 ## [2.8.2] - 2026-10-17
 
 ### Added
