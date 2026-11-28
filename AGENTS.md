@@ -155,7 +155,11 @@ def get_state(name: str) -> State:
   Example: `test__closed__failure_rate_at_threshold__opens`.
 - Test files mirror the package layout: `interlock/window.py` → `tests/test_window.py`.
 - One test — one behaviour. Arrange-Act-Assert structure.
-- Fixtures for repeated setup. `pytest-mock` to isolate external dependencies.
+- Fixtures for repeated setup.
+- New test code adds no mocks: no `MagicMock`, `AsyncMock`, `patch` or the `mocker` fixture. Replace
+  an external dependency with a double the suite already has (`FakeClock`, `MockTransport`,
+  `fakeredis`, `tests/inmemory_storage.py`) or write one by hand. Mock lines in older tests stay
+  until the test is rewritten.
 - `pytest-asyncio` for async (`@pytest.mark.asyncio`). `faker` for test data.
 - **Deterministic time via the injected `Clock`** — no `sleep` in tests.
 - **Property-based tests (`hypothesis`) for the state machine**; 100% coverage of all transitions
